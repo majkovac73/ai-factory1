@@ -1,6 +1,7 @@
-fastapi
-uvicorn
-sqlalchemy
-groq
-python-dotenv
-requests
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+sqlalchemy==2.0.36
+groq==0.12.0
+python-dotenv==1.0.1
+requests==2.32.3
+pydantic==2.10.1
