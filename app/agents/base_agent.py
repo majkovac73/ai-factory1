@@ -10,9 +10,10 @@ class BaseAgent:
     resolution so each agent doesn't duplicate the same init/call logic.
     """
 
-    def __init__(self, provider=None, model: str = None):
+    def __init__(self, provider=None, model: str = None, memory=None):
         self.llm = provider or ProviderManager.get_provider()
         self.model = model or settings.DEFAULT_MODEL
+        self.memory = memory  # Optional[MemoryInterface]; concrete backend wired in step 26/27
 
     def _generate(self, prompt: str) -> str:
         """
