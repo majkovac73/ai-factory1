@@ -153,3 +153,22 @@ class TaskService:
             raise HTTPException(status_code=500, detail=f"Failed to save QA result: {e}")
         finally:
             db.close()
+
+    def increment_retry_count(self, task_id: str):
+        db = SessionLocal()
+        try:
+            task = db.query(Task).filter(Task.id == task_id).first()
+            if not task:
+                raise HTTPException(status_code=404, detail="Task not found")
+
+            task.retry_count = (task.retry_count or 0) + 1
+            db.commit()
+            db.refresh(task)
+            return task
+        except HTTPException:
+            raise
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(status_code=500, detail=f"Failed to increment retry count: {e}")
+        finally:
+            db.close()

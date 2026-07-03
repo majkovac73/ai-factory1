@@ -23,6 +23,8 @@ class TaskProcessor:
     def __init__(self):
         self.task_service = TaskService()
 
+    MAX_QA_RETRIES = 3
+
     def process(self, task_id: str):
         task = self.task_service.get_task(task_id)
         if not task:
@@ -38,12 +40,28 @@ class TaskProcessor:
             self._advance(task_id, TaskStatus.QA.value)
             qa_passed = self._qa(task_id)
 
+            attempts = 0
+            while not qa_passed and attempts < self.MAX_QA_RETRIES:
+                attempts += 1
+                self.task_service.increment_retry_count(task_id)
+                logger.warning(
+                    f"Task {task_id} failed QA, retrying execution "
+                    f"(attempt {attempts}/{self.MAX_QA_RETRIES})"
+                )
+
+                self._advance(task_id, TaskStatus.RUNNING.value)
+                self._execute(task_id)
+
+                self._advance(task_id, TaskStatus.QA.value)
+                qa_passed = self._qa(task_id)
+
             if qa_passed:
                 self._advance(task_id, TaskStatus.DONE.value)
             else:
-                # Send back for rework; QA -> RUNNING is a legal transition
-                self._advance(task_id, TaskStatus.RUNNING.value)
-                logger.warning(f"Task {task_id} failed QA, sent back to RUNNING")
+                logger.error(
+                    f"Task {task_id} failed QA after {self.MAX_QA_RETRIES} retries, marking FAILED"
+                )
+                self._advance(task_id, TaskStatus.FAILED.value)
 
             return self.task_service.get_task(task_id)
 
