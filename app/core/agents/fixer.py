@@ -1,10 +1,14 @@
+import asyncio
 import json
-from app.core.providers.groq_provider import GroqProvider
+from app.core.providers.manager import ProviderManager
+from config import settings
+
 
 class FixerAgent:
 
-    def __init__(self):
-        self.llm = GroqProvider()
+    def __init__(self, provider=None):
+        self.llm = provider or ProviderManager.get_provider()
+        self.model = settings.DEFAULT_MODEL
 
     def improve(self, current_output: dict, critique: dict, task_type: str, task_input: str, role: str) -> str:
 
@@ -30,4 +34,4 @@ RULES:
 - Return ONLY a single valid JSON object
 """
 
-        return self.llm.generate(prompt)
+        return asyncio.run(self.llm.generate(model=self.model, prompt=prompt))

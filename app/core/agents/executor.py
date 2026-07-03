@@ -1,9 +1,13 @@
-from app.core.providers.groq_provider import GroqProvider
+import asyncio
+from app.core.providers.manager import ProviderManager
+from config import settings
+
 
 class ExecutorAgent:
 
-    def __init__(self):
-        self.llm = GroqProvider()
+    def __init__(self, provider=None):
+        self.llm = provider or ProviderManager.get_provider()
+        self.model = settings.DEFAULT_MODEL
 
     def execute_step(self, step: str, context: str):
 
@@ -34,4 +38,4 @@ CONTEXT:
 {context}
 """
 
-        return self.llm.generate(prompt)
+        return asyncio.run(self.llm.generate(model=self.model, prompt=prompt))

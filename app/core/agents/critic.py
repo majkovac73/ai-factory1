@@ -1,11 +1,15 @@
+import asyncio
 import json
-from app.core.providers.groq_provider import GroqProvider
+from app.core.providers.manager import ProviderManager
 from app.core.utils.json_sanitizer import JSONSanitizer
+from config import settings
+
 
 class CriticAgent:
 
-    def __init__(self):
-        self.llm = GroqProvider()
+    def __init__(self, provider=None):
+        self.llm = provider or ProviderManager.get_provider()
+        self.model = settings.DEFAULT_MODEL
         self.sanitizer = JSONSanitizer()
 
     def review(self, output: dict, task_type: str, task_input: str) -> dict:
@@ -30,15 +34,13 @@ Return ONLY valid JSON with these fields:
 }}
 """
 
-        response = self.llm.generate(prompt)
+        response = asyncio.run(self.llm.generate(model=self.model, prompt=prompt))
 
-        # Try direct JSON parse
         try:
             return json.loads(response)
         except Exception:
             pass
 
-        # Try to extract a JSON object from noisy LLM output
         try:
             parsed = self.sanitizer.extract(response)
             return parsed

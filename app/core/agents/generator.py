@@ -1,10 +1,13 @@
-import json
-from app.core.providers.groq_provider import GroqProvider
+import asyncio
+from app.core.providers.manager import ProviderManager
+from config import settings
+
 
 class GeneratorAgent:
 
-    def __init__(self):
-        self.llm = GroqProvider()
+    def __init__(self, provider=None):
+        self.llm = provider or ProviderManager.get_provider()
+        self.model = settings.DEFAULT_MODEL
 
     def generate_step(self, step: str, context: str, role: str, task_type: str) -> str:
 
@@ -36,4 +39,4 @@ CONTEXT:
 {context}
 """
 
-        return self.llm.generate(prompt)
+        return asyncio.run(self.llm.generate(model=self.model, prompt=prompt))

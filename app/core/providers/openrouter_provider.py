@@ -22,7 +22,7 @@ class OpenRouterProvider(BaseLLMProvider):
             self.extra_headers["X-Title"] = site_name or os.getenv("OPENROUTER_SITE_NAME")
 
         self.client = AsyncOpenAI(
-            base_url="[https://openrouter.ai/api/v1](https://openrouter.ai/api/v1)",
+            base_url="https://openrouter.ai/api/v1",
             api_key=self.api_key,
             default_headers=self.extra_headers
         )

@@ -18,6 +18,7 @@ class Settings(BaseSettings):
 
     OPENAI_API_KEY: str | None = None
     ANTHROPIC_API_KEY: str | None = None
+    DEFAULT_MODEL: str = "openai/gpt-4o-mini"
 
     SECRET_KEY: str = "change_me"
 
