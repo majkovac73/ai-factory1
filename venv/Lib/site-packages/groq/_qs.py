@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from typing import Any, List, Tuple, Union, Mapping, TypeVar
 from urllib.parse import parse_qs, urlencode
-from typing_extensions import get_args
+from typing_extensions import Literal, get_args
 
-from ._types import NotGiven, ArrayFormat, NestedFormat, not_given
+from ._types import NOT_GIVEN, NotGiven, NotGivenOr
 from ._utils import flatten
 
 _T = TypeVar("_T")
+
+
+ArrayFormat = Literal["comma", "repeat", "indices", "brackets"]
+NestedFormat = Literal["dots", "brackets"]
 
 PrimitiveData = Union[str, int, float, bool, None]
 # this should be Data = Union[PrimitiveData, "List[Data]", "Tuple[Data]", "Mapping[str, Data]"]
@@ -37,8 +41,8 @@ class Querystring:
         self,
         params: Params,
         *,
-        array_format: ArrayFormat | NotGiven = not_given,
-        nested_format: NestedFormat | NotGiven = not_given,
+        array_format: NotGivenOr[ArrayFormat] = NOT_GIVEN,
+        nested_format: NotGivenOr[NestedFormat] = NOT_GIVEN,
     ) -> str:
         return urlencode(
             self.stringify_items(
@@ -52,8 +56,8 @@ class Querystring:
         self,
         params: Params,
         *,
-        array_format: ArrayFormat | NotGiven = not_given,
-        nested_format: NestedFormat | NotGiven = not_given,
+        array_format: NotGivenOr[ArrayFormat] = NOT_GIVEN,
+        nested_format: NotGivenOr[NestedFormat] = NOT_GIVEN,
     ) -> list[tuple[str, str]]:
         opts = Options(
             qs=self,
@@ -97,10 +101,7 @@ class Querystring:
                     items.extend(self._stringify_item(key, item, opts))
                 return items
             elif array_format == "indices":
-                items = []
-                for i, item in enumerate(value):
-                    items.extend(self._stringify_item(f"{key}[{i}]", item, opts))
-                return items
+                raise NotImplementedError("The array indices format is not supported yet")
             elif array_format == "brackets":
                 items = []
                 key = key + "[]"
@@ -142,8 +143,8 @@ class Options:
         self,
         qs: Querystring = _qs,
         *,
-        array_format: ArrayFormat | NotGiven = not_given,
-        nested_format: NestedFormat | NotGiven = not_given,
+        array_format: NotGivenOr[ArrayFormat] = NOT_GIVEN,
+        nested_format: NotGivenOr[NestedFormat] = NOT_GIVEN,
     ) -> None:
         self.array_format = qs.array_format if isinstance(array_format, NotGiven) else array_format
         self.nested_format = qs.nested_format if isinstance(nested_format, NotGiven) else nested_format
