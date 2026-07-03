@@ -2,7 +2,7 @@ from typing import List
 
 from fastapi import APIRouter, HTTPException
 
-from app.schemas.task import TaskCreate, TaskResponse
+from app.schemas.task import TaskCreate, TaskResponse, TaskStatusUpdate
 from app.services.task_service import TaskService
 
 router = APIRouter()
@@ -27,3 +27,7 @@ def get_task(task_id: str):
 @router.get("/", response_model=List[TaskResponse])
 def list_tasks():
     return task_service.list_tasks()
+
+@router.patch("/{task_id}/status", response_model=TaskResponse)
+def update_task_status(task_id: str, update: TaskStatusUpdate):
+    return task_service.update_status(task_id, update.status.value)

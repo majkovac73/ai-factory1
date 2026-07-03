@@ -44,13 +44,28 @@ class TaskService:
         finally:
             db.close()
 
-    def list_tasks(self):
+    def update_status(self, task_id: str, new_status: str):
+        valid_values = {s.value for s in TaskStatus}
+        if new_status not in valid_values:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid status '{new_status}'. Must be one of: {sorted(valid_values)}",
+            )
+
         db = SessionLocal()
         try:
-            return db.query(Task).all()
+            task = db.query(Task).filter(Task.id == task_id).first()
+            if not task:
+                raise HTTPException(status_code=404, detail="Task not found")
+
+            task.status = new_status
+            db.commit()
+            db.refresh(task)
+            return task
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to list tasks: {e}")
+            db.rollback()
+            raise HTTPException(status_code=500, detail=f"Failed to update task status: {e}")
         finally:
             db.close()
