@@ -1,5 +1,6 @@
 import logging
 
+from app.core.agents.planner import PlannerAgent
 from app.schemas.enums import TaskStatus
 from app.services.task_service import TaskService
 
@@ -57,8 +58,14 @@ class TaskProcessor:
         logger.info(f"Task {task_id} -> {new_status}")
 
     def _plan(self, task_id: str):
-        # Placeholder for Step 15 (Planner module)
-        logger.info(f"Task {task_id}: planning (placeholder)")
+        task = self.task_service.get_task(task_id)
+        planner = PlannerAgent()
+
+        task_type = task.type or "general"
+        plan = planner.create_plan(task_type, task.prompt)
+
+        self.task_service.save_plan(task_id, plan)
+        logger.info(f"Task {task_id}: plan created with {len(plan.get('steps', []))} step(s)")
 
     def _execute(self, task_id: str):
         # Placeholder for Step 16 (Executor module)

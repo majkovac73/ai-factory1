@@ -95,3 +95,22 @@ class TaskService:
             raise HTTPException(status_code=500, detail=f"Failed to update task status: {e}")
         finally:
             db.close()
+            
+    def save_plan(self, task_id: str, plan: dict):
+        db = SessionLocal()
+        try:
+            task = db.query(Task).filter(Task.id == task_id).first()
+            if not task:
+                raise HTTPException(status_code=404, detail="Task not found")
+
+            task.metadata_ = plan
+            db.commit()
+            db.refresh(task)
+            return task
+        except HTTPException:
+            raise
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(status_code=500, detail=f"Failed to save task plan: {e}")
+        finally:
+            db.close()

@@ -1,6 +1,6 @@
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.enums import TaskStatus
 
@@ -19,6 +19,6 @@ class TaskResponse(BaseModel):
     prompt: str | None = None
     status: str
     result: Optional[str] = None
+    metadata: Optional[dict] = Field(default=None, validation_alias="metadata_")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
