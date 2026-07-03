@@ -1,6 +1,7 @@
 import logging
 
 from app.core.agents.planner import PlannerAgent
+from app.core.agents.executor import ExecutorAgent
 from app.schemas.enums import TaskStatus
 from app.services.task_service import TaskService
 
@@ -68,8 +69,28 @@ class TaskProcessor:
         logger.info(f"Task {task_id}: plan created with {len(plan.get('steps', []))} step(s)")
 
     def _execute(self, task_id: str):
-        # Placeholder for Step 16 (Executor module)
-        logger.info(f"Task {task_id}: executing (placeholder)")
+        task = self.task_service.get_task(task_id)
+        executor = ExecutorAgent()
+
+        plan = task.metadata_ or {}
+        steps = plan.get("steps", [])
+
+        if not steps:
+            logger.warning(f"Task {task_id}: no plan steps found, executing prompt directly")
+            steps = [task.prompt]
+
+        context = task.prompt or ""
+        outputs = []
+
+        for i, step in enumerate(steps, start=1):
+            logger.info(f"Task {task_id}: executing step {i}/{len(steps)}")
+            step_output = executor.execute_step(step, context)
+            outputs.append(step_output)
+            context += f"\n{step_output}"
+
+        combined_result = "\n\n".join(outputs)
+        self.task_service.save_result(task_id, combined_result)
+        logger.info(f"Task {task_id}: execution complete, {len(outputs)} step(s) run")
 
     def _qa(self, task_id: str) -> bool:
         # Placeholder for Step 17 (QA module)
