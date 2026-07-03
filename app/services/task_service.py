@@ -33,10 +33,14 @@ class TaskService:
         finally:
             db.close()
 
-    def get_task(self, task_id: int):
+    def get_task(self, task_id: str):
         db = SessionLocal()
         try:
             return db.query(Task).filter(Task.id == task_id).first()
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to fetch task: {e}")
         finally:
             db.close()
 
@@ -44,5 +48,9 @@ class TaskService:
         db = SessionLocal()
         try:
             return db.query(Task).all()
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to list tasks: {e}")
         finally:
             db.close()
