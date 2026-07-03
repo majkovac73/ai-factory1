@@ -1,12 +1,9 @@
-from app.db.database import SessionLocal
-from app.models.task import Task
-
-
 from fastapi import HTTPException
 
 from app.db.database import SessionLocal
 from app.models.task import Task
 from app.schemas.enums import TaskStatus, TASK_STATUS_TRANSITIONS
+
 
 class TaskService:
     def create_task(self, task_data):
@@ -40,6 +37,17 @@ class TaskService:
             raise
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to fetch task: {e}")
+        finally:
+            db.close()
+
+    def list_tasks(self):
+        db = SessionLocal()
+        try:
+            return db.query(Task).all()
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to list tasks: {e}")
         finally:
             db.close()
 

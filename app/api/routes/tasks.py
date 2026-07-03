@@ -5,10 +5,12 @@ from fastapi import APIRouter, HTTPException
 from app.schemas.task import TaskCreate, TaskResponse, TaskStatusUpdate
 from app.services.task_service import TaskService
 from app.services.task_processor import TaskProcessor
+from app.orchestrator.core import Orchestrator
 
 router = APIRouter()
 task_service = TaskService()
 task_processor = TaskProcessor()
+orchestrator = Orchestrator()
 
 
 @router.post("", response_model=TaskResponse)
@@ -40,3 +42,7 @@ def process_task(task_id: str):
         return task_processor.process(task_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    
+@router.post("/run-pending")
+def run_pending_tasks():
+    return orchestrator.run_pending()
