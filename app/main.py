@@ -7,8 +7,9 @@ from fastapi.middleware.cors import CORSMiddleware
 load_dotenv()
 
 from app.api.tasks import router as task_router
-from app.db.database import Base, engine
 from config import settings
+from database.base import Base
+from database.database import engine
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ai-factory")
