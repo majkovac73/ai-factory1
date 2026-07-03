@@ -7,16 +7,10 @@ from app.core.agents.schema_agent import SchemaAgent
 from app.core.engine.retry_engine import RetryEngine
 from app.db.database import SessionLocal
 from app.models.task import Task
-
-TASK_ROLES = {
-    "seo_writing": "Etsy marketing copywriter",
-    "image_prompt": "prompt engineer",
-    "research": "research analyst"
-}
+from app.agents.roles import get_role_for_task_type
 
 QUALITY_THRESHOLD = 70
 MAX_FIX_ROUNDS = 4
-
 
 def process_task(task_id: int):
 
@@ -40,7 +34,7 @@ def process_task(task_id: int):
             if isinstance(round_output, dict):
                 round_output = json.dumps(round_output, ensure_ascii=False)
 
-            fixed = fixer.improve(round_output, critique, task.type, task.input, TASK_ROLES.get(task.type, "copywriter"))
+            fixed = fixer.improve(round_output, critique, task.type, task.input, get_role_for_task_type(task.type))
             validation = schema_agent.validate_seo(fixed)
 
             if validation["valid"]:
@@ -96,7 +90,7 @@ def process_task(task_id: int):
         candidate = None
 
         for step in plan.get("steps", []):
-            candidate = generator.generate_step(step, context, TASK_ROLES.get(task.type, "copywriter"), task.type)
+            candidate = generator.generate_step(step, context, get_role_for_task_type(task.type), task.type)
             if candidate is None:
                 raise Exception("Generator returned no output for step")
             context += "\\n" + str(candidate)
