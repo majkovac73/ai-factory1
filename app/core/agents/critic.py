@@ -48,3 +48,13 @@ Return ONLY valid JSON with these fields:
                 "issues": ["Critic failed to parse model output."],
                 "recommendation": "Ensure the critic returns valid JSON."
             }
+
+    def run(self, task: dict) -> dict:
+        """
+        Standardized entry point. Expects a task dict with 'output',
+        'task_type', and 'task_input' keys.
+        """
+        output = task.get("output", {})
+        task_type = task.get("task_type", "general")
+        task_input = task.get("task_input", "")
+        return self.review(output, task_type, task_input)

@@ -33,3 +33,12 @@ CONTEXT:
 """
 
         return self._generate(prompt)
+
+    def run(self, task: dict) -> str:
+        """
+        Standardized entry point. Expects a task dict with 'step' and
+        'context' keys and returns the raw executor output string.
+        """
+        step = task.get("step", "")
+        context = task.get("context", "")
+        return self.execute_step(step, context)

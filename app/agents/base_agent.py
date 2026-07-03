@@ -20,3 +20,14 @@ class BaseAgent:
         Subclasses build the prompt, then call self._generate(prompt).
         """
         return asyncio.run(self.llm.generate(model=self.model, prompt=prompt))
+
+    def run(self, *args, **kwargs):
+        """
+        Standardized entry point so calling code (e.g. Orchestrator) can
+        invoke any agent the same way, without knowing its specific
+        method name. Subclasses must override this to call their own
+        specific method (create_plan, execute_step, review, etc).
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must implement run()"
+        )

@@ -34,3 +34,14 @@ CONTEXT:
 """
 
         return self._generate(prompt)
+
+    def run(self, task: dict) -> str:
+        """
+        Standardized entry point. Expects a task dict with 'step',
+        'context', 'role', and 'task_type' keys.
+        """
+        step = task.get("step", "")
+        context = task.get("context", "")
+        role = task.get("role", "copywriter")
+        task_type = task.get("task_type", "general")
+        return self.generate_step(step, context, role, task_type)

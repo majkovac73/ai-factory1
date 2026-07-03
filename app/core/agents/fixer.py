@@ -29,3 +29,16 @@ RULES:
 """
 
         return self._generate(prompt)
+
+    def run(self, task: dict) -> str:
+        """
+        Standardized entry point. Expects a task dict with
+        'current_output', 'critique', 'task_type', 'task_input', and
+        'role' keys.
+        """
+        current_output = task.get("current_output", {})
+        critique = task.get("critique", {})
+        task_type = task.get("task_type", "general")
+        task_input = task.get("task_input", "")
+        role = task.get("role", "copywriter")
+        return self.improve(current_output, critique, task_type, task_input, role)

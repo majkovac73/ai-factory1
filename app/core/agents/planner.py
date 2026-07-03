@@ -36,3 +36,12 @@ Rules:
                 "goal": prompt,
                 "steps": [prompt]
             }
+
+    def run(self, task: dict) -> dict:
+        """
+        Standardized entry point. Expects a task dict with 'type' and
+        'prompt' keys and returns the generated plan dict.
+        """
+        task_type = task.get("type") or "general"
+        prompt = task.get("prompt", "")
+        return self.create_plan(task_type, prompt)
