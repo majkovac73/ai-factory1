@@ -6,10 +6,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 
-from app.api.tasks import router as task_router
+from app.api.api import api_router
+from app.db.database import Base, engine
+from app.models import agent_execution, log, task, task_step  # noqa: F401
 from config import settings
-from database.base import Base
-from database.database import engine
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ai-factory")
@@ -50,11 +50,7 @@ async def shutdown_event():
     logger.info("AI Factory server shutting down...")
 
 
-# Future router registration hook
-# from app.api.task_routes import router as task_router
-# app.include_router(task_router, prefix="/task", tags=["Task"])
-
-app.include_router(task_router)
+app.include_router(api_router)
 
 logger.info("AI Factory API initialized")
 print(f"Loaded configuration for {settings.APP_NAME} ({settings.ENV})")
