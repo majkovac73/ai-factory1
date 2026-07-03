@@ -1,13 +1,7 @@
-import asyncio
-from app.core.providers.manager import ProviderManager
-from config import settings
+from app.agents.base_agent import BaseAgent
 
 
-class GeneratorAgent:
-
-    def __init__(self, provider=None):
-        self.llm = provider or ProviderManager.get_provider()
-        self.model = settings.DEFAULT_MODEL
+class GeneratorAgent(BaseAgent):
 
     def generate_step(self, step: str, context: str, role: str, task_type: str) -> str:
 
@@ -39,4 +33,4 @@ CONTEXT:
 {context}
 """
 
-        return asyncio.run(self.llm.generate(model=self.model, prompt=prompt))
+        return self._generate(prompt)

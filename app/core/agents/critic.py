@@ -1,15 +1,12 @@
-import asyncio
 import json
-from app.core.providers.manager import ProviderManager
+from app.agents.base_agent import BaseAgent
 from app.core.utils.json_sanitizer import JSONSanitizer
-from config import settings
 
 
-class CriticAgent:
+class CriticAgent(BaseAgent):
 
-    def __init__(self, provider=None):
-        self.llm = provider or ProviderManager.get_provider()
-        self.model = settings.DEFAULT_MODEL
+    def __init__(self, provider=None, model: str = None):
+        super().__init__(provider, model)
         self.sanitizer = JSONSanitizer()
 
     def review(self, output: dict, task_type: str, task_input: str) -> dict:
@@ -34,7 +31,7 @@ Return ONLY valid JSON with these fields:
 }}
 """
 
-        response = asyncio.run(self.llm.generate(model=self.model, prompt=prompt))
+        response = self._generate(prompt)
 
         try:
             return json.loads(response)

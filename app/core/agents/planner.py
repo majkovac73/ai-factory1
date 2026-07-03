@@ -1,14 +1,8 @@
-import asyncio
 import json
-from app.core.providers.manager import ProviderManager
-from config import settings
+from app.agents.base_agent import BaseAgent
 
 
-class PlannerAgent:
-
-    def __init__(self, provider=None):
-        self.llm = provider or ProviderManager.get_provider()
-        self.model = settings.DEFAULT_MODEL
+class PlannerAgent(BaseAgent):
 
     def create_plan(self, task_type: str, prompt: str):
 
@@ -32,9 +26,7 @@ Rules:
 - stay strictly within user input
 """
 
-        response = asyncio.run(
-            self.llm.generate(model=self.model, prompt=system_prompt + "\n\nINPUT:\n" + prompt)
-        )
+        response = self._generate(system_prompt + "\n\nINPUT:\n" + prompt)
 
         try:
             return json.loads(response)
