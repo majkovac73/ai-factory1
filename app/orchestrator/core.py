@@ -1,5 +1,6 @@
 import logging
 
+from app.ai.router import AIRouter, Capability
 from app.schemas.enums import TaskStatus
 from app.services.task_service import TaskService
 from app.services.task_processor import TaskProcessor
@@ -22,10 +23,43 @@ class Orchestrator:
     def __init__(self):
         self.task_service = TaskService()
         self.task_processor = TaskProcessor()
+        self.router = AIRouter()
 
-    def run_task(self, task_id: str):
-        """Process a single task by ID and return its final state."""
-        return self.task_processor.process(task_id)
+    def run_task(self, task: str):
+        capability = self.router.route(task)
+
+    # 2. Store routing decision
+        task["capability"] = capability.value
+
+        # 3. Route to correct pipeline stage
+        if capability == Capability.PLANNING:
+            return self.planner.run(task)
+
+        elif capability == Capability.EXECUTION:
+            planned_task = self.planner.run(task)
+            return self.executor.run(planned_task)
+
+        elif capability == Capability.QA:
+            result = self.executor.run(task)
+            return self.qa.run(result)
+
+        elif capability == Capability.CONTENT_GENERATION:
+            planned_task = self.planner.run(task)
+            result = self.executor.run(planned_task)
+            return self.qa.run(result)
+
+        elif capability == Capability.RESEARCH:
+            return self.planner.run(task)
+
+        elif capability == Capability.AUTOMATION:
+            planned_task = self.planner.run(task)
+            return self.executor.run(planned_task)
+
+        # fallback
+        else:
+            planned_task = self.planner.run(task)
+            result = self.executor.run(planned_task)
+            return self.qa.run(result)
 
     def run_pending(self):
         """
