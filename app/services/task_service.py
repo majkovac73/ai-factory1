@@ -133,3 +133,23 @@ class TaskService:
             raise HTTPException(status_code=500, detail=f"Failed to save task result: {e}")
         finally:
             db.close()
+
+    def save_qa_result(self, task_id: str, output_data: dict = None, error_message: str = None):
+        db = SessionLocal()
+        try:
+            task = db.query(Task).filter(Task.id == task_id).first()
+            if not task:
+                raise HTTPException(status_code=404, detail="Task not found")
+
+            task.output_data = output_data
+            task.error_message = error_message
+            db.commit()
+            db.refresh(task)
+            return task
+        except HTTPException:
+            raise
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(status_code=500, detail=f"Failed to save QA result: {e}")
+        finally:
+            db.close()

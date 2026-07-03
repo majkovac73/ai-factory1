@@ -20,5 +20,7 @@ class TaskResponse(BaseModel):
     status: str
     result: Optional[str] = None
     metadata: Optional[dict] = Field(default=None, validation_alias="metadata_")
+    output_data: Optional[dict] = None
+    error_message: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)

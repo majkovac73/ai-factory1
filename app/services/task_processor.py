@@ -2,6 +2,7 @@ import logging
 
 from app.core.agents.planner import PlannerAgent
 from app.core.agents.executor import ExecutorAgent
+from app.core.agents.qa import QAAgent
 from app.schemas.enums import TaskStatus
 from app.services.task_service import TaskService
 
@@ -93,7 +94,22 @@ class TaskProcessor:
         logger.info(f"Task {task_id}: execution complete, {len(outputs)} step(s) run")
 
     def _qa(self, task_id: str) -> bool:
-        # Placeholder for Step 17 (QA module)
-        # Returns True (pass) for now so tasks always complete during this step.
-        logger.info(f"Task {task_id}: running QA (placeholder)")
-        return True
+        task = self.task_service.get_task(task_id)
+        qa_agent = QAAgent()
+
+        if not task.result:
+            self.task_service.save_qa_result(task_id, output_data=None, error_message="No result to validate")
+            logger.warning(f"Task {task_id}: QA failed, no result present")
+            return False
+
+        validation = qa_agent.review(task.result)
+
+        if validation.get("valid"):
+            self.task_service.save_qa_result(task_id, output_data=validation["data"], error_message=None)
+            logger.info(f"Task {task_id}: QA passed")
+            return True
+
+        error = validation.get("error", "QA validation failed")
+        self.task_service.save_qa_result(task_id, output_data=None, error_message=error)
+        logger.warning(f"Task {task_id}: QA failed - {error}")
+        return False
