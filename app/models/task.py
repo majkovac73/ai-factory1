@@ -1,11 +1,27 @@
-from sqlalchemy import Column, Integer, String, Text
-from app.db.database import Base
+from datetime import datetime
+
+from sqlalchemy import JSON, Column, DateTime, Integer, String, Text
+from sqlalchemy.orm import relationship
+
+from app.models.base import Base
+from app.schemas.enums import TaskStatus
+
 
 class Task(Base):
     __tablename__ = "tasks"
 
-    id = Column(Integer, primary_key=True, index=True)
-    type = Column(String)
-    status = Column(String, default="pending")
-    input = Column(Text)
-    output = Column(Text, nullable=True)
+    id = Column(String, primary_key=True, index=True)
+    title = Column(String, nullable=True)
+    input_data = Column(JSON, nullable=False, default={})
+    output_data = Column(JSON, nullable=True)
+    status = Column(String, default=TaskStatus.NEW.value, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    current_step = Column(String, nullable=True)
+    error_message = Column(Text, nullable=True)
+    retry_count = Column(Integer, default=0, nullable=False)
+    priority = Column(Integer, default=0, nullable=False)
+    tags = Column(JSON, nullable=True)
+
+    task_steps = relationship("TaskStep", back_populates="task", cascade="all, delete-orphan")
+    agent_executions = relationship("AgentExecution", back_populates="task", cascade="all, delete-orphan")

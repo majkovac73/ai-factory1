@@ -5,12 +5,12 @@ from sqlalchemy import JSON, Column, DateTime, String
 from app.models.base import Base
 
 
-class Log(Base):
-    __tablename__ = "logs"
+class Memory(Base):
+    __tablename__ = "memory"
 
     id = Column(String, primary_key=True, index=True)
-    level = Column(String, nullable=False)
-    source = Column(String, nullable=False)
-    message = Column(String, nullable=False)
-    payload = Column(JSON, nullable=True)
+    entity_type = Column(String, nullable=False)
+    entity_id = Column(String, nullable=False)
+    memory_key = Column(String, nullable=False)
+    memory_value = Column(JSON, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
