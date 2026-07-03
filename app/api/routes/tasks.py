@@ -4,9 +4,11 @@ from fastapi import APIRouter, HTTPException
 
 from app.schemas.task import TaskCreate, TaskResponse, TaskStatusUpdate
 from app.services.task_service import TaskService
+from app.services.task_processor import TaskProcessor
 
 router = APIRouter()
 task_service = TaskService()
+task_processor = TaskProcessor()
 
 
 @router.post("", response_model=TaskResponse)
@@ -31,3 +33,10 @@ def list_tasks():
 @router.patch("/{task_id}/status", response_model=TaskResponse)
 def update_task_status(task_id: str, update: TaskStatusUpdate):
     return task_service.update_status(task_id, update.status.value)
+
+@router.post("/{task_id}/process", response_model=TaskResponse)
+def process_task(task_id: str):
+    try:
+        return task_processor.process(task_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
