@@ -6,8 +6,7 @@ from fastapi import HTTPException
 
 from app.db.database import SessionLocal
 from app.models.task import Task
-from app.schemas.enums import TaskStatus
-
+from app.schemas.enums import TaskStatus, TASK_STATUS_TRANSITIONS
 
 class TaskService:
     def create_task(self, task_data):
@@ -57,6 +56,25 @@ class TaskService:
             task = db.query(Task).filter(Task.id == task_id).first()
             if not task:
                 raise HTTPException(status_code=404, detail="Task not found")
+
+            current_status = task.status
+            allowed_next = TASK_STATUS_TRANSITIONS.get(current_status, set())
+
+            if new_status == current_status:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Task is already in status '{current_status}'",
+                )
+
+            if new_status not in allowed_next:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Illegal transition: cannot move task from "
+                        f"'{current_status}' to '{new_status}'. "
+                        f"Allowed next states: {sorted(allowed_next) if allowed_next else 'none (terminal state)'}"
+                    ),
+                )
 
             task.status = new_status
             db.commit()
