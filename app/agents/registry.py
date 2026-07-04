@@ -24,7 +24,10 @@ def _get_registry():
     from app.agents.product_development.design import DesignAgent
     from app.agents.product_development.optimization import OptimizationAgent
     from app.agents.product_development.planning import PlanningAgent
-    
+    from app.agents.creative.copywriter import CopywriterAgent
+    from app.agents.creative.brand import BrandAgent
+    from app.agents.creative.visual_director import VisualDirectorAgent
+
     return {
         "planner": PlannerAgent,
         "executor": ExecutorAgent,
@@ -38,6 +41,9 @@ def _get_registry():
         "design": DesignAgent,
         "optimization": OptimizationAgent,
         "planning": PlanningAgent,
+        "copywriter": CopywriterAgent,
+        "brand": BrandAgent,
+        "visual_director": VisualDirectorAgent,
     }
 
 
