@@ -2,7 +2,7 @@ from typing import List
 
 from fastapi import APIRouter, HTTPException
 
-from app.schemas.task import TaskCreate, TaskResponse, TaskStatusUpdate
+from app.schemas.task import TaskCreate, TaskResponse, TaskStatusUpdate, EtsyListingRequest
 from app.services.task_service import TaskService
 from app.services.task_processor import TaskProcessor
 from app.orchestrator.core import Orchestrator
@@ -64,3 +64,8 @@ def retry_task(task_id: str):
 @router.post("/retry-failed")
 def retry_all_failed_tasks():
     return task_service.retry_all_failed()
+
+@router.post("/etsy/listing", response_model=TaskResponse)
+def create_etsy_listing_task(request: EtsyListingRequest):
+    task_data = TaskCreate(prompt=request.prompt, type="seo_writing", metadata=request.metadata)
+    return task_service.create_task(task_data)

@@ -18,6 +18,7 @@ class TaskService:
         try:
             task = Task(
                 prompt=task_data.prompt,
+                type=task_data.type or "general",
                 metadata_=task_data.metadata,
                 status=TaskStatus.NEW.value,
             )
