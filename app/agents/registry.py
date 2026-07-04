@@ -21,6 +21,9 @@ def _get_registry():
     from app.agents.market_intelligence.research import ResearchAgent
     from app.agents.market_intelligence.analysis import AnalysisAgent
     from app.agents.market_intelligence.intelligence import IntelligenceAgent
+    from app.agents.product_development.design import DesignAgent
+    from app.agents.product_development.optimization import OptimizationAgent
+    from app.agents.product_development.planning import PlanningAgent
     
     return {
         "planner": PlannerAgent,
@@ -32,6 +35,9 @@ def _get_registry():
         "research": ResearchAgent,
         "analysis": AnalysisAgent,
         "intelligence": IntelligenceAgent,
+        "design": DesignAgent,
+        "optimization": OptimizationAgent,
+        "planning": PlanningAgent,
     }
 
 
