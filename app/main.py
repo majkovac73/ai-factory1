@@ -35,6 +35,14 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     logger.info("AI Factory server starting...")
+
+    from app.services.task_service import TaskService
+    recovery_results = TaskService().recover_orphaned_tasks()
+    if recovery_results["recovered"] or recovery_results["failed_permanently"]:
+        logger.warning(f"AI Factory: startup recovery ran — {recovery_results}")
+    else:
+        logger.info("AI Factory: startup recovery found no orphaned tasks")
+
     task_worker.start()
 
 

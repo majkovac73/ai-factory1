@@ -42,19 +42,25 @@ class TaskWorker:
 
     def _run_loop(self):
         while not self._stop_event.is_set():
-            task_id = self.queue.dequeue(block=True, timeout=self.poll_timeout)
-
-            if task_id is None:
-                # Nothing in the queue within the timeout window; loop
-                # back and check _stop_event again rather than blocking
-                # forever, so shutdown stays responsive.
-                continue
-
-            logger.info(f"TaskWorker: picked up task {task_id}")
             try:
-                self.processor.process(task_id)
-            except Exception as e:
-                # process() already marks the task FAILED and logs
-                # internally; just prevent one bad task from killing
-                # the worker thread itself.
-                logger.error(f"TaskWorker: task {task_id} raised during processing: {e}")
+                task_id = self.queue.dequeue(block=True, timeout=self.poll_timeout)
+
+                if task_id is None:
+                    # Nothing in the queue within the timeout window; loop
+                    # back and check _stop_event again rather than blocking
+                    # forever, so shutdown stays responsive.
+                    continue
+
+                logger.info(f"TaskWorker: picked up task {task_id}")
+                try:
+                    self.processor.process(task_id)
+                except Exception as e:
+                    # process() already marks the task FAILED and logs
+                    # internally; just prevent one bad task from killing
+                    # the worker thread itself.
+                    logger.error(f"TaskWorker: task {task_id} raised during processing: {e}")
+            except Exception as loop_error:
+                # Catch anything unexpected at the loop level itself
+                # (e.g. a transient DB error on dequeue) so the worker
+                # thread survives instead of dying silently forever.
+                logger.error(f"TaskWorker: unexpected error in run loop: {loop_error}")

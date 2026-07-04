@@ -216,6 +216,48 @@ class TaskService:
             except HTTPException as e:
                 results["skipped"].append({"task_id": task_id, "reason": e.detail})
         return results
+    
+    def recover_orphaned_tasks(self):
+        """
+        Finds tasks stuck in a non-terminal, non-NEW state (PLANNED,
+        RUNNING, QA) — these can only be leftovers from a crash or
+        unclean shutdown, since normal processing always resolves to
+        DONE or FAILED. Marks them FAILED (we cannot trust their
+        in-flight state) then attempts to retry them if under the cap.
+        """
+        orphan_statuses = {TaskStatus.PLANNED.value, TaskStatus.RUNNING.value, TaskStatus.QA.value}
+
+        db = SessionLocal()
+        try:
+            orphans = db.query(Task).filter(Task.status.in_(orphan_statuses)).all()
+            orphan_ids = [t.id for t in orphans]
+        finally:
+            db.close()
+
+        results = {"recovered": [], "failed_permanently": []}
+
+        for task_id in orphan_ids:
+            db = SessionLocal()
+            try:
+                task = db.query(Task).filter(Task.id == task_id).first()
+                if not task:
+                    continue
+                task.status = TaskStatus.FAILED.value
+                task.error_message = "Recovered after server restart: task was orphaned mid-processing"
+                db.commit()
+            except Exception:
+                db.rollback()
+                continue
+            finally:
+                db.close()
+
+            try:
+                self.retry_failed_task(task_id)
+                results["recovered"].append(task_id)
+            except HTTPException as e:
+                results["failed_permanently"].append({"task_id": task_id, "reason": e.detail})
+
+        return results
 
     def increment_retry_count(self, task_id: str):
         db = SessionLocal()
