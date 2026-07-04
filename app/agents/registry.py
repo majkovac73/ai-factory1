@@ -27,6 +27,9 @@ def _get_registry():
     from app.agents.creative.copywriter import CopywriterAgent
     from app.agents.creative.brand import BrandAgent
     from app.agents.creative.visual_director import VisualDirectorAgent
+    from app.agents.qa.consistency import ConsistencyAgent
+    from app.agents.qa.fact_check import FactCheckAgent
+    from app.agents.qa.completeness import CompletenessAgent
 
     return {
         "planner": PlannerAgent,
@@ -44,6 +47,9 @@ def _get_registry():
         "copywriter": CopywriterAgent,
         "brand": BrandAgent,
         "visual_director": VisualDirectorAgent,
+        "consistency": ConsistencyAgent,
+        "fact_check": FactCheckAgent,
+        "completeness": CompletenessAgent,
     }
 
 
