@@ -6,11 +6,13 @@ from app.schemas.task import TaskCreate, TaskResponse, TaskStatusUpdate
 from app.services.task_service import TaskService
 from app.services.task_processor import TaskProcessor
 from app.orchestrator.core import Orchestrator
+from app.services.task_queue import TaskQueue
 
 router = APIRouter()
 task_service = TaskService()
 task_processor = TaskProcessor()
 orchestrator = Orchestrator()
+task_queue = TaskQueue()
 
 
 @router.post("", response_model=TaskResponse)
@@ -46,3 +48,10 @@ def process_task(task_id: str):
 @router.post("/run-pending")
 def run_pending_tasks():
     return orchestrator.run_pending()
+
+@router.get("/queue/status")
+def queue_status():
+    return {
+        "queue_size": task_queue.size(),
+        "is_empty": task_queue.is_empty(),
+    }

@@ -3,9 +3,13 @@ from fastapi import HTTPException
 from app.db.database import SessionLocal
 from app.models.task import Task
 from app.schemas.enums import TaskStatus, TASK_STATUS_TRANSITIONS
+from app.services.task_queue import TaskQueues
 
 
 class TaskService:
+    def __init__(self):
+        self.queue = TaskQueue()
+
     def create_task(self, task_data):
         if not task_data.prompt or not task_data.prompt.strip():
             raise HTTPException(status_code=422, detail="prompt cannot be empty")
@@ -20,6 +24,7 @@ class TaskService:
             db.add(task)
             db.commit()
             db.refresh(task)
+            self.queue.enqueue(task.id)
             return task
         except HTTPException:
             raise
