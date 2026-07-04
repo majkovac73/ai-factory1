@@ -18,5 +18,5 @@ TASK_STATUS_TRANSITIONS = {
     TaskStatus.RUNNING.value: {TaskStatus.QA.value, TaskStatus.FAILED.value},
     TaskStatus.QA.value: {TaskStatus.DONE.value, TaskStatus.RUNNING.value, TaskStatus.FAILED.value},
     TaskStatus.DONE.value: set(),
-    TaskStatus.FAILED.value: set(),
+    TaskStatus.FAILED.value: {TaskStatus.NEW.value},
 }

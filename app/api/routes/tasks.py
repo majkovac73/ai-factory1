@@ -55,3 +55,12 @@ def queue_status():
         "queue_size": task_queue.size(),
         "is_empty": task_queue.is_empty(),
     }
+
+@router.post("/{task_id}/retry", response_model=TaskResponse)
+def retry_task(task_id: str):
+    return task_service.retry_failed_task(task_id)
+
+
+@router.post("/retry-failed")
+def retry_all_failed_tasks():
+    return task_service.retry_all_failed()

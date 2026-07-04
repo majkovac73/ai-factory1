@@ -3,7 +3,7 @@ from fastapi import HTTPException
 from app.db.database import SessionLocal
 from app.models.task import Task
 from app.schemas.enums import TaskStatus, TASK_STATUS_TRANSITIONS
-from app.services.task_queue import TaskQueue
+from app.services.task_queue import TaskQueue   
 
 
 class TaskService:
@@ -158,6 +158,64 @@ class TaskService:
             raise HTTPException(status_code=500, detail=f"Failed to save QA result: {e}")
         finally:
             db.close()
+
+    MAX_TASK_RETRIES = 5
+
+    def retry_failed_task(self, task_id: str):
+        db = SessionLocal()
+        try:
+            task = db.query(Task).filter(Task.id == task_id).first()
+            if not task:
+                raise HTTPException(status_code=404, detail="Task not found")
+
+            if task.status != TaskStatus.FAILED.value:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Only FAILED tasks can be retried (current status: '{task.status}')",
+                )
+
+            if (task.retry_count or 0) >= self.MAX_TASK_RETRIES:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Task {task_id} has exceeded max retries ({self.MAX_TASK_RETRIES}), not requeuing",
+                )
+
+            task.status = TaskStatus.NEW.value
+            task.error_message = None
+            db.commit()
+            db.refresh(task)
+
+            self.queue.enqueue(task.id)
+            return task
+        except HTTPException:
+            raise
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(status_code=500, detail=f"Failed to retry task: {e}")
+        finally:
+            db.close()
+
+    def retry_all_failed(self):
+        db = SessionLocal()
+        try:
+            failed_tasks = (
+                db.query(Task)
+                .filter(Task.status == TaskStatus.FAILED.value)
+                .filter((Task.retry_count == None) | (Task.retry_count < self.MAX_TASK_RETRIES))
+                .all()
+            )
+            task_ids = [t.id for t in failed_tasks]
+        finally:
+            db.close()
+
+        results = {"requeued": [], "skipped": []}
+        for task_id in task_ids:
+            try:
+                self.retry_failed_task(task_id)
+                results["requeued"].append(task_id)
+            except HTTPException as e:
+                results["skipped"].append({"task_id": task_id, "reason": e.detail})
+        return results
 
     def increment_retry_count(self, task_id: str):
         db = SessionLocal()
