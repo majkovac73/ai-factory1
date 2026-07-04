@@ -31,6 +31,7 @@ def _get_registry():
     from app.agents.qa.fact_check import FactCheckAgent
     from app.agents.qa.completeness import CompletenessAgent
     from app.agents.etsy.product_generator import ProductGeneratorAgent
+    from app.agents.etsy.seo_generator import SEOGeneratorAgent
 
     return {
         "planner": PlannerAgent,
@@ -52,6 +53,7 @@ def _get_registry():
         "fact_check": FactCheckAgent,
         "completeness": CompletenessAgent,
         "product_generator": ProductGeneratorAgent,
+        "seo_generator": SEOGeneratorAgent,
     }
 
 
