@@ -9,8 +9,8 @@ class SchemaValidator:
     def validate_seo(self, data: str):
 
         try:
-            if not data or not data.strip().endswith("}"):
-                raise ValueError("Incomplete JSON output (truncated)")
+            if not data or not data.strip():
+                raise ValueError("Empty output cannot be validated")
 
             parsed = self.sanitizer.extract(data)
 
@@ -27,5 +27,13 @@ class SchemaValidator:
                 "error": str(e),
                 "raw": data
             }
-    def is_complete_json(text: str):
-        return text.strip().endswith("}")
+
+    @staticmethod
+    def is_complete_json(text: str) -> bool:
+        """
+        Lightweight structural check, independent of full parsing —
+        useful as a fast pre-filter elsewhere if needed. Not used in
+        validate_seo() itself since JSONSanitizer already handles
+        trailing/leading noise more robustly than a simple suffix check.
+        """
+        return bool(text) and text.strip().endswith("}")
