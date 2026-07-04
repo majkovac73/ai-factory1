@@ -26,6 +26,7 @@ class OpenRouterProvider(BaseLLMProvider):
             api_key=self.api_key,
             default_headers=self.extra_headers
         )
+        self.last_usage = None
 
     async def generate(
         self, 
@@ -48,6 +49,14 @@ class OpenRouterProvider(BaseLLMProvider):
             max_tokens=max_tokens,
             **kwargs
         )
+
+        usage = getattr(response, "usage", None)
+        self.last_usage = {
+            "prompt_tokens": getattr(usage, "prompt_tokens", None),
+            "completion_tokens": getattr(usage, "completion_tokens", None),
+            "total_tokens": getattr(usage, "total_tokens", None),
+        } if usage else None
+
         return response.choices[0].message.content
 
     async def generate_structured(
