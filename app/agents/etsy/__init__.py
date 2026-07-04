@@ -7,5 +7,6 @@ generic product roadmap/design work, not Etsy-specific product ideation.
 
 from app.agents.etsy.product_generator import ProductGeneratorAgent
 from app.agents.etsy.seo_generator import SEOGeneratorAgent
+from app.agents.etsy.listing_generator import ListingGeneratorAgent
 
-__all__ = ["ProductGeneratorAgent", "SEOGeneratorAgent"]
+__all__ = ["ProductGeneratorAgent", "SEOGeneratorAgent", "ListingGeneratorAgent"]
