@@ -9,9 +9,10 @@ class PlannerAgent(BaseAgent):
         system_prompt = f"""
 You are a STRICT planning system.
 
-Return ONLY valid JSON.
+Return ONLY valid JSON. Your entire response must be a single JSON object,
+starting with {{ and ending with }}. Nothing before it, nothing after it.
 
-NO explanations. NO markdown. NO extra text.
+NO explanations. NO markdown. NO code fences. NO extra text of any kind.
 
 Schema:
 {{
@@ -30,7 +31,12 @@ Rules:
 
         try:
             return json.loads(response)
-        except Exception:
+        except Exception as e:
+            self.log_service.warning(
+                source="PlannerAgent",
+                message="Planner output was not valid JSON, using fallback plan",
+                payload={"raw_output": response, "error": str(e)},
+            )
             return {
                 "task_type": task_type,
                 "goal": prompt,

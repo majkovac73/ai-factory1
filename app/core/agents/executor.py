@@ -1,19 +1,28 @@
+import json
 from app.agents.base_agent import BaseAgent
+from app.core.utils.json_sanitizer import JSONSanitizer
 
 
 class ExecutorAgent(BaseAgent):
+
+    def __init__(self, provider=None, model: str = None):
+        super().__init__(provider, model)
+        self.sanitizer = JSONSanitizer()
 
     def execute_step(self, step: str, context: str):
 
         prompt = f"""
 You MUST output ONLY valid JSON.
 
+Your entire response must be a single JSON object, starting with {{ and
+ending with }}. Nothing before it, nothing after it.
+
 Rules:
 - No markdown
 - No ``` blocks
 - No explanation
 - No partial output allowed
-- Output must be complete JSON object
+- Output must be one complete, single JSON object
 
 If you cannot complete the full JSON, do NOT respond.
 
@@ -32,7 +41,18 @@ CONTEXT:
 {context}
 """
 
-        return self._generate(prompt)
+        output = self._generate(prompt)
+
+        try:
+            self.sanitizer.extract(output)
+        except Exception as e:
+            self.log_service.warning(
+                source="ExecutorAgent",
+                message="Executor output did not parse as clean JSON",
+                payload={"raw_output": output, "error": str(e)},
+            )
+
+        return output
 
     def run(self, task: dict) -> str:
         """
