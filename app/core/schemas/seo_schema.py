@@ -3,10 +3,10 @@ from pydantic import Field, field_validator
 from typing import List, Union
 
 class SEOSchema(BaseModel):
-    title: str = Field(..., min_length=1, max_length=140, description="Etsy listing title")
-    description: str = Field(..., min_length=1, description="Full product description")
-    keywords: List[str] = Field(..., min_length=1, description="SEO search terms")
-    sections: List[Union[str, dict]] = Field(..., min_length=1, description="List of section strings or section objects")
+    title: str = Field(..., min_length=20, max_length=70, description="Etsy listing title (20-70 chars)")
+    description: str = Field(..., min_length=120, description="Full product description (120+ chars)")
+    keywords: List[str] = Field(..., min_length=3, description="SEO search terms (3+ required)")
+    sections: List[Union[str, dict]] = Field(..., min_length=4, description="List of section strings or section objects (4+ required)")
 
     @field_validator("keywords")
     @classmethod
