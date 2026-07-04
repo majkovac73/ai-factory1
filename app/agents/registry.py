@@ -30,6 +30,7 @@ def _get_registry():
     from app.agents.qa.consistency import ConsistencyAgent
     from app.agents.qa.fact_check import FactCheckAgent
     from app.agents.qa.completeness import CompletenessAgent
+    from app.agents.etsy.product_generator import ProductGeneratorAgent
 
     return {
         "planner": PlannerAgent,
@@ -50,6 +51,7 @@ def _get_registry():
         "consistency": ConsistencyAgent,
         "fact_check": FactCheckAgent,
         "completeness": CompletenessAgent,
+        "product_generator": ProductGeneratorAgent,
     }
 
 
