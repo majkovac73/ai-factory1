@@ -5,6 +5,7 @@ from app.core.agents.executor import ExecutorAgent
 from app.core.agents.qa import QAAgent
 from app.schemas.enums import TaskStatus
 from app.services.task_service import TaskService
+from app.services.log_service import LogService
 
 logger = logging.getLogger("ai-factory")
 
@@ -22,6 +23,7 @@ class TaskProcessor:
 
     def __init__(self):
         self.task_service = TaskService()
+        self.log_service = LogService()
 
     MAX_QA_RETRIES = 3
 
@@ -44,9 +46,15 @@ class TaskProcessor:
             while not qa_passed and attempts < self.MAX_QA_RETRIES:
                 attempts += 1
                 self.task_service.increment_retry_count(task_id)
-                logger.warning(
+                retry_msg = (
                     f"Task {task_id} failed QA, retrying execution "
                     f"(attempt {attempts}/{self.MAX_QA_RETRIES})"
+                )
+                logger.warning(retry_msg)
+                self.log_service.warning(
+                    source="TaskProcessor",
+                    message=retry_msg,
+                    payload={"task_id": task_id, "attempt": attempts, "max_retries": self.MAX_QA_RETRIES},
                 )
 
                 self._advance(task_id, TaskStatus.RUNNING.value)
@@ -58,19 +66,35 @@ class TaskProcessor:
             if qa_passed:
                 self._advance(task_id, TaskStatus.DONE.value)
             else:
-                logger.error(
-                    f"Task {task_id} failed QA after {self.MAX_QA_RETRIES} retries, marking FAILED"
+                fail_msg = f"Task {task_id} failed QA after {self.MAX_QA_RETRIES} retries, marking FAILED"
+                logger.error(fail_msg)
+                self.log_service.error(
+                    source="TaskProcessor",
+                    message=fail_msg,
+                    payload={"task_id": task_id, "retries_used": attempts},
                 )
                 self._advance(task_id, TaskStatus.FAILED.value)
 
             return self.task_service.get_task(task_id)
 
         except Exception as e:
-            logger.error(f"Task {task_id} processing failed: {e}")
+            error_msg = f"Task {task_id} processing failed: {e}"
+            logger.error(error_msg)
+            self.log_service.error(
+                source="TaskProcessor",
+                message=error_msg,
+                payload={"task_id": task_id, "error": str(e)},
+            )
             try:
                 self._advance(task_id, TaskStatus.FAILED.value)
             except Exception as inner_e:
-                logger.error(f"Task {task_id} could not be marked FAILED: {inner_e}")
+                inner_msg = f"Task {task_id} could not be marked FAILED: {inner_e}"
+                logger.error(inner_msg)
+                self.log_service.error(
+                    source="TaskProcessor",
+                    message=inner_msg,
+                    payload={"task_id": task_id, "error": str(inner_e)},
+                )
             raise
 
     def _advance(self, task_id: str, new_status: str):

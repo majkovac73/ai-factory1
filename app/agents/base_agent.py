@@ -27,8 +27,21 @@ class BaseAgent:
         Synchronous wrapper around the provider's async generate() call.
         Subclasses build the prompt, then call self._generate(prompt).
         Every call is logged (prompt + output + token usage) via LogService.
+        Failures are logged too, before the exception propagates.
         """
-        output = asyncio.run(self.llm.generate(model=self.model, prompt=prompt))
+        try:
+            output = asyncio.run(self.llm.generate(model=self.model, prompt=prompt))
+        except Exception as e:
+            self.log_service.error(
+                source=self.__class__.__name__,
+                message="LLM generation failed",
+                payload={
+                    "model": self.model,
+                    "prompt": prompt,
+                    "error": str(e),
+                },
+            )
+            raise
 
         usage = getattr(self.llm, "last_usage", None)
 
