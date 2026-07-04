@@ -28,7 +28,10 @@ class SchemaValidator:
             if not data or not data.strip():
                 raise ValueError("Empty output cannot be validated")
 
+            # Extract JSON from potentially noisy output
             parsed = self.sanitizer.extract(data)
+
+            # Validate against schema (includes length/count constraints)
             validated = SEOSchema(**parsed)
 
             return {
@@ -37,17 +40,22 @@ class SchemaValidator:
             }
 
         except ValueError as e:
-            # Pydantic validation error (schema constraints violated)
+            error_msg = str(e)
+            # Distinguish JSON extraction errors from schema validation errors
+            if "Invalid JSON" in error_msg or "parsing failed" in error_msg:
+                full_error = f"JSON extraction failed: {error_msg}"
+            else:
+                full_error = f"Schema validation failed: {error_msg}"
+            
             return {
                 "valid": False,
-                "error": f"Schema validation failed: {str(e)}",
+                "error": full_error,
                 "raw": data
             }
         except Exception as e:
-            # JSON extraction or other error
             return {
                 "valid": False,
-                "error": f"Output parsing failed: {str(e)}",
+                "error": f"Unexpected validation error: {str(e)}",
                 "raw": data
             }
 
