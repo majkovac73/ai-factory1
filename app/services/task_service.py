@@ -3,7 +3,7 @@ from fastapi import HTTPException
 from app.db.database import SessionLocal
 from app.models.task import Task
 from app.schemas.enums import TaskStatus, TASK_STATUS_TRANSITIONS
-from app.services.task_queue import TaskQueues
+from app.services.task_queue import TaskQueue
 
 
 class TaskService:
