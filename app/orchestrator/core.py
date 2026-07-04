@@ -1,6 +1,5 @@
 import logging
 
-from app.ai.router import AIRouter, Capability
 from app.schemas.enums import TaskStatus
 from app.services.task_service import TaskService
 from app.services.task_processor import TaskProcessor
@@ -14,58 +13,29 @@ class Orchestrator:
     (which handles a single task's lifecycle) and is responsible for
     deciding which tasks to run and in what order.
 
-    This step runs tasks sequentially and in-process. Step 37/38 will
-    introduce a real task queue and background worker; when that happens,
-    this class's run_pending() logic is what the worker will call per task,
-    rather than looping over all of them synchronously here.
+    This implementation runs tasks sequentially and in-process. When a
+    background worker is added (step 38+), this class's run_pending()
+    logic will be what the worker calls per task, rather than looping
+    over all of them synchronously here.
+
+    State machine is enforced by TaskService.update_status() and
+    TaskProcessor.process() — the orchestrator never bypasses those.
     """
 
     def __init__(self):
         self.task_service = TaskService()
         self.task_processor = TaskProcessor()
-        self.router = AIRouter()
-
-    def run_task(self, task: str):
-        capability = self.router.route(task)
-
-    # 2. Store routing decision
-        task["capability"] = capability.value
-
-        # 3. Route to correct pipeline stage
-        if capability == Capability.PLANNING:
-            return self.planner.run(task)
-
-        elif capability == Capability.EXECUTION:
-            planned_task = self.planner.run(task)
-            return self.executor.run(planned_task)
-
-        elif capability == Capability.QA:
-            result = self.executor.run(task)
-            return self.qa.run(result)
-
-        elif capability == Capability.CONTENT_GENERATION:
-            planned_task = self.planner.run(task)
-            result = self.executor.run(planned_task)
-            return self.qa.run(result)
-
-        elif capability == Capability.RESEARCH:
-            return self.planner.run(task)
-
-        elif capability == Capability.AUTOMATION:
-            planned_task = self.planner.run(task)
-            return self.executor.run(planned_task)
-
-        # fallback
-        else:
-            planned_task = self.planner.run(task)
-            result = self.executor.run(planned_task)
-            return self.qa.run(result)
 
     def run_pending(self):
         """
         Find all tasks currently in NEW status and process them one by one.
         Returns a summary of what succeeded and what failed, so a single
         bad task doesn't stop the rest of the batch from running.
+
+        State machine is enforced: TaskProcessor.process() strictly
+        follows NEW → PLANNED → RUNNING → QA → DONE/FAILED, and
+        TaskService.update_status() validates each transition against
+        TASK_STATUS_TRANSITIONS before allowing it.
         """
         all_tasks = self.task_service.list_tasks()
         pending = [t for t in all_tasks if t.status == TaskStatus.NEW.value]
