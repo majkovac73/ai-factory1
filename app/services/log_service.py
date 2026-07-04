@@ -87,3 +87,39 @@ class LogService:
             return query.order_by(Log.created_at.desc()).limit(limit).all()
         finally:
             db.close()
+
+    def get_token_usage_summary(self):
+        """
+        Aggregates token usage across all logged LLM calls that carried
+        usage data in their payload (see BaseAgent._generate(), Step 31).
+        """
+        db = SessionLocal()
+        try:
+            logs = (
+                db.query(Log)
+                .filter(Log.message == "LLM generation completed")
+                .all()
+            )
+        finally:
+            db.close()
+
+        total_prompt_tokens = 0
+        total_completion_tokens = 0
+        total_tokens = 0
+        call_count = 0
+
+        for log in logs:
+            usage = (log.payload or {}).get("usage")
+            if not usage:
+                continue
+            call_count += 1
+            total_prompt_tokens += usage.get("prompt_tokens") or 0
+            total_completion_tokens += usage.get("completion_tokens") or 0
+            total_tokens += usage.get("total_tokens") or 0
+
+        return {
+            "llm_call_count": call_count,
+            "total_prompt_tokens": total_prompt_tokens,
+            "total_completion_tokens": total_completion_tokens,
+            "total_tokens": total_tokens,
+        }

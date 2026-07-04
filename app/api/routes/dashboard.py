@@ -35,3 +35,40 @@ def dashboard_overview():
             for log in recent_errors
         ],
     }
+
+@router.get("/metrics")
+def dashboard_metrics():
+    all_tasks = task_service.list_tasks()
+
+    done_tasks = [t for t in all_tasks if t.status == TaskStatus.DONE.value]
+    failed_tasks = [t for t in all_tasks if t.status == TaskStatus.FAILED.value]
+    resolved_count = len(done_tasks) + len(failed_tasks)
+
+    success_rate = (len(done_tasks) / resolved_count) if resolved_count > 0 else None
+
+    retry_counts = [(t.retry_count or 0) for t in all_tasks]
+    avg_retry_count = (sum(retry_counts) / len(retry_counts)) if retry_counts else 0
+
+    processing_times = []
+    for t in done_tasks:
+        if t.created_at and t.updated_at:
+            delta = (t.updated_at - t.created_at).total_seconds()
+            if delta >= 0:
+                processing_times.append(delta)
+    avg_processing_seconds = (
+        sum(processing_times) / len(processing_times) if processing_times else None
+    )
+
+    token_summary = log_service.get_token_usage_summary()
+
+    return {
+        "total_tasks": len(all_tasks),
+        "done_count": len(done_tasks),
+        "failed_count": len(failed_tasks),
+        "success_rate": success_rate,
+        "average_retry_count": round(avg_retry_count, 2),
+        "average_processing_seconds": (
+            round(avg_processing_seconds, 2) if avg_processing_seconds is not None else None
+        ),
+        "token_usage": token_summary,
+    }
