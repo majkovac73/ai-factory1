@@ -21,8 +21,13 @@ class Settings(BaseSettings):
     DEFAULT_MODEL: str = "openai/gpt-4o-mini"
 
     ETSY_API_KEY: str | None = None
-    ETSY_REDIRECT_URI: str = "https://localhost:8000/etsy/oauth/callback"
+    ETSY_REDIRECT_URI: str = "http://localhost:8000/etsy/oauth/callback"
     ETSY_SHOP_ID: str | None = None
+
+    PINTEREST_APP_ID: str | None = None
+    PINTEREST_APP_SECRET: str | None = None
+    PINTEREST_REDIRECT_URI: str = "http://localhost:8000/pinterest/oauth/callback"
+    PINTEREST_BOARD_ID: str | None = None
 
     SECRET_KEY: str = "change_me"
 

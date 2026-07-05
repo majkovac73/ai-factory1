@@ -1,0 +1,57 @@
+import asyncio
+import httpx
+
+from app.marketing.base import MarketingChannel
+from app.services.pinterest_oauth import get_valid_access_token
+from config import settings
+
+PINTEREST_API_BASE = "https://api.pinterest.com/v5"
+
+
+class PinterestChannel(MarketingChannel):
+    """
+    Marketing channel implementation for Pinterest: creates a Pin
+    linking back to an Etsy listing, using the listing's title,
+    description, and (if present) an image URL.
+    """
+
+    name = "pinterest"
+
+    def post(self, listing: dict) -> dict:
+        return asyncio.run(self._post_async(listing))
+
+    async def _post_async(self, listing: dict) -> dict:
+        try:
+            access_token = await get_valid_access_token()
+        except Exception as e:
+            return {"success": False, "external_id": None, "url": None, "error": str(e)}
+
+        payload = {
+            "board_id": settings.PINTEREST_BOARD_ID,
+            "title": listing.get("title", "")[:100],
+            "description": listing.get("description", "")[:500],
+            "link": listing.get("listing_url") or listing.get("product_url") or "",
+        }
+
+        image_url = listing.get("image_url")
+        if image_url:
+            payload["media_source"] = {"source_type": "image_url", "url": image_url}
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{PINTEREST_API_BASE}/pins",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    json=payload,
+                )
+                response.raise_for_status()
+                data = response.json()
+
+            return {
+                "success": True,
+                "external_id": data.get("id"),
+                "url": data.get("link") or f"https://www.pinterest.com/pin/{data.get('id')}",
+                "error": None,
+            }
+        except Exception as e:
+            return {"success": False, "external_id": None, "url": None, "error": str(e)}
