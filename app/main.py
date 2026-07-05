@@ -8,7 +8,7 @@ load_dotenv()
 
 from app.api.api import api_router
 from app.db.database import Base, engine
-from app.models import agent_execution, log, task, task_step  # noqa: F401
+from app.models import agent_execution, log, task, task_step, etsy_token  # noqa: F401
 from app.workers.task_worker import TaskWorker
 from config import settings
 
