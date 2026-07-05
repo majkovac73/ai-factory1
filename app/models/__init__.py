@@ -4,5 +4,6 @@ from app.models.memory import Memory
 from app.models.task import Task
 from app.models.task_step import TaskStep
 from app.models.etsy_token import EtsyToken
+from app.models.marketing_post import MarketingPost
 
-__all__ = ["Task", "TaskStep", "AgentExecution", "Log", "Memory", "EtsyToken"]
+__all__ = ["Task", "TaskStep", "AgentExecution", "Log", "Memory", "EtsyToken", "MarketingPost"]
