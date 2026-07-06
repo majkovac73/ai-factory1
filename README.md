@@ -1,4 +1,33 @@
-# AI Business Automation Platform
+# AI Factory — Personal Etsy Shop Automation Tool
+
+## About this application
+
+AI Factory is a **personal tool built and used solely by its developer** to help manage
+listings for a single Etsy shop. It is not a public product, service,
+or SaaS platform, and it is not intended for use by any other Etsy seller.
+
+**What it does:**
+- Helps draft product titles, descriptions, and tags using AI, based on product details
+  provided by the shop owner
+- Uses the Etsy Open API v3 to create these listings as **drafts** in the owner's own shop
+- All drafts are manually reviewed and published by the shop owner — the app does not
+  auto-publish listings
+
+**What it does not do:**
+- Does not access, read, or modify any shop other than the developer's own
+- Does not scrape or collect data from Etsy beyond what is needed to manage the owner's
+  own shop
+- Does not interact with buyers, messages, or orders on Etsy
+- Does not automate purchasing or any buyer-facing activity
+
+**Etsy API scopes used:**
+- `listings_r` — read the owner's own existing listings
+- `listings_w` — create and update draft listings in the owner's own shop
+- `shops_r` — read the owner's own shop information (e.g. shipping profiles)
+
+This application is developed and operated by a single individual, for their own shop only.
+
+---
 
 ## Python environment
 
