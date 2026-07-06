@@ -40,5 +40,8 @@ class EtsyClient:
                 },
                 json=payload,
             )
-            response.raise_for_status()
+
+            if response.status_code >= 400:
+                raise Exception(f"Etsy API error {response.status_code}: {response.text}")
+
             return response.json()
