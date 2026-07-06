@@ -15,8 +15,9 @@ async def main():
 
     payload = {
         "readiness_state": "made_to_order",
-        "processing_min": 3,
-        "processing_max": 5,
+        "min_processing_time": 3,
+        "max_processing_time": 5,
+        "processing_time_unit": "days",
     }
 
     async with httpx.AsyncClient() as client:

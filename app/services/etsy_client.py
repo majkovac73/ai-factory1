@@ -27,6 +27,7 @@ class EtsyClient:
             "when_made": "made_to_order",
             "taxonomy_id": listing.get("taxonomy_id", 1),
             "shipping_profile_id": listing.get("shipping_profile_id"),
+            "readiness_state_id": listing.get("readiness_state_id"),
             "tags": listing.get("tags", [])[:13],
             "materials": listing.get("materials", [])[:13],
         }
