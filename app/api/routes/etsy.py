@@ -1,24 +1,23 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 
-from app.services.etsy_oauth import build_authorization_url, exchange_code_for_token
+from app.services import etsy_oauth
 from app.services.etsy_client import EtsyClient
-from app.services.task_service import TaskService
 
 router = APIRouter()
 etsy_client = EtsyClient()
-task_service = TaskService()
 
 
 @router.get("/oauth/login")
 def etsy_oauth_login():
-    url = build_authorization_url()
+    url = etsy_oauth.build_authorization_url()
     return {"authorization_url": url}
 
 
 @router.get("/oauth/callback")
 async def etsy_oauth_callback(code: str, state: str):
     try:
-        token_data = await exchange_code_for_token(code, state)
+        from app.services import etsy_oauth
+        token_data = await etsy_oauth.exchange_code_for_token(code, state)
         return {"status": "connected", "expires_in": token_data.get("expires_in")}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"OAuth exchange failed: {e}")

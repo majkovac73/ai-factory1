@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     DEFAULT_MODEL: str = "openai/gpt-4o-mini"
 
     ETSY_API_KEY: str | None = None
+    ETSY_SHARED_SECRET: str | None = None
     ETSY_REDIRECT_URI: str = "http://localhost:8000/etsy/oauth/callback"
     ETSY_SHOP_ID: str | None = None
 
