@@ -73,6 +73,8 @@ class PODDesignAgent(BaseAgent):
         product_type: str = "digital_download",
         filename: str = "design.png",
         size: str = None,
+        aspect_ratio: str = "1:1",
+        resolution: str = "2K",
     ) -> Path:
         """
         Generate and save the delivery-ready design.
@@ -83,15 +85,18 @@ class PODDesignAgent(BaseAgent):
             visual_brief: Output from VisualDirectorAgent.
             product_type: 'digital_download' or 'pod'.
             filename: Override saved filename.
-            size: Image size; defaults to settings.DEFAULT_IMAGE_SIZE.
+            size: Ignored; kept for API compatibility.
+            aspect_ratio: OpenRouter aspect ratio (default '1:1' for print-safe square).
+            resolution: OpenRouter resolution tier (default '2K' for delivery quality).
 
         Returns:
             Path to the saved delivery-variant file.
         """
-        size = size or settings.DEFAULT_IMAGE_SIZE
         prompt = self._build_design_prompt(product_name, visual_brief, product_type)
         result = asyncio.run(
-            self.image_provider.generate_image(prompt, size=size)
+            self.image_provider.generate_image(
+                prompt, aspect_ratio=aspect_ratio, resolution=resolution
+            )
         )
         path = self.file_service.save_from_result(result, task_id, "delivery", filename)
 
@@ -113,7 +118,8 @@ class PODDesignAgent(BaseAgent):
         Standardized entry point.
         Expected task keys: task_id, product_name, visual_brief,
                             product_type (optional, default 'digital_download'),
-                            filename (optional), size (optional).
+                            filename (optional), aspect_ratio (optional),
+                            resolution (optional, default '2K' for delivery quality).
         """
         path = self.generate_design(
             task_id=task.get("task_id", "unknown"),
@@ -121,7 +127,8 @@ class PODDesignAgent(BaseAgent):
             visual_brief=task.get("visual_brief", ""),
             product_type=task.get("product_type", "digital_download"),
             filename=task.get("filename", "design.png"),
-            size=task.get("size"),
+            aspect_ratio=task.get("aspect_ratio", "1:1"),
+            resolution=task.get("resolution", "2K"),
         )
         return {
             "design_path": path,

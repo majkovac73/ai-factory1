@@ -16,12 +16,15 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str = "sqlite:///./app.db"
 
-    OPENAI_API_KEY: str | None = None
+    OPENAI_API_KEY: str | None = None  # no longer used for images; kept in case a future step needs it directly
     ANTHROPIC_API_KEY: str | None = None
     DEFAULT_MODEL: str = "openai/gpt-4o-mini"
 
-    IMAGE_PROVIDER: str = "dalle3"
-    DEFAULT_IMAGE_SIZE: str = "1024x1024"
+    OPENROUTER_API_KEY: str | None = None
+
+    IMAGE_PROVIDER: str = "openrouter"
+    OPENROUTER_IMAGE_MODEL: str = "google/gemini-3.1-flash-image"
+    DEFAULT_IMAGE_SIZE: str = "1024x1024"  # fallback; actual per-request sizing uses aspect_ratio + resolution params
 
     ETSY_API_KEY: str | None = None
     ETSY_SHARED_SECRET: str | None = None

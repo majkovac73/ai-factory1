@@ -48,7 +48,7 @@ USE_CASE_RULES = {
     "pinterest": {
         "min_width": 600,
         "min_height": 900,
-        "expected_ratio": (4, 7),  # DALL-E 3 produces 1024x1792 = 4:7; Pinterest accepts portrait ratios broadly
+        "expected_ratio": (2, 3),  # OpenRouter gemini-3.1-flash-image natively supports 2:3; replaces old DALL-E 4:7 workaround
         "ratio_tolerance": 0.10,
     },
 }

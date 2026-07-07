@@ -57,9 +57,10 @@ try:
 except ImageValidationError as e:
     print(f"  Correctly rejected: {e}")
 
-# 4. Valid Pinterest image (1024x1792)
-print("\n[4] Validating a valid 1024x1792 Pinterest image...")
-path4 = file_svc.save_bytes(make_png(1024, 1792), task_id, "listing", "valid_pin.png")
+# 4. Valid Pinterest image — native 2:3 ratio (OpenRouter gemini-3.1-flash-image)
+# Previously used 1024x1792 (DALL-E 3 approximation = 4:7). Now model returns true 2:3.
+print("\n[4] Validating a valid 1000x1500 Pinterest image (true 2:3 ratio)...")
+path4 = file_svc.save_bytes(make_png(1000, 1500), task_id, "listing", "valid_pin.png")
 result4 = svc.validate(path4, use_case="pinterest")
 assert result4["valid"] is True
 print(f"  PASSED: {result4['width']}x{result4['height']}, use_case=pinterest")

@@ -57,6 +57,8 @@ class ProductImageAgent(BaseAgent):
         product_name: str,
         visual_brief: str,
         size: str = None,
+        aspect_ratio: str = "1:1",
+        resolution: str = "1K",
     ) -> dict:
         """
         Generate hero + lifestyle images and save both as 'listing' variants.
@@ -65,26 +67,30 @@ class ProductImageAgent(BaseAgent):
             task_id: Task identifier (used as storage subdirectory).
             product_name: Name/type of the product being listed.
             visual_brief: Output from VisualDirectorAgent (text description).
-            size: Image dimensions; defaults to settings.DEFAULT_IMAGE_SIZE.
+            size: Ignored; kept for API compatibility. OpenRouter uses aspect_ratio+resolution.
+            aspect_ratio: OpenRouter aspect ratio string (default '1:1' for Etsy square).
+            resolution: OpenRouter resolution tier (default '1K' ≈ 1024px).
 
         Returns:
             Dict with paths to saved images:
               {'hero': Path, 'lifestyle': Path}
         """
-        size = size or settings.DEFAULT_IMAGE_SIZE
-
         hero_prompt = self._build_hero_prompt(product_name, visual_brief)
         lifestyle_prompt = self._build_lifestyle_prompt(product_name, visual_brief)
 
         hero_result = asyncio.run(
-            self.image_provider.generate_image(hero_prompt, size=size)
+            self.image_provider.generate_image(
+                hero_prompt, aspect_ratio=aspect_ratio, resolution=resolution
+            )
         )
         hero_path = self.file_service.save_from_result(
             hero_result, task_id, "listing", "hero.png"
         )
 
         lifestyle_result = asyncio.run(
-            self.image_provider.generate_image(lifestyle_prompt, size=size)
+            self.image_provider.generate_image(
+                lifestyle_prompt, aspect_ratio=aspect_ratio, resolution=resolution
+            )
         )
         lifestyle_path = self.file_service.save_from_result(
             lifestyle_result, task_id, "listing", "lifestyle.png"
@@ -106,11 +112,14 @@ class ProductImageAgent(BaseAgent):
     def run(self, task: dict) -> dict:
         """
         Standardized entry point.
-        Expected task keys: task_id, product_name, visual_brief, size (optional).
+        Expected task keys: task_id, product_name, visual_brief,
+                            aspect_ratio (optional, default '1:1'),
+                            resolution (optional, default '1K').
         """
         return self.generate_listing_images(
             task_id=task.get("task_id", "unknown"),
             product_name=task.get("product_name", ""),
             visual_brief=task.get("visual_brief", ""),
-            size=task.get("size"),
+            aspect_ratio=task.get("aspect_ratio", "1:1"),
+            resolution=task.get("resolution", "1K"),
         )

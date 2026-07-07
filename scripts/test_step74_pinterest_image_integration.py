@@ -20,10 +20,12 @@ from app.services.image_file_service import LISTING_DIR
 class FakeImageProvider(BaseImageProvider):
     def __init__(self):
         self.call_count = 0
-        self.last_size = None
-    async def generate_image(self, prompt, size="1024x1024", model=None, **kw):
+        self.last_aspect_ratio = None
+        self.last_resolution = None
+    async def generate_image(self, prompt, size=None, model=None, aspect_ratio="1:1", resolution="1K", **kw):
         self.call_count += 1
-        self.last_size = size
+        self.last_aspect_ratio = aspect_ratio
+        self.last_resolution = resolution
         fake_png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 200
         return ImageGenerationResult(
             b64_data=base64.b64encode(fake_png).decode(),
@@ -64,10 +66,11 @@ assert enriched["listing_url"] == listing["listing_url"]
 print("  All original keys intact")
 
 # 3. SocialImageAgent requested Pinterest size (1024x1792)
-print("\n[3] Checking Pinterest portrait size was requested...")
-from app.agents.image.social_image_agent import PINTEREST_SIZE
-assert fake.last_size == PINTEREST_SIZE, f"Expected {PINTEREST_SIZE}, got {fake.last_size}"
-print(f"  Requested size: {fake.last_size}")
+print("\n[3] Checking Pinterest 2:3 aspect ratio was requested...")
+from app.agents.image.social_image_agent import PINTEREST_ASPECT_RATIO, PINTEREST_RESOLUTION
+assert fake.last_aspect_ratio == PINTEREST_ASPECT_RATIO, f"Expected {PINTEREST_ASPECT_RATIO}, got {fake.last_aspect_ratio}"
+assert PINTEREST_ASPECT_RATIO == "2:3"
+print(f"  Requested aspect_ratio: {fake.last_aspect_ratio}  resolution: {fake.last_resolution}")
 
 # 4. PinterestChannel payload building includes image_base64 preference
 print("\n[4] Verifying PinterestChannel prefers image_base64 over image_url...")

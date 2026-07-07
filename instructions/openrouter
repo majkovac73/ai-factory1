@@ -1,0 +1,189 @@
+FIX — Replace DALL-E 3 / OpenAI dependency with OpenRouter's Image API
+
+═══════════════════════════════════════════════════════════════
+CONTEXT
+═══════════════════════════════════════════════════════════════
+
+Step 67 was originally built against OpenAI's DALL-E 3 directly, using
+settings.OPENAI_API_KEY. That's being scrapped — this project should
+use ONLY OpenRouter for all AI calls (text already goes through
+OpenRouterProvider/ProviderManager). Images should go through
+OpenRouter's Image API instead of a direct OpenAI dependency.
+
+OpenRouter now has a dedicated Image API (separate from chat
+completions): POST https://openrouter.ai/api/v1/images, using the
+same OPENROUTER_API_KEY already funded and working for text. It
+supports 30+ image models (Google Gemini image models, Black Forest
+Labs FLUX, ByteDance Seedream, OpenAI's GPT Image via OpenRouter,
+xAI Grok Imagine, etc.) through one unified request/response shape,
+with images returned as base64.
+
+Before writing any code, fetch and read
+https://openrouter.ai/docs/guides/overview/multimodal/image-generation
+directly — do not rely on assumed knowledge of the request/response
+schema, since this is a newer API surface. Also fetch
+https://openrouter.ai/api/v1/images/models?output_modalities=image
+to see current available models and their capabilities, and (once
+you've picked a model) fetch
+https://openrouter.ai/api/v1/images/models/{model_id}/endpoints
+to get that model's exact accepted parameters, supported aspect
+ratios, and pricing — per-model details differ (e.g. some support 18
+aspect ratios, others 14; some cap at 1 image per call).
+
+DEFAULT MODEL CHOICE: use "google/gemini-3.1-flash-image" (marketed
+as "Nano Banana 2") as the default — strong quality-to-speed ratio,
+reasonable cost, wide aspect-ratio support, base64 output natively.
+Make this configurable (see settings change below) so it can be
+swapped later without code changes.
+
+═══════════════════════════════════════════════════════════════
+STEP 1 — Replace the image provider implementation
+═══════════════════════════════════════════════════════════════
+
+- Delete app/core/providers/dalle3_provider.py (or rename/repurpose —
+  your call, but it must no longer be what's registered/used).
+- Create app/core/providers/openrouter_image_provider.py implementing
+  a new OpenRouterImageProvider(BaseImageProvider) class:
+    - Reads OPENROUTER_API_KEY the same way OpenRouterProvider does
+      (settings or os.getenv fallback — match the existing pattern in
+      app/core/providers/openrouter_provider.py).
+    - Constructor raises a clear error immediately if the key is
+      missing, same fail-loud behavior the DALL-E provider had.
+    - generate_image() calls POST https://openrouter.ai/api/v1/images
+      with the model, prompt, and any size/aspect-ratio parameter that
+      endpoint actually accepts (confirm this from the docs fetch
+      above — do not guess field names).
+    - Parses the base64 image data out of the actual response shape
+      (confirm exact field names from the docs/endpoint fetch, don't
+      assume it matches the old DALL-E response shape) and returns an
+      ImageGenerationResult with b64_data populated (url likely None
+      since this API returns base64, not hosted URLs — confirm this
+      too).
+    - Self-registers with ImageProviderManager under the name
+      "openrouter" on import, same self-registration pattern the old
+      dalle3_provider.py used.
+  Do NOT modify app/core/providers/image_base.py or
+  app/core/providers/image_manager.py — the abstraction itself is
+  correct and provider-agnostic; only the concrete provider changes.
+
+═══════════════════════════════════════════════════════════════
+STEP 2 — Update settings
+═══════════════════════════════════════════════════════════════
+
+In config/settings.py, find:
+    OPENAI_API_KEY: str | None = None
+    ANTHROPIC_API_KEY: str | None = None
+    DEFAULT_MODEL: str = "openai/gpt-4o-mini"
+
+    IMAGE_PROVIDER: str = "dalle3"
+    DEFAULT_IMAGE_SIZE: str = "1024x1024"
+
+Replace with:
+    OPENAI_API_KEY: str | None = None  # no longer used for images; kept in case a future step needs it directly
+    ANTHROPIC_API_KEY: str | None = None
+    DEFAULT_MODEL: str = "openai/gpt-4o-mini"
+
+    OPENROUTER_API_KEY: str | None = None
+
+    IMAGE_PROVIDER: str = "openrouter"
+    OPENROUTER_IMAGE_MODEL: str = "google/gemini-3.1-flash-image"
+    DEFAULT_IMAGE_SIZE: str = "1024x1024"  # keep as fallback; actual per-request sizing may use aspect-ratio params instead — see step 3
+
+Note: OPENROUTER_API_KEY is being added explicitly here even though
+OpenRouterProvider currently reads it via os.getenv directly — this
+makes it visible/documented alongside every other credential in
+settings.py rather than only living implicitly in .env. Don't remove
+the os.getenv fallback in openrouter_provider.py; just add the
+settings field for consistency and future use.
+
+═══════════════════════════════════════════════════════════════
+STEP 3 — Audit and fix downstream size/aspect-ratio assumptions
+═══════════════════════════════════════════════════════════════
+
+The following files were built assuming DALL-E 3's specific output
+sizes (1024x1024 square, 1024x1792 portrait) and MUST be checked
+against what google/gemini-3.1-flash-image (or whatever model you
+confirm in step 4) actually returns:
+
+  - app/agents/image/product_image_agent.py (assumed 1024x1024)
+  - app/agents/image/social_image_agent.py (assumed 1024x1792,
+    reasoned as "close enough to Pinterest's 2:3 ratio")
+  - app/services/image_validation_service.py (hardcoded minimum
+    resolutions and exact aspect ratios per use case: 'listing'
+    1000x1000 @ 1:1, 'delivery' 1000x1000 @ 1:1, 'pinterest' 600x900
+    @ 4:7 — the 4:7 figure was specifically chosen to match DALL-E
+    3's exact 1024x1792 output, per that step's changelog note)
+
+For each of these: determine the actual resolution/aspect-ratio
+options the new model supports (from the endpoint-parameters fetch in
+the CONTEXT section), pick the closest match to each use case's
+original intent (square product listing image, tall Pinterest pin,
+square delivery/print file), and update the hardcoded values to match
+reality rather than leaving stale DALL-E-shaped assumptions in place.
+Do this AFTER step 4's real test call confirms exactly what comes
+back — don't guess ahead of the real response.
+
+═══════════════════════════════════════════════════════════════
+STEP 4 — Make ONE real API call to confirm everything works
+═══════════════════════════════════════════════════════════════
+
+OPENROUTER_API_KEY is already funded and working (it's driving the
+entire text pipeline right now), so unlike the old DALL-E step there's
+no reason to skip the real call this time. Update
+scripts/test_step67_dalle3_provider.py — rename it to
+scripts/test_openrouter_image_provider.py — so it:
+  1. Confirms OpenRouterImageProvider registers correctly with
+     ImageProviderManager under "openrouter".
+  2. Makes exactly ONE real call to generate_image() with a simple
+     test prompt.
+  3. Prints and asserts on the actual returned resolution/dimensions
+     of the base64 image (decode enough of it, or use Pillow, to read
+     actual width/height) so step 3's corrections are based on ground
+     truth, not assumption.
+  4. Confirms provider/model fields are populated correctly on the
+     result.
+
+Run it. This call costs a small amount of real money (roughly
+$0.02-0.04 depending on the model/resolution) — that's expected and
+fine, it's the one call needed to validate the whole image pipeline
+actually works end-to-end before steps 68-76's test doubles are
+trusted as accurately modeling reality.
+
+═══════════════════════════════════════════════════════════════
+STEP 5 — Re-verify steps 69-76 still pass
+═══════════════════════════════════════════════════════════════
+
+After steps 1-4 above, rerun the existing test scripts for steps
+69 through 76 (scripts/test_step69_*.py through
+scripts/test_step76_*.py) using their existing test-double pattern —
+they should still pass unchanged UNLESS step 3's corrections changed
+an aspect ratio or resolution constant that a test script asserts on
+directly, in which case update that specific assertion to match the
+corrected value and note why in the changelog.
+
+═══════════════════════════════════════════════════════════════
+CHANGELOG ENTRY
+═══════════════════════════════════════════════════════════════
+
+Append to C:\ai-factory\instructions\CHANGELOG_AUTOMATED.md, using
+the same format as steps 67-76, titled:
+
+## Fix — Replace OpenAI/DALL-E 3 dependency with OpenRouter Image API
+**Date:** <today>
+**Files created:** ...
+**Files removed:** ...
+**Files modified:** ... (include every file touched in step 3, with
+  the specific old value → new value for each corrected constant)
+**Test:** scripts/test_openrouter_image_provider.py — PASSED (real
+  OpenRouter API call made, confirmed actual output resolution:
+  <fill in actual dimensions returned>)
+**Notes/assumptions:** which model was used by default, why, and what
+  the real confirmed output resolution/aspect ratio was — this is the
+  ground truth steps 68-76's test doubles should be assumed to match
+  going forward.
+
+---
+
+Do not proceed to step 81 after this fix — stop once this fix's
+changelog entry is written and confirm with Maj that the real test
+output looked correct before continuing.

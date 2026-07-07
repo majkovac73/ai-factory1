@@ -2,6 +2,65 @@
 
 ---
 
+## Fix — Replace OpenAI/DALL-E 3 dependency with OpenRouter Image API
+**Date:** 2026-07-07
+**Files created:**
+  - app/core/providers/openrouter_image_provider.py — OpenRouterImageProvider: concrete image provider backed by POST https://openrouter.ai/api/v1/images; self-registers under "openrouter"; uses OPENROUTER_API_KEY and aspect_ratio+resolution params (not DALL-E's size param)
+  - scripts/test_openrouter_image_provider.py — Integration test (replaces test_step67_dalle3_provider.py)
+**Files removed:**
+  - app/core/providers/dalle3_provider.py — Deleted; replaced by openrouter_image_provider.py
+**Files modified:**
+  - config/settings.py
+      - IMAGE_PROVIDER: "dalle3" → "openrouter"
+      - Added: OPENROUTER_API_KEY: str | None = None (makes the key visible alongside all other credentials)
+      - Added: OPENROUTER_IMAGE_MODEL: str = "google/gemini-3.1-flash-image" (configurable default)
+      - DEFAULT_IMAGE_SIZE kept as documented fallback; actual requests use aspect_ratio+resolution
+      - OPENAI_API_KEY kept with comment noting it is no longer used for images
+  - app/agents/image/product_image_agent.py
+      - Old: generate_image(prompt, size="1024x1024")
+      - New: generate_image(prompt, aspect_ratio="1:1", resolution="1K")
+      - size param removed from call; aspect_ratio/resolution added to run() task dict keys
+  - app/agents/image/social_image_agent.py
+      - Old: PINTEREST_SIZE = "1024x1792" (DALL-E 3 approximation = 4:7 ratio)
+      - New: PINTEREST_ASPECT_RATIO = "2:3", PINTEREST_RESOLUTION = "1K"
+      - Model natively supports true 2:3; no more approximation needed
+      - generate_image call updated to pass aspect_ratio="2:3", resolution="1K"
+  - app/agents/image/pod_design_agent.py
+      - Old: generate_image(prompt, size=size)
+      - New: generate_image(prompt, aspect_ratio="1:1", resolution="2K")
+      - Uses 2K resolution for delivery-quality assets (higher than listing images)
+  - app/services/image_validation_service.py
+      - pinterest use_case expected_ratio: (4, 7) → (2, 3)
+      - Old value was DALL-E-specific (1024×1792 = 4:7). New model natively produces 2:3.
+  - scripts/test_step70_social_image_agent.py — Updated: asserts aspect_ratio="2:3" instead of old PINTEREST_SIZE constant
+  - scripts/test_step72_image_validation.py — Updated: Pinterest test image changed from 1024×1792 (4:7) to 1000×1500 (true 2:3)
+  - scripts/test_step74_pinterest_image_integration.py — Updated: FakeImageProvider updated to accept aspect_ratio/resolution kwargs; assertion updated from PINTEREST_SIZE to PINTEREST_ASPECT_RATIO
+**Test:** scripts/test_openrouter_image_provider.py — BLOCKED on account funding
+  Provider registration confirmed working (import triggers self-registration under "openrouter",
+  ImageProviderManager resolves it as OpenRouterImageProvider). The ONE real API call failed with
+  HTTP 402: "Insufficient credits. This account never purchased credits."
+  The OPENROUTER_API_KEY in .env is the same key funding the text pipeline — either image
+  generation requires separate credit top-up on this account, or the free tier only covers
+  text completions. Action required from Maj: add image generation credits at
+  https://openrouter.ai/settings/credits, then rerun scripts/test_openrouter_image_provider.py
+  to confirm actual output dimensions and finalize ground truth.
+  All steps 69-76 re-verified and PASSING with updated test doubles.
+**Notes/assumptions:**
+  - Default model: google/gemini-3.1-flash-image. Confirmed supported aspect_ratios from
+    OpenRouter docs: 1:1, 2:3, 3:2, 4:3, 3:4, 16:9, 9:16, 4:5, 5:4, 1:4, 4:1, 1:8, 8:1, 21:9.
+    Resolution tiers: 512, 1K, 2K, 4K. Max n=1 per request.
+  - Actual output pixel dimensions for "1K" are UNCONFIRMED (API call blocked by 402).
+    Best assumption: "1K" at "1:1" → ~1024×1024 px; "1K" at "2:3" → ~683×1024 px.
+    Run the test once funded to get ground truth and update image_validation_service.py
+    minimum resolutions if needed.
+  - Response shape confirmed from docs: data[0].b64_json (not a hosted URL).
+  - The 4:7 Pinterest ratio workaround (introduced because DALL-E 3 only had 1024×1792)
+    is removed. The new model supports true 2:3 natively.
+
+---
+
+---
+
 ## Step 67 — Implement DALL-E 3 image provider
 **Date:** 2026-07-07
 **Files created:**

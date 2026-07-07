@@ -1,6 +1,7 @@
 """
 Step 70 test: Social media image generation agent (Pinterest).
-Uses a test-double image provider — no real DALL-E API call.
+Uses a test-double image provider — no real API call.
+Updated for OpenRouter: verifies aspect_ratio='2:3' (native, not DALL-E approximation).
 """
 import sys
 import uuid
@@ -15,16 +16,18 @@ print("=" * 60)
 
 from app.core.providers.image_base import BaseImageProvider, ImageGenerationResult
 from app.services.image_file_service import LISTING_DIR
-from app.agents.image.social_image_agent import SocialImageAgent, PINTEREST_SIZE
+from app.agents.image.social_image_agent import SocialImageAgent, PINTEREST_ASPECT_RATIO, PINTEREST_RESOLUTION
 import base64
 
 class FakeImageProvider(BaseImageProvider):
     def __init__(self):
-        self.last_size = None
+        self.last_aspect_ratio = None
+        self.last_resolution = None
         self.last_prompt = None
 
-    async def generate_image(self, prompt, size="1024x1024", model=None, **kw):
-        self.last_size = size
+    async def generate_image(self, prompt, size=None, model=None, aspect_ratio="1:1", resolution="1K", **kw):
+        self.last_aspect_ratio = aspect_ratio
+        self.last_resolution = resolution
         self.last_prompt = prompt
         fake_png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 50
         return ImageGenerationResult(
@@ -51,9 +54,12 @@ assert pin_path.name == "pin.png"
 assert pin_path.parent == LISTING_DIR / task_id
 print(f"  Saved: {pin_path}")
 
-print("\n[2] Verifying Pinterest-sized image request (1024x1792)...")
-assert fake.last_size == PINTEREST_SIZE, f"Expected {PINTEREST_SIZE}, got {fake.last_size}"
-print(f"  Requested size: {fake.last_size}")
+print("\n[2] Verifying native 2:3 aspect ratio requested (not DALL-E 4:7 workaround)...")
+assert fake.last_aspect_ratio == PINTEREST_ASPECT_RATIO, f"Expected {PINTEREST_ASPECT_RATIO}, got {fake.last_aspect_ratio}"
+assert PINTEREST_ASPECT_RATIO == "2:3", "PINTEREST_ASPECT_RATIO constant should be '2:3'"
+assert fake.last_resolution == PINTEREST_RESOLUTION
+print(f"  aspect_ratio: {fake.last_aspect_ratio}  (native 2:3 — correct)")
+print(f"  resolution  : {fake.last_resolution}")
 
 print("\n[3] Verifying prompt contains product name and Pinterest context...")
 assert "Boho Wall Art Print" in fake.last_prompt
@@ -64,5 +70,5 @@ print("  Prompt contains product name and Pinterest framing")
 shutil.rmtree(str(LISTING_DIR / task_id), ignore_errors=True)
 
 print("\n" + "=" * 60)
-print("STEP 70 TEST PASSED — social image agent works, test double used (no DALL-E API call)")
+print("STEP 70 TEST PASSED — social image agent uses native 2:3 aspect ratio, test double used (no API call)")
 print("=" * 60)
