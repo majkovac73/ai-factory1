@@ -25,6 +25,21 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("OPENROUTER_API_KEY", "test")
 os.environ.setdefault("ANTHROPIC_API_KEY", "test")
 
+# ── Env-level isolation for get_data_dir() ────────────────────────────────────
+# AutonomyService.__init__ calls get_data_dir() to resolve _state_dir.
+# On Railway, IMAGE_STORAGE_ROOT=/data/images and DATABASE_PATH=/data/app.db
+# both point get_data_dir() at /data — meaning any unguarded AutonomyService()
+# instantiation would write autonomy_state_<date>.json to the production volume.
+#
+# Fix: redirect IMAGE_STORAGE_ROOT to a per-run temp directory before any app
+# imports, so get_data_dir() resolves to the temp dir for the entire test
+# process. Clear DATABASE_PATH for the same reason (it's the fallback path).
+# Each individual test also overrides _state_dir directly via __new__ — that's
+# belt-and-suspenders; this env-level redirect is the primary guard.
+_state_tmp = tempfile.mkdtemp(suffix=".autonomy_test")
+os.environ.pop("DATABASE_PATH", None)
+os.environ["IMAGE_STORAGE_ROOT"] = os.path.join(_state_tmp, "images")
+
 import logging
 logging.basicConfig(level=logging.WARNING)
 
@@ -208,7 +223,6 @@ else:
 
 # [8] AutonomyWorker with agent double — creates task
 with tempfile.TemporaryDirectory() as tmp:
-    os.environ["IMAGE_STORAGE_ROOT"] = os.path.join(tmp, "images")
 
     created_tasks = []
 
@@ -280,7 +294,6 @@ with tempfile.TemporaryDirectory() as tmp:
         cfg.AUTONOMY_ENABLED = orig_enabled2
         cfg.MAX_TASKS_PER_DAY = orig_tasks
         cfg.MAX_DAILY_SPEND_USD = orig_spend
-        os.environ.pop("IMAGE_STORAGE_ROOT", None)
 
     if created_tasks and created_tasks[0] == "Celestial moon phase art print":
         ok("[8] AUTONOMY_ENABLED=True: agent double called, task created with correct concept")
@@ -292,4 +305,12 @@ with tempfile.TemporaryDirectory() as tmp:
 # ── Summary ────────────────────────────────────────────────────────────────────
 
 print(f"\nResults: {_passed} passed, {_failed} failed\n")
+
+# Clean up the process-level temp dir used for env-level isolation
+import shutil as _shutil
+try:
+    _shutil.rmtree(_state_tmp, ignore_errors=True)
+except Exception:
+    pass
+
 sys.exit(0 if _failed == 0 else 1)
