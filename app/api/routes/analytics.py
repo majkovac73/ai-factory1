@@ -5,12 +5,14 @@ from fastapi import APIRouter, HTTPException, Query
 from app.services.analytics_service import AnalyticsService
 from app.services.revenue_service import RevenueService
 from app.services.performance_service import PerformanceService
+from app.services.best_products_service import BestProductsService
 from app.schemas.revenue import SaleCreate
 
 router = APIRouter()
 analytics_service = AnalyticsService()
 revenue_service = RevenueService()
 performance_service = PerformanceService()
+best_products_service = BestProductsService()
 
 
 @router.get("/events")
@@ -87,3 +89,12 @@ def get_task_performance(task_id: str):
 @router.get("/performance")
 def get_all_performance_scores():
     return performance_service.score_all_tasks()
+
+@router.get("/best-products")
+def get_best_products(limit: int = Query(default=10, ge=1, le=100), min_score: float = Query(default=None)):
+    return best_products_service.get_best_products(limit=limit, min_score=min_score)
+
+
+@router.get("/best-products/insights")
+def get_best_product_insights(limit: int = Query(default=10, ge=1, le=100), min_score: float = Query(default=None)):
+    return best_products_service.get_best_product_insights(limit=limit, min_score=min_score)
