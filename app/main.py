@@ -8,6 +8,7 @@ load_dotenv()
 
 from app.api.api import api_router
 from app.db.database import Base, engine
+from app.db.migrations import run_all_migrations
 from app.models import agent_execution, log, task, task_step, etsy_token, marketing_post, pinterest_token, analytics_event, image_asset, pod_product, fulfillment_record  # noqa: F401
 from app.workers.task_worker import TaskWorker
 from app.workers.etsy_receipt_worker import EtsyReceiptWorker
@@ -16,6 +17,7 @@ from config import settings
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ai-factory")
 
+run_all_migrations(engine)
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(

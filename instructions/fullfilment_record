@@ -1,0 +1,68 @@
+FIX — FulfillmentRecord must track per-item, not per-receipt
+
+═══════════════════════════════════════════════════════════════
+CONTEXT
+═══════════════════════════════════════════════════════════════
+
+app/models/fulfillment_record.py currently has a UNIQUE constraint on
+etsy_receipt_id alone. This is wrong: a single Etsy receipt can
+contain multiple transactions (multiple different listing_id's bought
+in one order). With the current design, once ANY transaction from a
+receipt creates a FulfillmentRecord, every OTHER transaction in that
+same receipt is incorrectly treated as "already handled" by the
+idempotency check in EtsyReceiptWorker, and its Printify order is
+never submitted. This silently drops real physical fulfillment for
+any multi-item POD order — a correctness bug, not a scale limitation.
+
+═══════════════════════════════════════════════════════════════
+FIX
+═══════════════════════════════════════════════════════════════
+
+1. In app/models/fulfillment_record.py: change the unique constraint
+   from etsy_receipt_id alone to a composite unique constraint on
+   (etsy_receipt_id, etsy_transaction_id) — add an etsy_transaction_id
+   column if it doesn't already exist (each transaction within a
+   receipt has its own transaction_id in Etsy's ShopReceipt response —
+   confirm the exact field name from the ShopReceipt schema, likely
+   nested under a transactions array per receipt).
+
+2. In app/workers/etsy_receipt_worker.py: update the idempotency check
+   to query on (etsy_receipt_id, etsy_transaction_id) together, not
+   etsy_receipt_id alone. Update the loop so it iterates every
+   transaction within a receipt independently — each transaction gets
+   its own idempotency check and, if it matches a PODProduct's
+   etsy_listing_id and doesn't already have a FulfillmentRecord, its
+   own separate submit_order() call.
+
+3. Update app/services/pod_fulfillment_service.py's submit_order()
+   signature/callers if needed to accept and store the
+   etsy_transaction_id alongside etsy_receipt_id.
+
+4. Update scripts/test_step81_pod_fulfillment.py to add a new test
+   case: a single fake receipt containing TWO transactions for two
+   DIFFERENT PODProduct-linked listings. Assert that BOTH transactions
+   produce their own FulfillmentRecord and both trigger their own
+   submit_order() call — this is the exact scenario the original test
+   suite didn't cover and where the bug would have been caught.
+
+5. Also add a test case for the existing single-item idempotency
+   check (same receipt + same transaction processed twice = still
+   only 1 record) to confirm the fix didn't break that guarantee.
+
+Run scripts/test_step81_pod_fulfillment.py and confirm all tests pass,
+including the two new ones.
+
+═══════════════════════════════════════════════════════════════
+CHANGELOG ENTRY
+═══════════════════════════════════════════════════════════════
+
+## Fix — FulfillmentRecord must be per-transaction, not per-receipt
+**Date:** <today>
+**Files modified:** (list them, with the old constraint → new constraint)
+**Test:** scripts/test_step81_pod_fulfillment.py — PASSED (X/X assertions,
+  including 2 new multi-item-order test cases)
+**Notes:** This was a correctness bug found during review, not a
+  scale limitation — a real order with 2+ different physical products
+  would have silently fulfilled only one of them.
+
+---

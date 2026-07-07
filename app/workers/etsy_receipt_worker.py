@@ -180,14 +180,17 @@ class EtsyReceiptWorker:
             "phone": "",
         }
 
+        # Each transaction is processed independently — a receipt with two
+        # different POD listings must generate two separate Printify orders.
+        # Idempotency is per (receipt_id, transaction_id), not per receipt.
         for transaction in transactions:
             listing_id = str(transaction.get("listing_id", ""))
+            transaction_id = str(transaction.get("transaction_id", ""))
             quantity = int(transaction.get("quantity", 1))
 
             if not listing_id:
                 continue
 
-            # Find matching PODProduct by Etsy listing
             db = SessionLocal()
             try:
                 pod = (
@@ -196,13 +199,16 @@ class EtsyReceiptWorker:
                     .first()
                 )
                 if pod is None:
-                    # Digital download or unlisted POD — no action needed
+                    # Digital download or non-POD listing — skip
                     continue
 
-                # Idempotency: skip if already processed this receipt
+                # Idempotency: per (receipt_id, transaction_id) pair
                 existing = (
                     db.query(FulfillmentRecord)
-                    .filter(FulfillmentRecord.etsy_receipt_id == receipt_id)
+                    .filter(
+                        FulfillmentRecord.etsy_receipt_id == receipt_id,
+                        FulfillmentRecord.etsy_transaction_id == transaction_id,
+                    )
                     .first()
                 )
                 if existing:
@@ -222,9 +228,8 @@ class EtsyReceiptWorker:
                 shipping_address=shipping_address,
                 variant_id=variant_id,
                 quantity=quantity,
+                transaction_id=transaction_id,
             )
-            # One Printify order per receipt (unique constraint on etsy_receipt_id)
-            break
 
     # ── Tracking sync ─────────────────────────────────────────────────────────
 

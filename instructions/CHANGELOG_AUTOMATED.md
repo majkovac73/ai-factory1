@@ -371,3 +371,46 @@
 **Nothing changed in production code.**
 
 ---
+## Fix -- FulfillmentRecord must be per-transaction, not per-receipt
+**Date:** 2026-07-07
+**Root cause:** Original etsy_receipt_id UNIQUE constraint meant one Printify order
+  per Etsy receipt, silently dropping fulfillment for any second+ POD item in a
+  multi-item order. Correctness bug, not a scale limitation.
+**Files modified:**
+  - app/models/fulfillment_record.py
+      old: etsy_receipt_id UNIQUE (column-level)
+      new: (etsy_receipt_id, etsy_transaction_id) composite UNIQUE via __table_args__
+      added: etsy_transaction_id column (String, NOT NULL, default empty string)
+  - app/db/migrations.py (new) -- idempotent startup migration:
+      Detects missing etsy_transaction_id column, recreates fulfillment_records
+      table with correct composite constraint, copies existing rows (empty txn_id
+      for pre-existing rows), applied to real app.db successfully
+  - app/main.py -- calls run_all_migrations(engine) before Base.metadata.create_all()
+  - app/services/pod_fulfillment_service.py -- submit_order() now accepts and
+      stores transaction_id parameter
+  - app/workers/etsy_receipt_worker.py -- _process_receipt() now:
+      (a) extracts transaction_id from each ShopTransaction (transaction.transaction_id)
+      (b) idempotency check is on (etsy_receipt_id, etsy_transaction_id), not receipt alone
+      (c) removed the early "break" that stopped after the first transaction --
+          all transactions in a receipt are now processed independently
+  - scripts/test_step81_pod_fulfillment.py -- 2 new test cases added (tests 6 and 7)
+**Test:** scripts/test_step81_pod_fulfillment.py -- PASSED (7/7 assertions)
+  [6] NEW: 1 receipt with 2 POD transactions -> 2 FulfillmentRecords, 2 Printify orders
+  [7] NEW: Replaying multi-item receipt -> no duplicates (multi-item idempotency)
+
+---
+
+## Fix -- Printify shop_id corrected to Etsy-connected shop
+**Date:** 2026-07-07
+**Context:** After Maj connected the Printify shop to Etsy at printify.com,
+  GET /v1/shops.json returned a SECOND shop:
+    shop_id=5606311   title=My new store       channel=disconnected
+    shop_id=28166438  title=My Etsy Store      channel=etsy
+  The first shop (5606311) was stored in .env during step 81-2b but was the
+  wrong one. The Etsy-connected shop is 28166438.
+**Files modified:**
+  - .env -- PRINTIFY_SHOP_ID updated from 5606311 to 28166438
+**Notes:** All Printify client calls now target the correct shop. Real fulfillment
+  orders will route through the Etsy-connected shop as intended.
+
+---

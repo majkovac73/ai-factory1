@@ -147,13 +147,15 @@ class PODFulfillmentService:
         shipping_address: dict,
         variant_id: int,
         quantity: int = 1,
+        transaction_id: str = "",
     ) -> FulfillmentRecord:
         """
         Create a Printify order and record it as a FulfillmentRecord.
 
         Called automatically by EtsyReceiptWorker. Not intended for manual use.
-        Raises if a FulfillmentRecord for this receipt_id already exists
-        (idempotency guard — callers should check before calling).
+        transaction_id is the Etsy ShopTransaction.transaction_id — together with
+        receipt_id it forms the composite unique key that makes multi-item receipts
+        work correctly (one FulfillmentRecord per transaction, not per receipt).
         """
         # Look up Printify product_id
         db = SessionLocal()
@@ -180,6 +182,7 @@ class PODFulfillmentService:
             record = FulfillmentRecord(
                 id=str(uuid.uuid4()),
                 etsy_receipt_id=str(receipt_id),
+                etsy_transaction_id=str(transaction_id),
                 task_id=task_id,
                 pod_product_id=pod_product_id,
                 printify_order_id=printify_order_id,
