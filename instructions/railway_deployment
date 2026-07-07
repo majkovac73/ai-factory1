@@ -1,0 +1,161 @@
+PROJECT HANDOFF — Steps 85-88, deployed to Railway (temporary host,
+until an Oracle VM is available)
+
+═══════════════════════════════════════════════════════════════
+0. FILL THESE IN — Maj has completed Railway account/volume/env var
+   setup already per his manual steps
+═══════════════════════════════════════════════════════════════
+
+DISCORD_WEBHOOK_URL = <fill in>
+MAX_TASKS_PER_DAY = <fill in>
+MAX_DAILY_SPEND_USD = <fill in>
+GITHUB_REPO_URL = <fill in, or "none — deploying via Railway CLI directly">
+
+Before anything else: install the Railway CLI locally (npm install -g
+@railway/cli, or check https://docs.railway.com/guides/cli for the
+current install method — verify current syntax rather than assuming,
+this CLI has changed before). Run `railway login` — this opens a
+browser for Maj to authenticate; wait for Maj to confirm this
+completed before continuing.
+
+Note: this is explicitly a TEMPORARY hosting arrangement. Railway has
+no permanent free tier — Maj is using the 30-day trial credit / Hobby
+plan to get steps 85-88 working now, with a move to an Oracle VM
+planned once that account is available. Do not build anything that
+would make a future migration harder than necessary (e.g. don't
+hardcode Railway-specific URLs anywhere except the two OAuth redirect
+settings, which will need updating again on migration anyway).
+
+═══════════════════════════════════════════════════════════════
+1. STEP 85 — Deployment setup (Railway)
+═══════════════════════════════════════════════════════════════
+
+1a. Adjust the app to work with Railway's dynamic port assignment:
+    Railway injects a PORT environment variable at runtime and expects
+    the app to bind to it — it is NOT always 8000. Find wherever
+    uvicorn is invoked (likely a Procfile, railway.json, or a run
+    command in app/main.py's __main__ block) and change it to read
+    the port from os.environ.get("PORT", 8000) and bind host 0.0.0.0.
+    If there's no Procfile yet, create one at the project root:
+        web: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    (Confirm Railway's current expected format for this by checking
+    https://docs.railway.com/guides/start-command — Railway has
+    supported multiple config methods, verify which one this project
+    should use rather than assuming Procfile is still current.)
+
+1b. Adjust persistent storage paths to live under the mounted volume
+    (Maj configured this at /data per his manual setup):
+    - Wherever the SQLite database path is configured (check
+      app/db/database.py or config/settings.py), make it configurable
+      via an environment variable (e.g. DATABASE_PATH) defaulting to
+      the current relative path for local dev, but settable to
+      /data/app.db in Railway's environment variables.
+    - Same for the image storage root (data/images/ per step 68) —
+      make the base path configurable via an env var (e.g.
+      IMAGE_STORAGE_ROOT), defaulting to the current relative path
+      locally, settable to /data/images in Railway.
+    - Add both new variables to Railway's Variables tab (tell Maj
+      the exact variable names and values to set if you can't set
+      them yourself via `railway variables set` — check the CLI's
+      current syntax for this rather than assuming).
+
+1c. Deploy:
+    - If GITHUB_REPO_URL was provided: connect that repo in the
+      Railway dashboard (Maj may need to do this one click, since it
+      involves GitHub OAuth authorization — ask him to do it if the
+      CLI can't complete it non-interactively).
+    - Otherwise: from the project root, run `railway init` then
+      `railway up` to deploy directly from the local folder. Confirm
+      the current correct command sequence from Railway's docs before
+      running — CLI commands/flags change between versions.
+
+1d. Confirm the deploy actually succeeded: check `railway logs` for
+    startup errors, and specifically confirm TaskWorker and
+    EtsyReceiptWorker's startup log lines appear (proving the
+    background threads started inside the container, not just the
+    web server).
+
+1e. Generate the public domain if not already done (Settings →
+    Networking → Generate Domain, or `railway domain` via CLI — check
+    current CLI syntax). Hit https://<the-domain>/health from your
+    local machine's browser (not from inside the container) to
+    confirm it's actually reachable from the outside internet.
+
+1f. Confirm ETSY_REDIRECT_URI and PINTEREST_REDIRECT_URI in Railway's
+    env vars match exactly what Maj added to the Etsy/Pinterest
+    developer dashboards (the new Railway domain, not localhost).
+
+Changelog entry: document the exact deploy commands used, the final
+public URL, and confirm the health check succeeded from an external
+request.
+
+═══════════════════════════════════════════════════════════════
+2. STEP 86 — Monitoring and alerting (same as Oracle version, host-
+   agnostic — no changes needed here)
+═══════════════════════════════════════════════════════════════
+
+2a. app/services/alert_service.py (AlertService) — POSTs to
+    DISCORD_WEBHOOK_URL.
+2b. Wire into: worker thread death, permanent FulfillmentRecord
+    failure, daily spend cap being hit. Do not alert on routine
+    retries/repairs.
+2c. Add a /health/workers endpoint exposing each worker's last-loop
+    heartbeat timestamp. Since there's no server to put a cron job on
+    here (unlike the Oracle plan), instead add a lightweight internal
+    self-check: have one of the existing worker loops (or a small new
+    one) periodically call its own /health/workers endpoint and alert
+    via Discord if a heartbeat is stale — this replaces the external
+    cron-based health check from the Oracle version, since Railway
+    doesn't give you a second always-on place to run a cron script
+    without adding a second paid service. Note this tradeoff in the
+    changelog: a heartbeat check running inside the same process is
+    weaker than an independent external check (if the whole process
+    dies, nothing internal can alert), so also confirm Railway's own
+    dashboard has crash/restart notifications enabled (Settings →
+    Notifications, if available) as a backstop — check what Railway
+    actually offers here rather than assuming.
+
+Changelog entry, including confirmation of a real test alert arriving.
+
+═══════════════════════════════════════════════════════════════
+3. STEP 87 — Final stabilization (same intent as Oracle version)
+═══════════════════════════════════════════════════════════════
+
+Re-run every scripts/test_*.py against the deployed Railway
+environment specifically (via `railway run python scripts/test_x.py`
+or equivalent — check current CLI syntax for running one-off commands
+against the deployed environment). Fix any discrepancy between local
+and Railway behavior (path differences from step 1b's changes are the
+most likely source of new bugs — test image generation/storage and
+DB access specifically, since those paths just changed).
+
+═══════════════════════════════════════════════════════════════
+4. STEP 88 — Full autonomous loop activation (unchanged logic from
+   Oracle version, host-agnostic)
+═══════════════════════════════════════════════════════════════
+
+Same as before: AutonomyService enforcing MAX_TASKS_PER_DAY and
+MAX_DAILY_SPEND_USD (added to Railway's env vars), AutonomyWorker
+background thread invoking existing market-intelligence agents on a
+schedule, routing through the existing task-creation pipeline,
+AUTONOMY_ENABLED defaulting to False as a kill switch, test script
+using a double for the market-intelligence call.
+
+Changelog entry: confirm AUTONOMY_ENABLED remains False, and note
+explicitly that once Oracle is ready, migrating means redoing steps
+85-86 there (87/88's code doesn't change, just where it runs) —
+Maj should be told this is a hosting swap, not a rebuild, when that
+day comes.
+
+═══════════════════════════════════════════════════════════════
+5. WORKING METHOD
+═══════════════════════════════════════════════════════════════
+
+Same as always. Given Railway CLI syntax/config methods have changed
+before, verify current commands against Railway's own docs rather
+than assuming — this project has been burned by assumed API shapes
+multiple times already (Etsy fields, Etsy digital-file endpoint).
+Stop and ask Maj if a step requires a browser-based action you can't
+complete (GitHub OAuth connection, Railway dashboard clicks).
+
+Stop after step 88's changelog entry.

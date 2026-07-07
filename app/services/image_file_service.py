@@ -19,8 +19,12 @@ from typing import Optional
 
 import httpx
 
+import os as _os
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-IMAGES_DIR = PROJECT_ROOT / "data" / "images"
+# IMAGE_STORAGE_ROOT overrides the local default (Railway: /data/images).
+_image_root = _os.getenv("IMAGE_STORAGE_ROOT")
+IMAGES_DIR = Path(_image_root) if _image_root else PROJECT_ROOT / "data" / "images"
 LISTING_DIR = IMAGES_DIR / "listing"
 DELIVERY_DIR = IMAGES_DIR / "delivery"
 

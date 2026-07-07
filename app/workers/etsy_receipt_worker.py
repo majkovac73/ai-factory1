@@ -37,12 +37,15 @@ from app.models.fulfillment_record import FulfillmentRecord
 from app.models.pod_product import PODProduct
 from app.services.etsy_oauth import get_valid_access_token
 from app.services.pod_fulfillment_service import PODFulfillmentService
+from app.services import worker_registry
 from config import settings
 
 logger = logging.getLogger("ai-factory")
 
+from app.core.paths import get_data_dir
+
 ETSY_API_BASE = "https://openapi.etsy.com/v3/application"
-STATE_FILE = Path(__file__).resolve().parents[2] / "data" / "receipt_worker_state.json"
+STATE_FILE = get_data_dir() / "receipt_worker_state.json"
 
 
 class EtsyReceiptWorker:
@@ -79,18 +82,42 @@ class EtsyReceiptWorker:
     # ── Main loop ─────────────────────────────────────────────────────────────
 
     def _run_loop(self):
-        while not self._stop_event.is_set():
-            try:
-                self._poll_new_receipts()
-            except Exception as e:
-                logger.error(f"EtsyReceiptWorker: error polling receipts: {e}")
+        try:
+            _check_interval = 0
+            while not self._stop_event.is_set():
+                worker_registry.record_heartbeat("EtsyReceiptWorker")
+                try:
+                    self._poll_new_receipts()
+                except Exception as e:
+                    logger.error(f"EtsyReceiptWorker: error polling receipts: {e}")
 
-            try:
-                self._sync_pending_tracking()
-            except Exception as e:
-                logger.error(f"EtsyReceiptWorker: error syncing tracking: {e}")
+                try:
+                    self._sync_pending_tracking()
+                except Exception as e:
+                    logger.error(f"EtsyReceiptWorker: error syncing tracking: {e}")
 
-            self._stop_event.wait(self._poll_seconds)
+                # Internal self-check every 3 poll cycles (~15 min at default 300s).
+                # Weaker than an external check (can't detect whole-process death),
+                # but provides in-process visibility without a second service.
+                _check_interval += 1
+                if _check_interval >= 3:
+                    _check_interval = 0
+                    self._check_worker_health()
+
+                self._stop_event.wait(self._poll_seconds)
+        finally:
+            if not self._stop_event.is_set():
+                logger.critical("EtsyReceiptWorker: thread exiting unexpectedly")
+                try:
+                    from app.services.alert_service import AlertService
+                    AlertService().send_alert_sync(
+                        "EtsyReceiptWorker thread died",
+                        "EtsyReceiptWorker exited its run loop without being stopped. "
+                        "New Etsy orders will not be fulfilled until the service restarts.",
+                        level="error",
+                    )
+                except Exception:
+                    pass
 
     # ── New-receipt polling ───────────────────────────────────────────────────
 
@@ -221,15 +248,32 @@ class EtsyReceiptWorker:
             finally:
                 db.close()
 
-            self._fulfillment.submit_order(
-                receipt_id=receipt_id,
-                task_id=task_id,
-                pod_product_id=pod_id,
-                shipping_address=shipping_address,
-                variant_id=variant_id,
-                quantity=quantity,
-                transaction_id=transaction_id,
-            )
+            try:
+                self._fulfillment.submit_order(
+                    receipt_id=receipt_id,
+                    task_id=task_id,
+                    pod_product_id=pod_id,
+                    shipping_address=shipping_address,
+                    variant_id=variant_id,
+                    quantity=quantity,
+                    transaction_id=transaction_id,
+                )
+            except Exception as fulfillment_err:
+                logger.error(
+                    f"EtsyReceiptWorker: fulfillment failed for "
+                    f"receipt={receipt_id} transaction={transaction_id}: {fulfillment_err}"
+                )
+                try:
+                    from app.services.alert_service import AlertService
+                    AlertService().send_alert_sync(
+                        "Fulfillment order failed",
+                        f"Could not submit Printify order for Etsy receipt {receipt_id} "
+                        f"transaction {transaction_id}.\nError: {fulfillment_err}\n"
+                        "Will retry on next poll. Manual review recommended if this persists.",
+                        level="error",
+                    )
+                except Exception:
+                    pass
 
     # ── Tracking sync ─────────────────────────────────────────────────────────
 
@@ -252,6 +296,37 @@ class EtsyReceiptWorker:
                     logger.info(f"EtsyReceiptWorker: tracking synced for FulfillmentRecord {record_id}")
             except Exception as e:
                 logger.error(f"EtsyReceiptWorker: error syncing tracking for {record_id}: {e}")
+
+    # ── Internal worker health self-check ────────────────────────────────────
+
+    def _check_worker_health(self):
+        """
+        Check heartbeat registry and alert via Discord if any worker is stale.
+        Limitation: if the whole process dies, this check dies with it.
+        Railway's crash/restart notifications act as the external backstop.
+        """
+        stale_thresholds = {
+            "TaskWorker": 30,           # should beat every ~1s
+            "EtsyReceiptWorker": 660,   # beats every poll cycle (300s), allow 2x
+            "AutonomyWorker": 7200,     # beats every schedule cycle (3600s), allow 2x
+        }
+        stale = [
+            name
+            for name, max_age in stale_thresholds.items()
+            if worker_registry.is_stale(name, max_age)
+        ]
+        if stale:
+            logger.warning(f"EtsyReceiptWorker: stale heartbeats detected: {stale}")
+            try:
+                from app.services.alert_service import AlertService
+                AlertService().send_alert_sync(
+                    "Stale worker heartbeat",
+                    f"Workers with no recent heartbeat: {', '.join(stale)}. "
+                    "They may have died silently. Check Railway logs.",
+                    level="warning",
+                )
+            except Exception as e:
+                logger.warning(f"EtsyReceiptWorker: failed to send stale-heartbeat alert: {e}")
 
     # ── State persistence ─────────────────────────────────────────────────────
 

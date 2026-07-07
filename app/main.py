@@ -12,6 +12,7 @@ from app.db.migrations import run_all_migrations
 from app.models import agent_execution, log, task, task_step, etsy_token, marketing_post, pinterest_token, analytics_event, image_asset, pod_product, fulfillment_record  # noqa: F401
 from app.workers.task_worker import TaskWorker
 from app.workers.etsy_receipt_worker import EtsyReceiptWorker
+from app.workers.autonomy_worker import AutonomyWorker
 from config import settings
 
 logging.basicConfig(level=logging.INFO)
@@ -48,6 +49,7 @@ async def startup_event():
 
     task_worker.start()
     etsy_receipt_worker.start()
+    autonomy_worker.start()
 
 
 @app.on_event("shutdown")
@@ -55,12 +57,14 @@ async def shutdown_event():
     logger.info("AI Factory server shutting down...")
     task_worker.stop()
     etsy_receipt_worker.stop()
+    autonomy_worker.stop()
 
 
 app.include_router(api_router)
 
 task_worker = TaskWorker()
 etsy_receipt_worker = EtsyReceiptWorker()
+autonomy_worker = AutonomyWorker()
 
 logger.info("AI Factory API initialized")
 print(f"Loaded configuration for {settings.APP_NAME} ({settings.ENV})")

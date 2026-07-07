@@ -45,6 +45,19 @@ class Settings(BaseSettings):
 
     ETSY_RECEIPT_POLL_SECONDS: int = 300
 
+    # Persistent storage paths — override in Railway env vars:
+    #   DATABASE_PATH=/data/app.db
+    #   IMAGE_STORAGE_ROOT=/data/images
+    DATABASE_PATH: str | None = None
+    IMAGE_STORAGE_ROOT: str | None = None
+
+    DISCORD_WEBHOOK_URL: str | None = None
+
+    MAX_TASKS_PER_DAY: int = 10
+    MAX_DAILY_SPEND_USD: float = 5.00
+    AUTONOMY_ENABLED: bool = False
+    AUTONOMY_SCHEDULE_SECONDS: int = 3600
+
     AUTO_PUBLISH_LISTINGS: bool = False
 
     class Config:
