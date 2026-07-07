@@ -1,11 +1,14 @@
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
 from app.services.analytics_service import AnalyticsService
+from app.services.revenue_service import RevenueService
+from app.schemas.revenue import SaleCreate
 
 router = APIRouter()
 analytics_service = AnalyticsService()
+revenue_service = RevenueService()
 
 
 @router.get("/events")
@@ -40,3 +43,33 @@ def analytics_summary():
     return {
         "event_counts": analytics_service.get_event_counts_by_type(),
     }
+
+
+@router.post("/revenue")
+def record_sale(sale: SaleCreate):
+    """
+    Manually records a sale against a task/product. Etsy revenue isn't
+    pulled automatically (this app only creates draft listings and has
+    no transactions_r scope — see README), so the shop owner logs sales
+    here after checking Etsy's own Shop Manager sales dashboard.
+    """
+    try:
+        return revenue_service.record_sale(
+            task_id=sale.task_id,
+            amount=sale.amount,
+            currency=sale.currency,
+            quantity=sale.quantity,
+            notes=sale.notes,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.get("/revenue/summary")
+def revenue_summary(task_id: Optional[str] = Query(default=None)):
+    return revenue_service.get_total_revenue(task_id=task_id)
+
+
+@router.get("/revenue/by-task")
+def revenue_by_task():
+    return revenue_service.get_revenue_by_task()
