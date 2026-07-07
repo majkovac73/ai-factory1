@@ -27,7 +27,7 @@ def _generate_pkce_pair():
     return verifier, challenge
 
 
-def build_authorization_url(scopes: str = "listings_r listings_w shops_r shops_w") -> str:
+def build_authorization_url(scopes: str = "listings_r listings_w shops_r shops_w transactions_r transactions_w address_r") -> str:
     verifier, challenge = _generate_pkce_pair()
     state = secrets.token_urlsafe(16)
     _pending_verifiers[state] = verifier

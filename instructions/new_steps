@@ -1,0 +1,249 @@
+PROJECT HANDOFF — Steps 81, 83, 84 (fully automatic order fulfillment)
+
+═══════════════════════════════════════════════════════════════
+1. WHAT'S ALREADY TRUE
+═══════════════════════════════════════════════════════════════
+
+Maj has:
+  - A Printify account, fully set up
+  - PRINTIFY_API_KEY saved in .env
+  - Printify declared as a Production Partner on the Etsy shop
+
+Existing Etsy OAuth scopes: listings_r listings_w shops_r shops_w
+(see app/services/etsy_oauth.py build_authorization_url).
+
+CONSTRAINT: Maj wants ZERO hardcoded product-type limits — the system
+picks ANY Printify catalog product dynamically based on the generated
+design/concept, not a fixed shortlist.
+
+CONSTRAINT: this must be FULLY AUTOMATIC end-to-end — no manual step
+between "buyer purchases on Etsy" and "Printify order submitted and,
+once shipped, tracking pushed back to the Etsy receipt." No human
+action required at any point in this loop once it's built.
+
+Before writing any code, fetch and read the real API references —
+this project has been burned before by assuming field names instead
+of checking (Etsy readiness-state fields, Etsy digital-file endpoint):
+  - https://developers.printify.com/ (blueprints, print providers,
+    variants, image upload, product creation, order creation, AND
+    order status/tracking retrieval — needed for step 2f below)
+  - https://developer.etsy.com/documentation/tutorials/fulfillment/
+    (getShopReceipts, createReceiptShipment — exact request/response
+    fields, especially the ShopReceipt object's shipping name/address
+    field names)
+  - https://developer.etsy.com/documentation/essentials/authentication/
+    (confirm exact scope strings needed: transactions_r, transactions_w,
+    address_r)
+
+═══════════════════════════════════════════════════════════════
+2. STEP 81 — Fully automatic Printify POD fulfillment
+═══════════════════════════════════════════════════════════════
+
+2a. Re-authorize Etsy with additional scopes (ONE-TIME MANUAL STEP —
+    tell Maj exactly what to do, do not attempt this yourself):
+
+    In app/services/etsy_oauth.py, find build_authorization_url()'s
+    scope string and change it from:
+        "listings_r listings_w shops_r shops_w"
+    to:
+        "listings_r listings_w shops_r shops_w transactions_r transactions_w address_r"
+
+    Then tell Maj: "Go to http://localhost:8000/etsy/oauth/login in a
+    browser, approve the consent screen (it will now additionally ask
+    for receipt/transaction and shipping-address permissions), and let
+    the callback complete. This overwrites the existing Etsy token with
+    one that has the new scopes — same process as the earlier shops_w
+    fix." Do not proceed past this point until Maj confirms this is
+    done, since every subsequent step in 2b-2h depends on it.
+
+2b. Discover the Printify shop_id (one real, free call):
+    - scripts/get_printify_shop.py calls GET /v1/shops.json with
+      PRINTIFY_API_KEY.
+    - If exactly one shop returned, use it and add PRINTIFY_SHOP_ID to
+      config/settings.py + .env.
+    - If more than one, STOP and ask Maj which to use.
+
+2c. Create app/services/printify_client.py (PrintifyClient):
+    - list_blueprints(), list_print_providers(blueprint_id),
+      list_variants(blueprint_id, print_provider_id)
+    - upload_image(image_path_or_base64)
+    - create_product(blueprint_id, print_provider_id, variant_ids,
+      image_id, title, description)
+    - create_order(product_id, variant_id, quantity, shipping_address)
+      — NOW called automatically (see 2g), not manually
+    - get_order_status(order_id) — needed to detect when Printify has
+      shipped the item and has tracking info available (check the real
+      Printify order-status endpoint/webhook options in their docs;
+      prefer a webhook if Printify supports one over polling, but if
+      not, polling is fine — see 2h)
+
+2d. Create app/agents/product_type_selector_agent.py
+    (ProductTypeSelectorAgent, BaseAgent subclass): given a task's
+    product concept (task.output_data) and the live blueprint catalog
+    from 2c, picks the best-fit blueprint_id via self._generate().
+    Strict JSON output, validated via JSONSanitizer like every other
+    agent.
+
+2e. Create app/models/pod_product.py (PODProduct): task_id,
+    printify_product_id, blueprint_id, print_provider_id,
+    variant_ids (JSON), etsy_listing_id, created_at.
+
+    IMPORTANT: etsy_listing_id must be populated when the Etsy listing
+    for this product is created (step 73's pipeline) — this is the
+    join key that lets an incoming Etsy receipt be matched back to the
+    correct PODProduct automatically in step 2g. Check how/where the
+    Etsy listing_id is currently returned and stored (EtsyClient.
+    create_draft_listing()'s response) and wire it into PODProduct at
+    creation time. If Task or another existing model already stores
+    listing_id somewhere, reuse that instead of duplicating it — check
+    before adding a new column.
+
+    Also add: app/models/fulfillment_record.py (FulfillmentRecord):
+    etsy_receipt_id (unique), task_id, pod_product_id, printify_order_id,
+    status (enum-like string: "submitted", "shipped", "tracking_synced"),
+    tracking_number, carrier, created_at, updated_at. This is what
+    makes the automatic loop idempotent — a receipt is only ever
+    submitted to Printify once, and tracking is only pushed back to
+    Etsy once.
+
+    Register both new models in app/models/__init__.py and app/main.py.
+
+2f. Create app/services/pod_fulfillment_service.py
+    (PODFulfillmentService):
+    - create_product_for_task(task_id): orchestrates 2c/2d/2e —
+      dynamic blueprint selection, image upload (via
+      ImageCatalogService.get_delivery_asset(task_id) from step 76),
+      Printify product creation, PODProduct row (including
+      etsy_listing_id).
+    - submit_order(receipt_id, task_id, pod_product_id, shipping_address,
+      variant_id, quantity): calls PrintifyClient.create_order(),
+      creates a FulfillmentRecord row. Called automatically by the
+      receipt worker in 2g — no manual trigger anymore.
+    - sync_tracking(fulfillment_record_id): calls
+      PrintifyClient.get_order_status(), and if shipped with tracking
+      available, calls Etsy's createReceiptShipment with the real
+      tracking_number/carrier, then updates FulfillmentRecord.status
+      to "tracking_synced". Called automatically by 2h.
+
+2g. Create app/workers/etsy_receipt_worker.py (EtsyReceiptWorker) —
+    mirror app/workers/task_worker.py's structure (background thread,
+    start()/stop(), poll loop with a stop event):
+    - On each poll interval (add settings.ETSY_RECEIPT_POLL_SECONDS,
+      default e.g. 300), calls Etsy's getShopReceipts filtered to
+      receipts since the last successful poll (track a
+      last_checked_at timestamp — store it somewhere durable, e.g. a
+      simple key in a small settings/state table or a dedicated row,
+      not just an in-memory variable that resets on restart).
+    - For each new receipt: extract the real shipping name/address
+      fields (confirm exact field names from the Etsy docs fetch in
+      section 1 — do not guess), and extract which listing(s) the
+      receipt is for (receipts contain transactions, each tied to a
+      listing_id).
+    - For each transaction whose listing_id matches an existing
+      PODProduct.etsy_listing_id AND has no existing FulfillmentRecord
+      for that receipt_id yet (idempotency check): call
+      PODFulfillmentService.submit_order() automatically.
+    - Skip transactions for listing_ids that don't match any
+      PODProduct — those are digital-download sales, already fulfilled
+      automatically by Etsy delivering the attached digital file; no
+      action needed.
+    - Wrap each receipt's processing in its own try/except so one bad
+      receipt doesn't kill the worker thread or block others, same
+      resilience pattern as TaskWorker.
+
+2h. Extend EtsyReceiptWorker (or add a second lightweight worker,
+    your call on which reads cleaner) to also periodically call
+    PODFulfillmentService.sync_tracking() for every FulfillmentRecord
+    still in "submitted" status, closing the loop by pushing tracking
+    back to Etsy automatically once Printify reports the item shipped.
+
+2i. Wire EtsyReceiptWorker's start()/stop() into app/main.py's
+    startup/shutdown events, same as TaskWorker already is.
+
+2j. Add routes in app/api/routes/pod.py (new file), registered in
+    app/api/api.py:
+    - GET /pod/fulfillments — lists FulfillmentRecord rows with status,
+      for visibility/debugging (read-only, no manual trigger routes —
+      this is fully automatic now, there's nothing left to manually
+      call)
+
+2k. Test script scripts/test_step81_pod_fulfillment.py — use test
+    doubles for BOTH PrintifyClient and the Etsy receipts call (a fake
+    "new receipt" fixture) so this can be tested repeatedly without
+    real API calls or real orders. Confirm:
+    - ProductTypeSelectorAgent picks correctly from a fake multi-item
+      catalog
+    - A fake incoming receipt matching a PODProduct's etsy_listing_id
+      automatically creates a FulfillmentRecord and calls submit_order()
+      — with NO manual trigger, proving the automation actually works
+      end-to-end in test
+    - Processing the SAME fake receipt twice does NOT create a second
+      FulfillmentRecord or a second Printify order (idempotency)
+    - A fake receipt for a listing_id with no matching PODProduct is
+      correctly skipped (digital product case)
+    - sync_tracking() correctly updates FulfillmentRecord to
+      "tracking_synced" given a fake "shipped" Printify order status,
+      and calls a faked Etsy createReceiptShipment
+
+Changelog entry noting:
+  - Confirmation the Etsy re-auth (2a) was completed by Maj before
+    proceeding
+  - The exact real field names used for shipping address extraction
+    (from the actual Etsy docs, not assumed)
+  - Explicit note: this automation has nothing to process until at
+    least one listing is actually live (AUTO_PUBLISH_LISTINGS=True or
+    a listing manually published) — that remains Maj's decision,
+    unchanged from step 73
+  - Confirm zero real Printify/Etsy API calls beyond the one free
+    shops.json lookup — everything else tested via doubles
+
+═══════════════════════════════════════════════════════════════
+3. STEP 83 — Final system stress testing
+═══════════════════════════════════════════════════════════════
+
+[unchanged from before]
+
+Budget: $1.00 total, hard ceiling. Latency not a concern.
+
+Failure standard:
+  - ZERO tolerance for internally-caused failures (unhandled
+    exceptions, worker thread death — now including
+    EtsyReceiptWorker — state-machine violations, DB corruption, stuck
+    states).
+  - UP TO 15% tolerance for externally-caused failures from real
+    external API rate-limiting under deliberately extreme concurrent
+    load, ONLY if they fail cleanly and would plausibly succeed on
+    retry.
+
+Use test doubles for all expensive/external calls; up to $1 may be
+spent on real OpenRouter text calls only, hard-capped by a counter in
+the script itself. Include EtsyReceiptWorker's poll loop in the
+concurrency test — confirm it doesn't double-process receipts or
+deadlock against TaskWorker's DB access under load.
+
+═══════════════════════════════════════════════════════════════
+4. STEP 84 — Optimize performance and cost (build/profile only)
+═══════════════════════════════════════════════════════════════
+
+[unchanged from before]
+
+Do NOT change DEFAULT_MODEL — pending separate approval, out of scope.
+Profile for redundant DB queries, unnecessary sequential calls, and
+confirm image dedup (step 76) is actually used everywhere it should
+be. Document (don't fix) any SQLite concurrency bottleneck found in
+step 83, and any model-swap opportunity found — both are Maj's
+decisions to make, not to auto-apply.
+
+═══════════════════════════════════════════════════════════════
+5. WORKING METHOD
+═══════════════════════════════════════════════════════════════
+
+Check real repo state before writing anything. Follow existing
+patterns. Write and pass a test script per step before moving on.
+Append a changelog entry in the established format. Stop and ask if
+genuinely blocked — particularly: do not proceed past step 2a until
+Maj has confirmed the Etsy re-authorization is complete, since nothing
+after that point can be correctly built or tested against real scope
+requirements otherwise.
+
+Stop after step 84's changelog entry.

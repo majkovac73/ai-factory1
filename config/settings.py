@@ -40,6 +40,11 @@ class Settings(BaseSettings):
 
     LOG_LEVEL: str = "info"
 
+    PRINTIFY_API_KEY: str | None = None
+    PRINTIFY_SHOP_ID: str | None = None
+
+    ETSY_RECEIPT_POLL_SECONDS: int = 300
+
     AUTO_PUBLISH_LISTINGS: bool = False
 
     class Config:
