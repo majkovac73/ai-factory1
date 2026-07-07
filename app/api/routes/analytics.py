@@ -4,11 +4,13 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.services.analytics_service import AnalyticsService
 from app.services.revenue_service import RevenueService
+from app.services.performance_service import PerformanceService
 from app.schemas.revenue import SaleCreate
 
 router = APIRouter()
 analytics_service = AnalyticsService()
 revenue_service = RevenueService()
+performance_service = PerformanceService()
 
 
 @router.get("/events")
@@ -73,3 +75,15 @@ def revenue_summary(task_id: Optional[str] = Query(default=None)):
 @router.get("/revenue/by-task")
 def revenue_by_task():
     return revenue_service.get_revenue_by_task()
+
+@router.get("/performance/{task_id}")
+def get_task_performance(task_id: str):
+    try:
+        return performance_service.score_task(task_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/performance")
+def get_all_performance_scores():
+    return performance_service.score_all_tasks()
