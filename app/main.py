@@ -1,8 +1,10 @@
 import logging
+from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 load_dotenv()
 
@@ -61,6 +63,9 @@ async def shutdown_event():
 
 
 app.include_router(api_router)
+
+_frontend_dir = Path(__file__).resolve().parents[1] / "frontend"
+app.mount("/ui", StaticFiles(directory=_frontend_dir, html=True), name="ui")
 
 task_worker = TaskWorker()
 etsy_receipt_worker = EtsyReceiptWorker()

@@ -284,7 +284,7 @@
   <script type="text/babel">
     const { useState, useEffect, useCallback } = React;
 
-    const API = 'http://localhost:8000';
+    const API = window.location.origin;
     const POLL = 7000;
 
     const ROOM_CFG = {
