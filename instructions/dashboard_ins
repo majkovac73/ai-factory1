@@ -1,0 +1,122 @@
+FEATURE — Visual "facility" dashboard: rooms representing subsystems,
+characters representing active agents/workers, click for real status
+
+═══════════════════════════════════════════════════════════════
+CONTEXT
+═══════════════════════════════════════════════════════════════
+
+Replace/extend the existing basic dashboard frontend with a visual,
+game-like layout: a grid of distinct "rooms," each representing one
+subsystem of the pipeline, with small animated character icons inside
+each room representing active agents/workers. Clicking a room or
+character opens a panel showing real, live status pulled from the
+actual backend — not decorative or fake activity.
+
+Before writing anything, check what the existing dashboard frontend
+is built with (plain HTML/JS, a JS framework, templates served by
+FastAPI, etc. — check app/api/routes/dashboard.py and wherever its
+frontend assets live) and build on top of that stack rather than
+introducing a new framework unless the existing setup genuinely can't
+support this.
+
+═══════════════════════════════════════════════════════════════
+ROOM LAYOUT — map each room to a REAL subsystem, not a generic label
+═══════════════════════════════════════════════════════════════
+
+Design roughly one room per major pipeline stage, each wired to its
+real corresponding backend piece:
+
+  - Research Room       → AutonomyWorker / TrendResearchAgent
+  - Planning Room        → Planner / TaskService (task lifecycle states)
+  - Content Room          → Executor, SEO/listing generator agents
+  - Image Studio Room     → ProductImageAgent, SocialImageAgent,
+                            PODDesignAgent, ImageValidationService
+  - QA Room               → QA validation/repair pipeline
+  - Storefront Room       → Etsy listing pipeline (EtsyImageService,
+                            AUTO_PUBLISH_LISTINGS status)
+  - Marketing Room        → MarketingService, PinterestChannel,
+                            SEOPostingService
+  - Fulfillment Room      → EtsyReceiptWorker, PODFulfillmentService,
+                            FulfillmentRecord statuses
+  - Ledger Room           → AnalyticsService, RevenueService,
+                            PerformanceService, BestProductsService
+
+Adjust naming/grouping if the actual codebase's boundaries don't map
+cleanly to this list — check real service/agent boundaries before
+finalizing room names, don't force a mismatch.
+
+═══════════════════════════════════════════════════════════════
+DATA — real only, polling existing endpoints
+═══════════════════════════════════════════════════════════════
+
+Do NOT invent new fake activity or placeholder animations disconnected
+from real state. Each room's "liveliness" (whether its character is
+shown as active/idle/error) must be derived from real data:
+
+  - Worker-backed rooms (Research, Fulfillment): use GET /health/workers
+    (already built in step 86) — heartbeat age determines
+    active/idle/stale.
+  - Task-lifecycle rooms (Planning, Content, QA): query recent Task
+    rows by status (use existing TaskService, expose a new lightweight
+    read-only endpoint if one doesn't already return this — e.g.
+    GET /dashboard/rooms/status summarizing counts per room from real
+    queries).
+  - Image Studio: recent ImageAsset creation activity (step 76's
+    ImageCatalogService).
+  - Storefront/Marketing/Ledger: recent PODProduct, MarketingPost,
+    AnalyticsEvent activity respectively.
+
+Add ONE new aggregating endpoint (e.g. GET /dashboard/rooms/status)
+that returns a per-room summary object rather than making the frontend
+call 8 different existing endpoints separately — check current data
+in one request, poll it every 5-10 seconds from the frontend.
+
+═══════════════════════════════════════════════════════════════
+INTERACTIVITY
+═══════════════════════════════════════════════════════════════
+
+- Clicking a ROOM opens a panel showing: current status (active/idle/
+  error), a short real summary (e.g. "3 tasks in QA," "last fulfillment
+  2 min ago"), and the most recent few real log lines or events
+  relevant to that subsystem (reuse existing LogService/AnalyticsService
+  queries — don't build a second logging system).
+- Clicking a CHARACTER (representing a specific worker/agent) shows
+  which real worker/agent it represents and its real current state
+  (heartbeat age, last action, error if any).
+- No action buttons that DO anything from this view (no triggering
+  tasks, no publishing listings) — this is a read-only visualization,
+  not a control panel. Keep it that way; don't blur into an admin
+  action surface without a separate explicit decision to do so.
+
+═══════════════════════════════════════════════════════════════
+VISUAL STYLE — CSS ONLY, no generated images
+═══════════════════════════════════════════════════════════════
+
+Reference aesthetic: a grid of distinct, colorfully-lit isometric-ish
+rooms (like a facility/dungeon map), each with its own accent color
+and small character sprites inside.
+
+Build this entirely with CSS Grid/Flexbox for room layout, simple SVG
+or small icon-based "character" representations (a colored dot/icon
+with a subtle idle animation, e.g. gentle bob/pulse via CSS keyframes)
+rather than a full sprite-animation system or any generated artwork.
+Give each room its own accent color/glow via CSS box-shadow/border/
+gradient, consistent with a dark tech/sci-fi theme. Use CSS transitions
+for the click-to-open status panels rather than a heavier animation
+library, unless one is already in use elsewhere in the frontend.
+
+═══════════════════════════════════════════════════════════════
+WORKING METHOD
+═══════════════════════════════════════════════════════════════
+
+Check the existing dashboard code/frontend stack first. Build the new
+aggregating status endpoint, wire it to real data only, build the
+room-grid UI with click-to-inspect panels, and confirm every number/
+status shown traces back to a real query — no hardcoded/demo values
+left behind. Test by triggering a real task locally (or checking
+against current Railway state) and confirming the relevant room
+reflects it within one poll interval.
+
+Changelog entry documenting the new endpoint, the room-to-subsystem
+mapping chosen, and confirmation that no fake/demo data remains in the
+final version.

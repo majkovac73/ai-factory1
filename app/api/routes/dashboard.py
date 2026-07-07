@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter
 
 from app.schemas.enums import TaskStatus
@@ -72,3 +74,260 @@ def dashboard_metrics():
         ),
         "token_usage": token_summary,
     }
+
+
+@router.get("/rooms/status")
+def rooms_status():
+    from app.services import worker_registry
+    from app.db.database import SessionLocal
+    from app.models.image_asset import ImageAsset
+    from app.models.fulfillment_record import FulfillmentRecord
+    from app.models.pod_product import PODProduct
+    from app.models.marketing_post import MarketingPost
+    from app.models.analytics_event import AnalyticsEvent
+    from config import settings as _settings
+
+    db = SessionLocal()
+    try:
+        now_utc = datetime.now(timezone.utc)
+        cutoff_24h = datetime.utcnow() - timedelta(hours=24)
+
+        # ── Task counts ────────────────────────────────────────────
+        all_tasks = task_service.list_tasks()
+        sc = {s.value: 0 for s in TaskStatus}
+        for t in all_tasks:
+            if t.status in sc:
+                sc[t.status] += 1
+
+        # ── Worker heartbeats ──────────────────────────────────────
+        heartbeats = worker_registry.get_heartbeats()
+
+        def _age(name):
+            last = heartbeats.get(name)
+            if last is None:
+                return None
+            aware = last.replace(tzinfo=timezone.utc) if last.tzinfo is None else last
+            return round((now_utc - aware).total_seconds(), 1)
+
+        def _wstatus(name, max_age):
+            age = _age(name)
+            if age is None:
+                return "stale"
+            return "active" if age <= max_age else "stale"
+
+        # ── DB queries ─────────────────────────────────────────────
+        recent_images = (
+            db.query(ImageAsset)
+            .filter(ImageAsset.created_at >= cutoff_24h)
+            .count()
+        )
+        total_images = db.query(ImageAsset).count()
+
+        recent_fr = (
+            db.query(FulfillmentRecord)
+            .order_by(FulfillmentRecord.created_at.desc())
+            .limit(10)
+            .all()
+        )
+        total_fr = db.query(FulfillmentRecord).count()
+        fr_sc = {}
+        for r in recent_fr:
+            fr_sc[r.status] = fr_sc.get(r.status, 0) + 1
+        last_fr = recent_fr[0] if recent_fr else None
+
+        total_pods = db.query(PODProduct).count()
+
+        recent_posts = (
+            db.query(MarketingPost)
+            .order_by(MarketingPost.created_at.desc())
+            .limit(10)
+            .all()
+        )
+        post_sc = {}
+        for p in recent_posts:
+            post_sc[p.status] = post_sc.get(p.status, 0) + 1
+
+        total_events = db.query(AnalyticsEvent).count()
+
+        # ── Recent errors (filtered per room) ─────────────────────
+        all_errors = log_service.list_logs(level="ERROR", limit=30)
+
+        def _errors_for(sources):
+            return [
+                {
+                    "source": e.source,
+                    "message": (e.message or "")[:120],
+                    "at": e.created_at.isoformat() if e.created_at else None,
+                }
+                for e in all_errors
+                if e.source in sources
+            ][:3]
+
+        # ── Feature flags ──────────────────────────────────────────
+        auto_publish = bool(getattr(_settings, "AUTO_PUBLISH_LISTINGS", False))
+        autonomy_enabled = bool(getattr(_settings, "AUTONOMY_ENABLED", False))
+
+        # ── Rooms ──────────────────────────────────────────────────
+        rooms = {
+            "research": {
+                "label": "Research Room",
+                "status": _wstatus("AutonomyWorker", 7200) if autonomy_enabled else "idle",
+                "summary": (
+                    "Autonomy disabled (kill switch active)"
+                    if not autonomy_enabled
+                    else f"AutonomyWorker heartbeat {_age('AutonomyWorker')}s ago"
+                ),
+                "characters": [
+                    {
+                        "name": "AutonomyWorker",
+                        "status": _wstatus("AutonomyWorker", 7200),
+                        "heartbeat_age_s": _age("AutonomyWorker"),
+                        "detail": f"AUTONOMY_ENABLED={autonomy_enabled}",
+                    }
+                ],
+                "events": _errors_for({"AutonomyWorker", "TrendResearchAgent", "ResearchAgent", "IntelligenceAgent"}),
+            },
+            "planning": {
+                "label": "Planning Room",
+                "status": "active" if (sc.get("NEW", 0) + sc.get("PLANNED", 0)) > 0 else "idle",
+                "summary": f"{sc.get('NEW', 0)} new, {sc.get('PLANNED', 0)} planned, queue={task_queue.size()}",
+                "characters": [
+                    {
+                        "name": "TaskWorker",
+                        "status": _wstatus("TaskWorker", 10),
+                        "heartbeat_age_s": _age("TaskWorker"),
+                        "detail": f"Queue size: {task_queue.size()}",
+                    }
+                ],
+                "events": _errors_for({"TaskWorker", "TaskService", "TaskQueue", "PlannerAgent"}),
+                "counts": {"NEW": sc.get("NEW", 0), "PLANNED": sc.get("PLANNED", 0), "queue": task_queue.size()},
+            },
+            "content": {
+                "label": "Content Room",
+                "status": "active" if sc.get("RUNNING", 0) > 0 else "idle",
+                "summary": f"{sc.get('RUNNING', 0)} running, {sc.get('DONE', 0)} done, {sc.get('FAILED', 0)} failed",
+                "characters": [
+                    {
+                        "name": "ExecutorAgent",
+                        "status": "active" if sc.get("RUNNING", 0) > 0 else "idle",
+                        "detail": f"{sc.get('RUNNING', 0)} tasks in RUNNING state",
+                    }
+                ],
+                "events": _errors_for({"ExecutorAgent", "ListingGeneratorAgent", "SEOAgent"}),
+                "counts": {"RUNNING": sc.get("RUNNING", 0), "DONE": sc.get("DONE", 0), "FAILED": sc.get("FAILED", 0)},
+            },
+            "image_studio": {
+                "label": "Image Studio",
+                "status": "active" if recent_images > 0 else "idle",
+                "summary": f"{recent_images} images in last 24h ({total_images} total)",
+                "characters": [
+                    {
+                        "name": "ImageAgents",
+                        "status": "active" if recent_images > 0 else "idle",
+                        "detail": "ProductImageAgent / SocialImageAgent / PODDesignAgent",
+                    }
+                ],
+                "events": _errors_for({"ProductImageAgent", "SocialImageAgent", "PODDesignAgent", "ImageValidationService"}),
+                "counts": {"last_24h": recent_images, "total": total_images},
+            },
+            "qa": {
+                "label": "QA Room",
+                "status": "active" if sc.get("QA", 0) > 0 else "idle",
+                "summary": f"{sc.get('QA', 0)} tasks in QA pipeline",
+                "characters": [
+                    {
+                        "name": "QAValidator",
+                        "status": "active" if sc.get("QA", 0) > 0 else "idle",
+                        "detail": f"{sc.get('QA', 0)} tasks awaiting QA validation",
+                    }
+                ],
+                "events": _errors_for({"QAAgent", "QAValidator", "QARepairAgent"}),
+                "counts": {"QA": sc.get("QA", 0)},
+            },
+            "storefront": {
+                "label": "Storefront Room",
+                "status": "active" if total_pods > 0 else "idle",
+                "summary": f"{total_pods} products, AUTO_PUBLISH={'ON' if auto_publish else 'OFF'}",
+                "characters": [
+                    {
+                        "name": "EtsyListingAgent",
+                        "status": "idle",
+                        "detail": f"AUTO_PUBLISH_LISTINGS={auto_publish}",
+                    }
+                ],
+                "events": _errors_for({"EtsyService", "EtsyImageService", "ListingAgent"}),
+                "counts": {"pod_products": total_pods, "auto_publish": auto_publish},
+            },
+            "marketing": {
+                "label": "Marketing Room",
+                "status": (
+                    "active" if post_sc.get("success", 0) > 0
+                    else "error" if (recent_posts and all(p.status == "failed" for p in recent_posts))
+                    else "idle"
+                ),
+                "summary": (
+                    f"{len(recent_posts)} recent posts: {post_sc.get('success', 0)} ok, {post_sc.get('failed', 0)} failed"
+                    if recent_posts else "No marketing posts yet"
+                ),
+                "characters": [
+                    {
+                        "name": "MarketingService",
+                        "status": "active" if post_sc.get("success", 0) > 0 else "idle",
+                        "detail": f"{post_sc.get('pending', 0)} pending, {post_sc.get('success', 0)} ok, {post_sc.get('failed', 0)} failed",
+                    }
+                ],
+                "events": _errors_for({"MarketingService", "PinterestChannel", "SEOPostingService"}),
+                "counts": {
+                    "pending": post_sc.get("pending", 0),
+                    "success": post_sc.get("success", 0),
+                    "failed": post_sc.get("failed", 0),
+                },
+            },
+            "fulfillment": {
+                "label": "Fulfillment Room",
+                "status": _wstatus("EtsyReceiptWorker", 660),
+                "summary": (
+                    f"{total_fr} records"
+                    + (f", last: {last_fr.status} at {last_fr.created_at.strftime('%H:%M')}" if last_fr else "")
+                ),
+                "characters": [
+                    {
+                        "name": "EtsyReceiptWorker",
+                        "status": _wstatus("EtsyReceiptWorker", 660),
+                        "heartbeat_age_s": _age("EtsyReceiptWorker"),
+                        "detail": f"{total_fr} total fulfillment records",
+                    }
+                ],
+                "events": _errors_for({"EtsyReceiptWorker", "PODFulfillmentService", "PrintifyClient"}),
+                "counts": {"total": total_fr, **fr_sc},
+            },
+            "ledger": {
+                "label": "Ledger Room",
+                "status": "active" if total_events > 0 else "idle",
+                "summary": f"{total_events} analytics events tracked",
+                "characters": [
+                    {
+                        "name": "AnalyticsService",
+                        "status": "active" if total_events > 0 else "idle",
+                        "detail": "AnalyticsService / RevenueService / PerformanceService",
+                    }
+                ],
+                "events": _errors_for({"AnalyticsService", "RevenueService", "PerformanceService", "BestProductsService"}),
+                "counts": {"total_events": total_events},
+            },
+        }
+
+        worker_checks = [
+            _wstatus("TaskWorker", 10),
+            _wstatus("EtsyReceiptWorker", 660),
+            _wstatus("AutonomyWorker", 7200),
+        ]
+        overall_ok = all(s == "active" for s in worker_checks)
+
+        return {
+            "polled_at": now_utc.isoformat(),
+            "rooms": rooms,
+            "workers_overall": {"status": "ok" if overall_ok else "degraded"},
+        }
+    finally:
+        db.close()
