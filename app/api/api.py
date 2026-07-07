@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.routes import health, tasks, logs, dashboard, etsy, pinterest
+from app.api.routes import health, tasks, logs, dashboard, etsy, pinterest, marketing
 
 api_router = APIRouter()
 
@@ -10,3 +10,4 @@ api_router.include_router(logs.router, prefix="/logs", tags=["Logs"])
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
 api_router.include_router(etsy.router, prefix="/etsy", tags=["Etsy"])
 api_router.include_router(pinterest.router, prefix="/pinterest", tags=["Pinterest"])
+api_router.include_router(marketing.router, prefix="/marketing", tags=["Marketing"])
