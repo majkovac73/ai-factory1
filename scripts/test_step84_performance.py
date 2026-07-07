@@ -25,9 +25,11 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 import uuid
 
-# Temp DB
+# Temp DB — must clear DATABASE_PATH so Railway's /data/app.db production
+# path doesn't override DATABASE_URL (DATABASE_PATH wins in app/db/database.py).
 _tmp = tempfile.NamedTemporaryFile(suffix=".perf.db", delete=False)
 _tmp.close()
+os.environ.pop("DATABASE_PATH", None)
 os.environ["DATABASE_URL"] = f"sqlite:///{_tmp.name}"
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -314,6 +316,25 @@ print("    -> JSON extraction from structured input -- no change needed.")
 print("  NOT CHANGED: DEFAULT_MODEL change requires Maj's approval per instructions.")
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
+# Explicit row deletion so the script leaves no artifacts even if the temp-DB
+# isolation fails (e.g. if DATABASE_PATH is re-introduced in future env).
+
+_cleanup_db = SessionLocal()
+try:
+    # Delete Task rows seeded by the concurrent-write section
+    _cleanup_db.query(Task).filter(Task.prompt.like("Concurrent write %")).delete(
+        synchronize_session=False
+    )
+    # Delete the PODProduct and its ImageAsset seeded in section [1]
+    _cleanup_db.query(PODProduct).filter(PODProduct.etsy_listing_id == "LIST-PERF-001").delete(
+        synchronize_session=False
+    )
+    _cleanup_db.query(ImageAsset).filter(ImageAsset.task_id == TASK_ID).delete(
+        synchronize_session=False
+    )
+    _cleanup_db.commit()
+finally:
+    _cleanup_db.close()
 
 engine.dispose()
 os.unlink(_tmp.name)
