@@ -1,0 +1,108 @@
+FIX — Confirm real image dimensions and correct cost assumptions
+
+═══════════════════════════════════════════════════════════════
+CONTEXT
+═══════════════════════════════════════════════════════════════
+
+scripts/test_openrouter_image_provider.py ran successfully and made
+one real OpenRouter API call, but the dimension-verification step
+(step 4 of that script) silently skipped because Pillow was not
+importable in this environment, even though step 68's changelog
+states Pillow was installed. The test still printed PASSED despite
+not completing its core purpose. Fix both the environment and the
+test's failure behavior, then get real dimension ground truth.
+
+═══════════════════════════════════════════════════════════════
+STEP 1 — Fix the Pillow environment gap
+═══════════════════════════════════════════════════════════════
+
+- Run `pip show pillow` (using the same python/pip the test script
+  runs under) to check if it's actually installed in this venv.
+- If missing, install it: `pip install Pillow` and add/confirm it's
+  listed in requirements.txt (it should have been added in step 68 —
+  check whether requirements.txt actually has it; if not, that's the
+  root cause and needs fixing there so this doesn't happen again on a
+  fresh venv).
+- If it IS installed but the script still couldn't import it, figure
+  out why (wrong venv/interpreter, import error, etc.) before
+  proceeding — don't just reinstall blindly without understanding
+  which case this is.
+
+═══════════════════════════════════════════════════════════════
+STEP 2 — Make the test fail loudly instead of silently skipping
+═══════════════════════════════════════════════════════════════
+
+In scripts/test_openrouter_image_provider.py, find the dimension-decode
+step (currently prints "Pillow not available — skipping dimension
+decode" and continues to PASSED regardless). Change this so that if
+Pillow is not importable, the script prints a clear error and exits
+with a non-zero status instead of reporting PASSED — dimension
+verification is the core purpose of this specific test, so its
+absence must not be silently tolerated. Passing without checking the
+one thing you set out to check is worse than not running the test at
+all, since it creates false confidence.
+
+═══════════════════════════════════════════════════════════════
+STEP 3 — Rerun and get real ground truth
+═══════════════════════════════════════════════════════════════
+
+Rerun scripts/test_openrouter_image_provider.py. It should now
+actually decode the returned base64 image via Pillow and print the
+real width/height for aspect_ratio="1:1", resolution="1K".
+
+Compare that real figure against the assumption currently baked into
+app/services/image_validation_service.py (~1024×1024 for this
+combination). If the real dimensions differ meaningfully, update the
+minimum-resolution constants in image_validation_service.py to match
+reality, and note the old vs. new value in the changelog.
+
+═══════════════════════════════════════════════════════════════
+STEP 4 — Correct the cost assumption in the changelog and flag it
+═══════════════════════════════════════════════════════════════
+
+The prior changelog entry estimated $0.02-0.04 per image call; the
+real call cost $0.068 (google/gemini-3.1-flash-image bills per-token,
+with completion_tokens_details.image_tokens driving cost — not a flat
+per-image rate). Update this fix's changelog entry to record the real
+per-call cost, and add a rough per-product cost estimate: 2 listing
+images + 1 Pinterest image + 1 delivery image (which uses "2K"
+resolution per pod_design_agent.py, so likely costs MORE than $0.068,
+not the same — measure this directly with the same real-call approach
+if you want an accurate 2K figure; do not just assume it scales
+linearly with resolution without checking, since token-based image
+pricing does not necessarily scale that way).
+
+Do NOT make additional real API calls beyond what's needed to get
+this one 2K delivery-resolution cost data point — one real 1:1/1K call
+(already done) and, if you choose to measure it, one real 1:1/2K call
+is enough. Everything else should continue to use test doubles.
+
+═══════════════════════════════════════════════════════════════
+CHANGELOG ENTRY
+═══════════════════════════════════════════════════════════════
+
+Append to C:\ai-factory\instructions\CHANGELOG_AUTOMATED.md:
+
+## Fix — Confirm real image dimensions and correct cost assumptions
+**Date:** <today>
+**Files modified:**
+  - scripts/test_openrouter_image_provider.py — now fails loudly if
+    Pillow is unavailable instead of silently skipping the dimension check
+  - requirements.txt — <note whether Pillow needed to be (re-)added>
+  - app/services/image_validation_service.py — <old constants → new
+    confirmed-real constants, if they changed>
+**Test:** scripts/test_openrouter_image_provider.py — PASSED (real
+  dimensions confirmed: <fill in actual width×height for 1:1/1K>)
+**Notes/assumptions:**
+  - Real cost per 1:1/1K image call: $0.068 (previous estimate of
+    $0.02-0.04 was wrong — this model bills per-token, not flat-rate)
+  - <if measured> Real cost per 1:1/2K image call: $<fill in>
+  - Rough estimated cost per full product (2 listing + 1 social + 1
+    delivery image): $<fill in total>
+  - This is meaningfully higher than the flat-rate alternative
+    (ByteDance Seedream 4.5 at $0.04/image regardless of resolution) —
+    worth Maj knowing before generating images at real volume.
+
+---
+
+Stop after this changelog entry. Do not proceed to step 81.

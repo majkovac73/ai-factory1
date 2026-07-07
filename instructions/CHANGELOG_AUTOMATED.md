@@ -2,6 +2,37 @@
 
 ---
 
+## Fix — Confirm real image dimensions and correct cost assumptions
+**Date:** 2026-07-07
+**Files modified:**
+  - scripts/test_openrouter_image_provider.py — Now fails loudly (sys.exit(1)) if Pillow is
+    not importable instead of silently printing "skipping dimension decode" and reporting PASSED.
+    Also extended to make a second real API call (1:1/2K) to capture delivery-resolution cost.
+  - requirements.txt — Added `Pillow` (was installed ad-hoc in step 68 but never committed to
+    requirements.txt; a fresh venv would have been missing it — this was the root cause of the
+    silent skip)
+  - app/services/image_validation_service.py — NO CHANGES NEEDED. Confirmed real dimensions
+    (1024×1024 for 1K, 2048×2048 for 2K) both satisfy the existing min_width=1000/min_height=1000
+    threshold for 'listing' and 'delivery' use cases.
+**Test:** scripts/test_openrouter_image_provider.py — PASSED (real OpenRouter API calls made,
+  2 images generated)
+  - Confirmed 1:1 @ 1K  => 1024×1024 px  (assumption was correct)
+  - Confirmed 1:1 @ 2K  => 2048×2048 px
+**Notes/assumptions:**
+  - Real cost per 1:1/1K image call: $0.0672 (previous estimate of $0.02-0.04 was wrong)
+  - Real cost per 1:1/2K image call: $0.1008 (delivery quality — used by PODDesignAgent)
+  - Pricing model: per image token at $0.00006/token. 1K=1120 tokens, 2K=1680 tokens.
+    Token count does NOT scale linearly with pixel count (1K→2K is 4× the pixels but only
+    1.5× the tokens), so linear extrapolation from per-resolution cost is inaccurate.
+  - Rough cost per full product (2 listing images + 1 Pinterest pin + 1 delivery image):
+    3 × $0.0672 + 1 × $0.1008 = ~$0.30 per product.
+  - For comparison: ByteDance Seedream 4.5 charges $0.04/image flat regardless of resolution,
+    which would be 4 × $0.04 = $0.16/product. Gemini Flash at ~$0.30/product is roughly 2×
+    more expensive per product. Worth knowing before generating at real volume — model can be
+    swapped via settings.OPENROUTER_IMAGE_MODEL without code changes.
+
+---
+
 ## Fix — Replace OpenAI/DALL-E 3 dependency with OpenRouter Image API
 **Date:** 2026-07-07
 **Files created:**
