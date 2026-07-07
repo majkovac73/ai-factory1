@@ -1,0 +1,109 @@
+# AI Factory — Roadmap
+
+## Phase 1 — Core Infrastructure (CURRENT)
+
+### Completed / In Progress
+- FastAPI server
+- Task API
+- Task database
+- AI Router (basic)
+- Basic agent structure
+- Simple planner/executor/QA flow
+
+---
+
+### Next Steps
+
+#### 1. Fix Core Stability
+- Fix schema validation errors
+- Fix JSON parsing failures
+- Add retry + repair pipeline
+- Standardize output format
+
+---
+
+#### 2. Build Orchestrator
+- Implement strict workflow engine
+- Enforce:
+  Planner → Executor → QA
+- Add task state machine
+
+---
+
+#### 3. Improve AI Router
+- Convert to capability-based system
+- Add model config file
+- Remove provider dependency from agents
+
+---
+
+#### 4. Memory System v1
+- SQLite persistence
+- Agent memory storage
+- Simple retrieval layer
+
+---
+
+#### 5. Logging System
+- Store all AI inputs/outputs
+- Track failures
+- Track model usage
+
+---
+
+#### 6. Task Queue Hardening
+- Background worker stability
+- Retry queue
+- Failure recovery
+
+---
+
+## Phase 2 — Agent Expansion
+
+- Market Intelligence agents
+- Product Development agents
+- Creative agents
+- QA expansion
+
+---
+
+## Phase 3 — Etsy MVP
+
+- Product generator
+- SEO generator
+- Listing generator
+- Basic upload automation
+
+---
+
+## Phase 4 — Marketing Automation
+
+- Pinterest automation
+- SEO posting
+- Content generation
+
+---
+
+## Phase 5 — Analytics
+
+- Revenue tracking
+- Performance scoring
+- Best product detection
+
+---
+
+## Phase 6 — Multi-Business Expansion
+
+- Shopify
+- Gumroad
+- YouTube
+- Print-on-demand
+
+---
+
+## Critical Rule
+
+Do NOT move to Phase 3 until:
+- Core system is stable
+- Schema validation is 100% reliable
+- Orchestrator is deterministic

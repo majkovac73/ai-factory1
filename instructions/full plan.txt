@@ -1,0 +1,695 @@
+PROJECT NAME
+AI Factory
+
+MISSION
+
+Build a fully autonomous AI company capable of creating, launching, managing, optimizing and expanding multiple online businesses with minimal human intervention.
+
+The first business is Etsy.
+
+The architecture MUST NOT be Etsy-specific.
+
+Everything should be built as reusable infrastructure so future businesses (Shopify, YouTube, Amazon KDP, Gumroad, Creative Market, SaaS, etc.) can plug into the same system.
+
+=========================================================
+CURRENT DEVELOPMENT STAGE
+=========================================================
+
+Currently building Version 1.
+
+Current focus:
+Core architecture.
+
+NOT optimization.
+
+NOT UI polishing.
+
+NOT production deployment.
+
+The goal is to create an extremely solid foundation.
+
+=========================================================
+TECH STACK
+=========================================================
+
+Backend
+- Python
+- FastAPI
+- SQLAlchemy
+- SQLite during development
+- PostgreSQL later
+
+Frontend
+- React (later)
+- Dashboard
+
+Task execution
+- Background workers
+- Queue system
+
+LLM Gateway
+- OpenRouter ONLY during development
+
+Future providers
+- OpenAI
+- Anthropic
+
+The architecture MUST make switching providers require changing configuration only.
+
+NO business logic should depend on a specific AI provider.
+
+=========================================================
+CURRENT DIRECTORY STRUCTURE
+=========================================================
+
+app/
+
+api/
+
+agents/
+
+core/
+
+providers/
+
+schemas/
+
+db/
+
+models/
+
+storage/
+
+logs/
+
+dashboard/
+
+workflows/
+
+config/
+
+tests/
+
+=========================================================
+ARCHITECTURE PRINCIPLES
+=========================================================
+
+Everything must follow these rules.
+
+Rule 1
+
+Agents NEVER communicate directly.
+
+Everything goes through the orchestrator.
+
+Rule 2
+
+Agents NEVER choose AI models.
+
+Only AIRouter decides.
+
+Rule 3
+
+Agents NEVER know provider names.
+
+Agents request capabilities.
+
+Example:
+
+generate_text()
+
+reason()
+
+generate_image()
+
+vision()
+
+embedding()
+
+NOT
+
+GPT
+
+Claude
+
+Gemini
+
+Groq
+
+etc.
+
+Rule 4
+
+Every task has a schema.
+
+No free-form outputs.
+
+Everything must validate.
+
+Rule 5
+
+Every AI response must be validated.
+
+If validation fails:
+
+Retry
+
+Repair
+
+Retry
+
+Reject
+
+Rule 6
+
+Every major action must be logged.
+
+Rule 7
+
+Every important decision must be explainable.
+
+=========================================================
+CURRENT IMPLEMENTED COMPONENTS
+=========================================================
+
+Working
+
+FastAPI
+
+Task API
+
+Task database
+
+Background execution
+
+AI Router
+
+Provider abstraction
+
+Groq/OpenRouter compatible structure
+
+Planner Agent
+
+Executor Agent
+
+QA Agent
+
+Task Processor
+
+Schema validation
+
+Retry mechanism
+
+JSON cleaning
+
+JSON extraction
+
+Output parsing
+
+Basic workflow
+
+User creates task
+
+Planner
+
+Executor
+
+QA
+
+Return output
+
+=========================================================
+KNOWN ISSUES ALREADY SOLVED
+=========================================================
+
+Never repeat these mistakes.
+
+Do NOT let AI invent products.
+
+Do NOT let Executor ignore Planner.
+
+Do NOT allow markdown output.
+
+Always enforce JSON.
+
+Always strip markdown fences.
+
+Always validate schema.
+
+Always retry on invalid JSON.
+
+Always repair malformed JSON.
+
+Never trust model output.
+
+=========================================================
+OUTPUT STANDARD
+=========================================================
+
+Every agent returns structured JSON.
+
+No markdown.
+
+No explanations.
+
+No code fences.
+
+No conversational text.
+
+Only valid JSON.
+
+=========================================================
+DEVELOPMENT PHILOSOPHY
+=========================================================
+
+The project is NOT a chatbot.
+
+It is NOT an AI wrapper.
+
+It is an operating system for autonomous AI companies.
+
+Infrastructure first.
+
+Businesses later.
+
+Never hardcode Etsy logic into core systems.
+
+=========================================================
+COMPANY STRUCTURE
+=========================================================
+
+CEO
+
+Operations
+
+Market Intelligence
+
+Product Development
+
+Creative
+
+QA
+
+Sales
+
+Marketing
+
+Finance
+
+Analytics
+
+Infrastructure
+
+Expansion
+
+Every department contains specialized agents.
+
+=========================================================
+PHASES
+=========================================================
+
+Phase 1
+
+Core infrastructure
+
+Current phase.
+
+Build
+
+Router
+
+Memory
+
+Agents
+
+Task Queue
+
+Schemas
+
+Dashboard
+
+Logging
+
+Configuration
+
+Phase 2
+
+Company departments
+
+Phase 3
+
+Market Intelligence
+
+Trend discovery
+
+Keyword research
+
+Competitor analysis
+
+Demand scoring
+
+Opportunity scoring
+
+Phase 4
+
+Product Development
+
+Idea generation
+
+Validation
+
+SEO
+
+Titles
+
+Descriptions
+
+Tags
+
+Pricing
+
+Bundles
+
+Prompts
+
+Phase 5
+
+Creative
+
+Image generation
+
+Printables
+
+Templates
+
+Mockups
+
+Branding
+
+Typography
+
+Colors
+
+Phase 6
+
+Vision QA
+
+Image quality
+
+Copyright checks
+
+AI artifact detection
+
+Watermark detection
+
+Text readability
+
+Resolution
+
+Print safety
+
+Phase 7
+
+Etsy automation
+
+Listing creation
+
+Uploads
+
+Pricing
+
+Inventory
+
+Renewals
+
+Analytics
+
+Orders
+
+Messages
+
+Phase 8
+
+Marketing
+
+Pinterest
+
+Instagram
+
+Facebook
+
+TikTok
+
+Email
+
+Blogs
+
+SEO
+
+Ads
+
+Phase 9
+
+Analytics
+
+Revenue
+
+Profit
+
+CTR
+
+Conversion
+
+Expenses
+
+Best sellers
+
+Seasonality
+
+Phase 10
+
+Finance
+
+Profit
+
+Taxes
+
+Subscriptions
+
+API spending
+
+Forecasting
+
+Phase 11
+
+Expansion
+
+New businesses
+
+=========================================================
+LONG TERM GOAL
+=========================================================
+
+CEO Agent controls an AI holding company.
+
+Departments manage businesses.
+
+Businesses run automatically.
+
+CEO allocates budget.
+
+CEO starts new businesses.
+
+CEO shuts down unprofitable businesses.
+
+CEO reallocates resources.
+
+=========================================================
+AI ROUTER
+=========================================================
+
+Router chooses models based on capability.
+
+Never provider.
+
+Capabilities include
+
+generate_text
+
+reason
+
+research
+
+vision
+
+generate_image
+
+embedding
+
+classification
+
+summarization
+
+Future capabilities can be added without changing agents.
+
+=========================================================
+MEMORY
+=========================================================
+
+Agent Memory
+
+↓
+
+Department Memory
+
+↓
+
+Company Memory
+
+↓
+
+Database
+
+Every agent should remember previous work.
+
+=========================================================
+TASK LIFECYCLE
+=========================================================
+
+NEW
+
+↓
+
+PLANNED
+
+↓
+
+RUNNING
+
+↓
+
+QA
+
+↓
+
+DONE
+
+or
+
+FAILED
+
+=========================================================
+QUALITY RULES
+=========================================================
+
+Every important output gets QA.
+
+QA checks
+
+Schema
+
+Logic
+
+Hallucinations
+
+Topic drift
+
+Grammar
+
+Formatting
+
+Consistency
+
+Completeness
+
+Only then return to user.
+
+=========================================================
+DASHBOARD
+=========================================================
+
+Dashboard should eventually display
+
+Running agents
+
+Task queue
+
+Agent status
+
+API usage
+
+Costs
+
+Logs
+
+Errors
+
+Memory
+
+Business performance
+
+Revenue
+
+Current workflows
+
+=========================================================
+CODING RULES
+=========================================================
+
+Write modular code.
+
+Avoid duplication.
+
+Use dependency injection where possible.
+
+Separate infrastructure from business logic.
+
+Use type hints.
+
+Use Pydantic models.
+
+Use schemas everywhere.
+
+Every new feature should be extendable.
+
+Never implement shortcuts that prevent scaling later.
+
+=========================================================
+CURRENT PRIORITY
+=========================================================
+
+DO NOT build more Etsy features yet.
+
+Finish infrastructure first.
+
+Every future feature should reuse existing systems.
+
+The objective is not to finish Etsy quickly.
+
+The objective is to build an AI operating system capable of running unlimited businesses.
+
+=========================================================
+IMPORTANT
+=========================================================
+
+Whenever making architectural decisions, prioritize:
+
+Scalability
+
+Maintainability
+
+Provider independence
+
+Modularity
+
+Autonomous operation
+
+Future expansion
+
+Cost efficiency
+
+Human oversight through dashboard only
+
+The user wants the company to operate automatically, with intervention limited to monitoring, handling exceptions, or making strategic decisions when necessary.
+
+Every implementation should move the project toward that vision.

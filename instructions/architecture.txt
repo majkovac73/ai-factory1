@@ -1,0 +1,157 @@
+# AI Factory — Architecture
+
+## 1. High-Level System
+
+User → API → Task Processor → Orchestrator → Agents → AI Router → OpenRouter → Model
+
+Result → QA → Storage → API Response → Dashboard
+
+---
+
+## 2. Core Components
+
+### API Layer (FastAPI)
+- Receives tasks
+- Returns task IDs
+- Fetches results
+
+---
+
+### Task Processor
+- Converts request → structured task
+- Assigns to orchestrator
+- Tracks status
+
+---
+
+### Orchestrator (CORE SYSTEM)
+
+Responsible for:
+- Creating execution plan
+- Assigning agents
+- Managing workflow steps
+- Enforcing order:
+  Planner → Executor → QA
+
+No direct agent skipping allowed.
+
+---
+
+### AI Router
+
+Single abstraction layer:
+
+Capabilities:
+- generate_text
+- reason
+- generate_image
+- vision
+- embed
+- classify
+
+Maps capabilities → provider/model.
+
+Agents never see provider.
+
+---
+
+### Agents
+
+Each agent has:
+- role
+- goal
+- tools
+- memory
+- run()
+- review()
+
+Agents are stateless between tasks unless memory is injected.
+
+---
+
+### Memory System
+
+Levels:
+1. Agent memory (short-term)
+2. Department memory
+3. Company memory
+4. Database (persistent)
+
+---
+
+### Task Queue
+
+States:
+- NEW
+- PLANNED
+- RUNNING
+- QA
+- DONE
+- FAILED
+
+---
+
+### QA System
+
+Validates:
+- Schema correctness
+- Logical consistency
+- Hallucinations
+- Format compliance
+- Completeness
+
+---
+
+### Logging System
+
+Logs:
+- All prompts
+- All outputs
+- Model used
+- Token usage
+- Errors
+- Retry attempts
+
+---
+
+### Dashboard
+
+Shows:
+- Running agents
+- Tasks
+- Errors
+- Costs
+- Performance metrics
+
+---
+
+## 3. Data Flow
+
+1. User sends request
+2. Task created
+3. Orchestrator plans workflow
+4. Agents execute steps
+5. AI Router generates outputs
+6. QA validates results
+7. Output stored
+8. Returned to user
+
+---
+
+## 4. Design Constraints
+
+- No agent direct calls
+- No hardcoded providers
+- No free-form output allowed
+- No uncontrolled LLM responses
+- Everything schema-driven
+
+---
+
+## 5. Future Extensions
+
+- Etsy integration module
+- Marketing automation
+- Image generation pipeline
+- Multi-business support
+- Self-improving agents

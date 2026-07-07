@@ -1,0 +1,155 @@
+# AI Factory — Project Specification
+
+## 1. Mission
+
+Build a fully autonomous AI operating system capable of running multiple online businesses (starting with Etsy) with minimal human intervention.
+
+The system must:
+- Generate products
+- Validate products
+- Create listings
+- Optimize SEO
+- Manage marketing
+- Track analytics
+- Expand into new businesses
+
+Human role:
+- Monitor system
+- Fix failures
+- Make strategic decisions only
+
+---
+
+## 2. Core Philosophy
+
+This is NOT:
+- A chatbot
+- A prompt chain
+- A wrapper around APIs
+
+This IS:
+- An AI Operating System for autonomous businesses
+
+Key principles:
+- Full modularity
+- Provider independence
+- Schema-first outputs
+- Agent isolation
+- Central orchestration
+- Strict validation
+
+---
+
+## 3. System Rules
+
+### Rule 1 — No direct agent communication
+All agents communicate ONLY via orchestrator.
+
+### Rule 2 — No model selection in agents
+Only AI Router selects models.
+
+### Rule 3 — Capability-based AI usage
+Agents request capabilities:
+
+- generate_text
+- reason
+- generate_image
+- vision
+- embed
+- classify
+
+NOT provider names.
+
+### Rule 4 — Strict structured outputs
+All outputs must be valid JSON matching schema.
+
+No markdown.
+No explanations.
+No extra text.
+
+### Rule 5 — Validation required
+Every output must pass schema validation.
+If not:
+retry → repair → retry → fail
+
+---
+
+## 4. Current Stage
+
+Phase 1: Core Infrastructure
+
+NOT building Etsy yet.
+
+Focus:
+- AI Router
+- Agent system
+- Task queue
+- Memory system
+- Logging
+- Basic dashboard
+
+---
+
+## 5. Long-Term Goal
+
+A self-operating AI company:
+
+CEO Agent:
+- Allocates resources
+- Starts/stops businesses
+- Monitors performance
+
+Departments:
+- Market Intelligence
+- Product Development
+- Creative
+- QA
+- Marketing
+- Finance
+- Analytics
+
+---
+
+## 6. Technology Stack
+
+Backend:
+- Python
+- FastAPI
+- SQLAlchemy
+- PostgreSQL (later)
+
+AI Gateway:
+- OpenRouter (primary)
+- Future: OpenAI, Anthropic
+
+Frontend:
+- React (later)
+
+---
+
+## 7. Task Lifecycle
+
+Every task flows:
+
+NEW → PLANNED → RUNNING → QA → DONE / FAILED
+
+---
+
+## 8. Quality Requirements
+
+All outputs must:
+- Be schema valid
+- Be non-hallucinated
+- Be consistent
+- Pass QA checks
+
+---
+
+## 9. Non-Goals (for now)
+
+- No full Etsy automation
+- No marketing automation
+- No image pipelines
+- No expansion systems
+
+Only infrastructure first.

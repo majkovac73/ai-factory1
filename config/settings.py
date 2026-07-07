@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str | None = None
     DEFAULT_MODEL: str = "openai/gpt-4o-mini"
 
+    IMAGE_PROVIDER: str = "dalle3"
+    DEFAULT_IMAGE_SIZE: str = "1024x1024"
+
     ETSY_API_KEY: str | None = None
     ETSY_SHARED_SECRET: str | None = None
     ETSY_REDIRECT_URI: str = "http://localhost:8000/etsy/oauth/callback"
@@ -33,6 +36,8 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "change_me"
 
     LOG_LEVEL: str = "info"
+
+    AUTO_PUBLISH_LISTINGS: bool = False
 
     class Config:
         env_file = ".env"

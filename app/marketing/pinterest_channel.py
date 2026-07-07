@@ -34,7 +34,14 @@ class PinterestChannel(MarketingChannel):
         }
 
         image_url = listing.get("image_url")
-        if image_url:
+        image_b64 = listing.get("image_base64")
+        if image_b64:
+            payload["media_source"] = {
+                "source_type": "image_base64",
+                "content_type": listing.get("image_content_type", "image/png"),
+                "data": image_b64,
+            }
+        elif image_url:
             payload["media_source"] = {"source_type": "image_url", "url": image_url}
 
         try:

@@ -7,5 +7,6 @@ from app.models.etsy_token import EtsyToken
 from app.models.marketing_post import MarketingPost
 from app.models.pinterest_token import PinterestToken
 from app.models.analytics_event import AnalyticsEvent
+from app.models.image_asset import ImageAsset
 
-__all__ = ["Task", "TaskStep", "AgentExecution", "Log", "Memory", "EtsyToken", "MarketingPost", "PinterestToken", "AnalyticsEvent"]
+__all__ = ["Task", "TaskStep", "AgentExecution", "Log", "Memory", "EtsyToken", "MarketingPost", "PinterestToken", "AnalyticsEvent", "ImageAsset"]
