@@ -54,12 +54,13 @@ assert pin_path.name == "pin.png"
 assert pin_path.parent == LISTING_DIR / task_id
 print(f"  Saved: {pin_path}")
 
-print("\n[2] Verifying native 2:3 aspect ratio requested (not DALL-E 4:7 workaround)...")
+print("\n[2] Verifying native 2:3 aspect ratio and 4K resolution (Seedream min pixel requirement)...")
 assert fake.last_aspect_ratio == PINTEREST_ASPECT_RATIO, f"Expected {PINTEREST_ASPECT_RATIO}, got {fake.last_aspect_ratio}"
 assert PINTEREST_ASPECT_RATIO == "2:3", "PINTEREST_ASPECT_RATIO constant should be '2:3'"
-assert fake.last_resolution == PINTEREST_RESOLUTION
-print(f"  aspect_ratio: {fake.last_aspect_ratio}  (native 2:3 — correct)")
-print(f"  resolution  : {fake.last_resolution}")
+assert fake.last_resolution == PINTEREST_RESOLUTION, f"Expected {PINTEREST_RESOLUTION}, got {fake.last_resolution}"
+assert PINTEREST_RESOLUTION == "4K", "PINTEREST_RESOLUTION should be '4K' (2:3@2K is below Seedream's 3.69M px minimum)"
+print(f"  aspect_ratio: {fake.last_aspect_ratio}  (native 2:3)")
+print(f"  resolution  : {fake.last_resolution}  (4K required for 2:3 on Seedream 4.5)")
 
 print("\n[3] Verifying prompt contains product name and Pinterest context...")
 assert "Boho Wall Art Print" in fake.last_prompt

@@ -1,0 +1,109 @@
+FIX — Switch default image model to Seedream 4.5 for cost efficiency
+
+═══════════════════════════════════════════════════════════════
+CONTEXT
+═══════════════════════════════════════════════════════════════
+
+Real measured cost per product on google/gemini-3.1-flash-image is
+~$0.30 (3 images at 1K @ $0.0672 + 1 image at 2K @ $0.1008), because
+that model bills per image-token and does not scale flat with
+resolution. ByteDance's Seedream 4.5 bills at a flat rate regardless
+of resolution, making 2K delivery images no more expensive than 1K
+listing images. Switch the default model.
+
+Model slug to use: "bytedance-seed/seedream-4.5" — note the slug is
+"bytedance-seed", NOT "bytedance". Getting this wrong will 400.
+
+Note: OpenRouter's own materials disagree with each other on the
+exact per-image price — the model's public page states $0.04/image,
+but a cached docs example shows cost_usd: 0.05 for the same model.
+Do not trust either figure — get the real number from a live response
+per step 3 below.
+
+═══════════════════════════════════════════════════════════════
+STEP 1 — Confirm this model's actual accepted parameters first
+═══════════════════════════════════════════════════════════════
+
+Fetch https://openrouter.ai/api/v1/images/models/bytedance-seed/seedream-4.5/endpoints
+before changing any code. Confirm:
+  - It accepts "resolution" (enum: 1K/2K/4K per public docs) and
+    "aspect_ratio" — confirm the exact accepted aspect_ratio values,
+    since Seedream reportedly supports 18 aspect ratios but the
+    precise list needs verifying against this specific endpoint, not
+    assumed from the general marketing page.
+  - Confirm it does NOT require any parameter your current
+    OpenRouterImageProvider isn't already sending (e.g. check if
+    "n" or "seed" are required vs optional — per the docs these
+    appear optional with sensible defaults).
+
+═══════════════════════════════════════════════════════════════
+STEP 2 — Change the default model setting
+═══════════════════════════════════════════════════════════════
+
+In config/settings.py, find:
+    OPENROUTER_IMAGE_MODEL: str = "google/gemini-3.1-flash-image"
+
+Replace with:
+    OPENROUTER_IMAGE_MODEL: str = "bytedance-seed/seedream-4.5"
+
+Do NOT change anything in openrouter_image_provider.py itself unless
+step 1's endpoint check reveals it sends a parameter this model
+doesn't accept (in which case, fix only that specific mismatch — the
+provider is supposed to already be model-agnostic per how it was
+built).
+
+═══════════════════════════════════════════════════════════════
+STEP 3 — Re-run the real verification test with the new model
+═══════════════════════════════════════════════════════════════
+
+Re-run scripts/test_openrouter_image_provider.py as-is (it already
+makes real 1:1/1K and 1:1/2K calls and decodes real dimensions via
+Pillow, and will now hit Seedream instead of Gemini since it reads
+settings.OPENROUTER_IMAGE_MODEL). Confirm:
+  - Real dimensions returned for 1:1 @ 1K and 1:1 @ 2K (may differ
+    from Gemini's 1024×1024/2048×2048 — don't assume they match).
+  - Real actual cost per call from the response's usage/cost field —
+    this is the authoritative number, overriding both conflicting
+    cached prices mentioned in CONTEXT above.
+  - If dimensions differ from Gemini's, check whether
+    image_validation_service.py's minimum thresholds (1000×1000) are
+    still satisfied — update only if they're not.
+
+═══════════════════════════════════════════════════════════════
+STEP 4 — Update the per-product cost estimate
+═══════════════════════════════════════════════════════════════
+
+Using the real confirmed per-call cost from step 3, recalculate:
+  per-product cost = (2 listing images + 1 Pinterest image, all 1K)
+                    + (1 delivery image, 2K)
+using Seedream's real confirmed price, not the $0.04/$0.05 guesses
+from CONTEXT. Since Seedream is flat-rate, this should just be
+4 × (real confirmed per-image price).
+
+═══════════════════════════════════════════════════════════════
+CHANGELOG ENTRY
+═══════════════════════════════════════════════════════════════
+
+Append to C:\ai-factory\instructions\CHANGELOG_AUTOMATED.md:
+
+## Fix — Switch default image model to Seedream 4.5
+**Date:** <today>
+**Files modified:**
+  - config/settings.py — OPENROUTER_IMAGE_MODEL: "google/gemini-3.1-flash-image" → "bytedance-seed/seedream-4.5"
+  - <any other file, only if step 1/3 revealed an actual incompatibility>
+**Test:** scripts/test_openrouter_image_provider.py — PASSED (real
+  Seedream 4.5 API calls made)
+  - Confirmed 1:1 @ 1K => <real dimensions>, real cost $<real price>
+  - Confirmed 1:1 @ 2K => <real dimensions>, real cost $<real price>
+**Notes/assumptions:**
+  - Real confirmed per-image cost: $<fill in> (overrides the
+    conflicting $0.04/$0.05 figures found in OpenRouter's own docs)
+  - Updated per-product cost estimate: $<fill in> (down from ~$0.30
+    on Gemini)
+  - Model remains swappable via settings.OPENROUTER_IMAGE_MODEL with
+    no other code changes required, assuming step 1's parameter
+    check found no incompatibilities.
+
+---
+
+Stop after this changelog entry.

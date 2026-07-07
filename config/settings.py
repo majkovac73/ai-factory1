@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str | None = None
 
     IMAGE_PROVIDER: str = "openrouter"
-    OPENROUTER_IMAGE_MODEL: str = "google/gemini-3.1-flash-image"
+    OPENROUTER_IMAGE_MODEL: str = "bytedance-seed/seedream-4.5"
     DEFAULT_IMAGE_SIZE: str = "1024x1024"  # fallback; actual per-request sizing uses aspect_ratio + resolution params
 
     ETSY_API_KEY: str | None = None

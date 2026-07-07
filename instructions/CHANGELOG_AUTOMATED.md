@@ -2,6 +2,26 @@
 
 ---
 
+## Fix — Switch default image model to Seedream 4.5
+**Date:** 2026-07-07
+**Files modified:**
+  - config/settings.py — OPENROUTER_IMAGE_MODEL: "google/gemini-3.1-flash-image" → "bytedance-seed/seedream-4.5"
+  - app/agents/image/product_image_agent.py — default resolution: "1K" → "2K" (Seedream requires minimum ~3,686,400 pixels; "1K"=1024×1024=1M pixels is below this)
+  - app/agents/image/social_image_agent.py — PINTEREST_RESOLUTION: "2K" → "4K" (2:3 at "2K" produces ~2.8M pixels, still below Seedream minimum; 4K produces 2732×4096=11.2M pixels; flat-rate so no cost penalty)
+  - scripts/test_openrouter_image_provider.py — Updated to use "2K" for 1:1 calls and "4K" for 2:3 Pinterest call; model assertion made model-agnostic; summary note added explaining the pixel-minimum constraint
+  - scripts/test_step70_social_image_agent.py — Assertion updated to expect PINTEREST_RESOLUTION="4K"
+**Test:** scripts/test_openrouter_image_provider.py — PASSED (real Seedream 4.5 API calls made, 2 images generated)
+  - Confirmed 1:1 @ 2K => 2048×2048 px, real cost $0.04
+  - Confirmed 2:3 @ 4K => 2732×4096 px, real cost $0.04 (flat-rate — same cost despite 2.7× more image tokens)
+**Notes/assumptions:**
+  - Real confirmed per-image cost: $0.04 flat regardless of resolution or aspect ratio (overrides the conflicting $0.04/$0.05 figures in OpenRouter docs — the $0.05 figure appears to be stale)
+  - Seedream pixel minimum constraint discovered: requires >= 3,686,400 pixels per image. 1:1 at "1K" (1,048,576 px) fails with HTTP 400. 1:1 at "2K" (4,194,304 px) passes. Non-square ratios need "4K" because e.g. 2:3 at "2K" only produces ~2.8M pixels.
+  - Updated per-product cost estimate: 4 × $0.04 = $0.16/product (down from ~$0.30 on Gemini Flash). No resolution-based cost scaling — all 4 images cost the same regardless of whether they are "2K" or "4K".
+  - Parameter compatibility: Seedream accepts the same aspect_ratio and resolution params already sent by OpenRouterImageProvider. No changes to the provider itself were needed.
+  - Model remains swappable via settings.OPENROUTER_IMAGE_MODEL with no other code changes, assuming the target model also uses the same resolution/aspect_ratio parameter names.
+
+---
+
 ## Fix — Confirm real image dimensions and correct cost assumptions
 **Date:** 2026-07-07
 **Files modified:**

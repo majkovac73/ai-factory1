@@ -26,7 +26,7 @@ from app.core.providers.image_manager import ImageProviderManager
 from app.services.image_file_service import ImageFileService
 
 PINTEREST_ASPECT_RATIO = "2:3"
-PINTEREST_RESOLUTION = "1K"
+PINTEREST_RESOLUTION = "4K"  # Seedream 4.5: non-square 2:3 at 2K is only ~2.8M pixels, below the 3.69M minimum; 4K satisfies it. Flat-rate so no extra cost.
 
 
 class SocialImageAgent(BaseAgent):

@@ -1,12 +1,16 @@
 """
 OpenRouter image provider test — replaces test_step67_dalle3_provider.py.
 
-Makes ONE real OpenRouter Image API call to confirm end-to-end integration
-and print the actual returned image dimensions (used to ground-truth the
-aspect-ratio and minimum-resolution constants in image_validation_service.py).
+Makes real OpenRouter Image API calls to confirm end-to-end integration
+and print the actual returned image dimensions.
 
-Pillow is REQUIRED — if it is not importable, the test fails loudly rather
-than silently skipping the dimension check (the core purpose of this test).
+NOTE: bytedance-seed/seedream-4.5 requires a minimum of ~3,686,400 pixels
+(equivalent to 1920x1920 for 1:1). "1K" (1024x1024 = ~1M pixels) is below
+this threshold and returns a 400 error. "2K" is the minimum viable resolution.
+Since Seedream is flat-rate regardless of resolution, "2K" is used throughout.
+
+Pillow is REQUIRED — if not importable, the test fails loudly (dimension
+verification is the core purpose of this test).
 """
 import sys
 import asyncio
@@ -17,14 +21,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 print("=" * 60)
-print("OPENROUTER IMAGE PROVIDER TEST (replaces step67 DALL-E test)")
+print("OPENROUTER IMAGE PROVIDER TEST")
 print("=" * 60)
 
 # 0. Verify Pillow is available — fail loudly if not
 print("\n[0] Checking Pillow is importable...")
 try:
     from PIL import Image as PILImage
-    print(f"  Pillow available: {PILImage.__version__ if hasattr(PILImage, '__version__') else 'OK'}")
+    import PIL
+    print(f"  Pillow available: {PIL.__version__}")
 except ImportError as e:
     print(f"  ERROR: Pillow is not importable: {e}")
     print("  Dimension verification is the core purpose of this test — cannot pass without it.")
@@ -40,7 +45,7 @@ from app.core.providers.image_manager import ImageProviderManager
 ImageProviderManager.reset()
 
 import app.core.providers.openrouter_image_provider  # noqa: F401
-print("  Import OK")
+print(f"  Import OK — model: {config.settings.OPENROUTER_IMAGE_MODEL}")
 
 # 2. Resolve provider
 print("\n[2] Resolving provider via ImageProviderManager...")
@@ -54,63 +59,68 @@ except RuntimeError as e:
     print(f"  OPENROUTER_API_KEY not configured: {e}")
     sys.exit(1)
 
-# 3. ONE real API call — square 1:1 at 1K resolution
-print("\n[3] Making ONE real OpenRouter Image API call (1:1, 1K)...")
-result_1k = asyncio.run(provider.generate_image(
-    prompt="A simple solid red circle centered on a plain white background",
-    aspect_ratio="1:1",
-    resolution="1K",
-))
-assert result_1k.provider == "openrouter"
-assert result_1k.model == "google/gemini-3.1-flash-image"
-assert result_1k.b64_data, "Expected b64_data in result"
-print(f"  provider : {result_1k.provider}")
-print(f"  model    : {result_1k.model}")
-print(f"  b64_data : {len(result_1k.b64_data)} chars")
-
-usage_1k = result_1k.raw_response.get("usage", {})
-cost_1k = usage_1k.get("cost", "unknown")
-print(f"  cost     : ${cost_1k}")
-
-# 4. Decode and measure actual pixel dimensions (1:1 / 1K)
-print("\n[4] Decoding 1:1/1K image to measure actual dimensions...")
-img_bytes_1k = base64.b64decode(result_1k.b64_data)
-with PILImage.open(BytesIO(img_bytes_1k)) as img:
-    width_1k, height_1k = img.size
-    fmt_1k = img.format
-print(f"  Actual dimensions : {width_1k} x {height_1k} px")
-print(f"  Actual ratio      : {width_1k/height_1k:.4f}")
-print(f"  Format            : {fmt_1k}")
-
-# 5. ONE real API call — square 1:1 at 2K resolution (delivery quality cost check)
-print("\n[5] Making ONE real OpenRouter Image API call (1:1, 2K) for delivery cost data...")
+# 3. Real API call — 1:1 at 2K (minimum resolution for Seedream 4.5)
+print("\n[3] Making real OpenRouter Image API call (1:1, 2K)...")
 result_2k = asyncio.run(provider.generate_image(
     prompt="A simple solid red circle centered on a plain white background",
     aspect_ratio="1:1",
     resolution="2K",
 ))
-assert result_2k.b64_data, "Expected b64_data in 2K result"
+assert result_2k.provider == "openrouter"
+assert result_2k.b64_data, "Expected b64_data in result"
+assert result_2k.model, "Expected model field to be populated"
+print(f"  provider : {result_2k.provider}")
+print(f"  model    : {result_2k.model}")
+print(f"  b64_data : {len(result_2k.b64_data)} chars")
 
 usage_2k = result_2k.raw_response.get("usage", {})
 cost_2k = usage_2k.get("cost", "unknown")
-print(f"  cost : ${cost_2k}")
+print(f"  cost     : ${cost_2k}")
 
-img_bytes_2k = base64.b64decode(result_2k.b64_data)
-with PILImage.open(BytesIO(img_bytes_2k)) as img:
+# 4. Decode and measure actual pixel dimensions
+print("\n[4] Decoding image to measure actual dimensions...")
+img_bytes = base64.b64decode(result_2k.b64_data)
+with PILImage.open(BytesIO(img_bytes)) as img:
     width_2k, height_2k = img.size
+    fmt = img.format
 print(f"  Actual dimensions : {width_2k} x {height_2k} px")
+print(f"  Actual ratio      : {width_2k/height_2k:.4f}")
+print(f"  Format            : {fmt}")
+print(f"  Total pixels      : {width_2k * height_2k:,}")
+
+# 5. Real API call — 2:3 at 4K (Pinterest pin)
+# NOTE: Seedream 4.5 requires >= 3,686,400 pixels. 2:3 at 2K is ~2.8M pixels (below
+# minimum). 4K at 2:3 produces enough pixels. Flat-rate so cost is still $0.04.
+print("\n[5] Making real OpenRouter Image API call (2:3, 4K — Pinterest)...")
+result_pin = asyncio.run(provider.generate_image(
+    prompt="A simple solid blue rectangle on a white background",
+    aspect_ratio="2:3",
+    resolution="4K",
+))
+assert result_pin.b64_data, "Expected b64_data in Pinterest result"
+
+usage_pin = result_pin.raw_response.get("usage", {})
+cost_pin = usage_pin.get("cost", "unknown")
+print(f"  cost : ${cost_pin}")
+
+img_bytes_pin = base64.b64decode(result_pin.b64_data)
+with PILImage.open(BytesIO(img_bytes_pin)) as img:
+    width_pin, height_pin = img.size
+print(f"  Actual dimensions : {width_pin} x {height_pin} px")
+print(f"  Actual ratio      : {width_pin/height_pin:.4f}")
 
 # 6. Confirm raw_response structure
 print("\n[6] Checking raw_response structure...")
-assert "data" in result_1k.raw_response
-assert "b64_json" in result_1k.raw_response["data"][0]
-print(f"  1K usage: {usage_1k}")
-print(f"  2K usage: {usage_2k}")
+assert "data" in result_2k.raw_response
+assert "b64_json" in result_2k.raw_response["data"][0]
+print(f"  usage (1:1/2K) : {usage_2k}")
+print(f"  usage (2:3/2K) : {usage_pin}")
 
 # 7. Summary
 print("\n" + "=" * 60)
 print("OPENROUTER IMAGE PROVIDER TEST PASSED")
-print(f"  1:1 @ 1K => {width_1k}x{height_1k} px  cost=${cost_1k}")
-print(f"  1:1 @ 2K => {width_2k}x{height_2k} px  cost=${cost_2k}")
+print(f"  1:1 @ 2K (listing/delivery) => {width_2k}x{height_2k} px  cost=${cost_2k}")
+print(f"  2:3 @ 4K (Pinterest pin)    => {width_pin}x{height_pin} px  cost=${cost_pin}")
+print(f"  NOTE: Seedream minimum is 3,686,400 px; 1:1@2K={width_2k*height_2k:,}px OK, 2:3@2K~2.8M px TOO SMALL => use 4K for non-square")
 print("Real OpenRouter API calls made (2 images total).")
 print("=" * 60)

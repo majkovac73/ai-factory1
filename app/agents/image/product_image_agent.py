@@ -58,7 +58,7 @@ class ProductImageAgent(BaseAgent):
         visual_brief: str,
         size: str = None,
         aspect_ratio: str = "1:1",
-        resolution: str = "1K",
+        resolution: str = "2K",
     ) -> dict:
         """
         Generate hero + lifestyle images and save both as 'listing' variants.
@@ -69,7 +69,7 @@ class ProductImageAgent(BaseAgent):
             visual_brief: Output from VisualDirectorAgent (text description).
             size: Ignored; kept for API compatibility. OpenRouter uses aspect_ratio+resolution.
             aspect_ratio: OpenRouter aspect ratio string (default '1:1' for Etsy square).
-            resolution: OpenRouter resolution tier (default '1K' ≈ 1024px).
+            resolution: OpenRouter resolution tier (default '2K' — Seedream 4.5 minimum).
 
         Returns:
             Dict with paths to saved images:
@@ -121,5 +121,5 @@ class ProductImageAgent(BaseAgent):
             product_name=task.get("product_name", ""),
             visual_brief=task.get("visual_brief", ""),
             aspect_ratio=task.get("aspect_ratio", "1:1"),
-            resolution=task.get("resolution", "1K"),
+            resolution=task.get("resolution", "2K"),
         )
