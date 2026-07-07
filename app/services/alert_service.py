@@ -1,5 +1,5 @@
 """
-Alert service -- step 86.
+Alert service — step 86.
 
 POSTs to DISCORD_WEBHOOK_URL. Never raises: a failed alert must not kill
 the worker that's trying to report a problem.
@@ -12,9 +12,16 @@ Alert on:
 Do NOT alert on:
   - Routine retries / JSON repair attempts
   - External API rate limits that succeed on retry
+  - Concurrent-duplicate IntegrityErrors (expected race-condition behavior)
+
+Debouncing: identical alert titles are suppressed for DEBOUNCE_SECONDS after
+the first send. This prevents alert storms (e.g. 15 concurrent fulfillment
+failures all hitting Discord in the same second and getting rate-limited).
+One alert per event type per minute is enough to be actionable.
 """
 import logging
-from typing import Optional
+import time
+from typing import Dict, Optional
 
 import httpx
 
@@ -23,6 +30,12 @@ from config import settings
 logger = logging.getLogger("ai-factory")
 
 _COLORS = {"error": 16711680, "warning": 16776960, "info": 3447003}
+
+DEBOUNCE_SECONDS = 60
+
+# Module-level so debouncing is shared across all AlertService instances
+# (they are typically created fresh per call, not reused).
+_last_sent: Dict[str, float] = {}
 
 
 class AlertService:
@@ -36,11 +49,21 @@ class AlertService:
         level: str = "error",
     ) -> bool:
         """
-        POST an embed to Discord. Returns True on success, False on failure.
+        POST an embed to Discord. Returns True on success, False on failure or debounce.
         Never raises.
         """
         if not self._url:
             logger.warning(f"AlertService: DISCORD_WEBHOOK_URL not set, dropping alert: {title}")
+            return False
+
+        # Debounce: skip if same title was sent within DEBOUNCE_SECONDS
+        now = time.monotonic()
+        last = _last_sent.get(title, 0.0)
+        if now - last < DEBOUNCE_SECONDS:
+            logger.debug(
+                f"AlertService: debounced '{title}' "
+                f"(sent {now - last:.0f}s ago, cooldown {DEBOUNCE_SECONDS}s)"
+            )
             return False
 
         payload = {
@@ -60,6 +83,7 @@ class AlertService:
             if resp.status_code not in (200, 204):
                 logger.warning(f"AlertService: Discord returned {resp.status_code}")
                 return False
+            _last_sent[title] = now
             return True
         except Exception as e:
             logger.warning(f"AlertService: failed to send alert '{title}': {e}")

@@ -24,9 +24,12 @@ from pathlib import Path
 from datetime import datetime
 from unittest.mock import MagicMock
 
-# Must set DATABASE_URL before any app imports so SessionLocal uses temp DB
+# Must set before any app imports. Clear DATABASE_PATH so Railway's /data/app.db
+# production path doesn't take precedence over our temp DB (DATABASE_PATH wins
+# over DATABASE_URL in app/db/database.py when both are set).
 _tmp = tempfile.NamedTemporaryFile(suffix=".test.db", delete=False)
 _tmp.close()
+os.environ.pop("DATABASE_PATH", None)
 os.environ["DATABASE_URL"] = f"sqlite:///{_tmp.name}"
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))

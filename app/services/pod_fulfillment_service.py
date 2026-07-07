@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
+from sqlalchemy.exc import IntegrityError
 
 from app.agents.product_type_selector_agent import ProductTypeSelectorAgent
 from app.db.database import SessionLocal
@@ -190,11 +191,31 @@ class PODFulfillmentService:
                 created_at=datetime.utcnow(),
                 updated_at=datetime.utcnow(),
             )
-            db.add(record)
-            db.commit()
-            db.refresh(record)
+            try:
+                db.add(record)
+                db.commit()
+                db.refresh(record)
+            except IntegrityError:
+                # Another concurrent thread already inserted the same
+                # (receipt_id, transaction_id). Roll back cleanly and return
+                # the winning record. This is expected under concurrent load —
+                # do NOT alert; it's not an actionable failure.
+                db.rollback()
+                logger.info(
+                    f"PODFulfillmentService: concurrent duplicate for receipt "
+                    f"{receipt_id} txn {transaction_id} — already handled by "
+                    f"another thread, returning existing record"
+                )
+                record = (
+                    db.query(FulfillmentRecord)
+                    .filter(
+                        FulfillmentRecord.etsy_receipt_id == str(receipt_id),
+                        FulfillmentRecord.etsy_transaction_id == str(transaction_id),
+                    )
+                    .first()
+                )
             logger.info(
-                f"PODFulfillmentService: FulfillmentRecord {record.id} created "
+                f"PODFulfillmentService: FulfillmentRecord {record.id} "
                 f"(printify_order={printify_order_id})"
             )
             return record

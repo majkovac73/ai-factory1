@@ -26,9 +26,11 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
-# Temp DB — must be set before importing app modules
+# Must be set before importing app modules. Clear DATABASE_PATH so Railway's
+# /data/app.db production path doesn't override our temp DB on `railway run`.
 _tmp = tempfile.NamedTemporaryFile(suffix=".stress.db", delete=False)
 _tmp.close()
+os.environ.pop("DATABASE_PATH", None)
 os.environ["DATABASE_URL"] = f"sqlite:///{_tmp.name}"
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -256,10 +258,12 @@ assert len(set(receipt_ids_in_db)) == fulfillment_count, "Duplicate receipt_ids 
 print(f"  {RECEIPT_COUNT} concurrent attempts on {POD_COUNT} unique receipts")
 print(f"  Result: {fulfillment_count} FulfillmentRecords — idempotency holds under race")
 if race_errors:
-    # IntegrityError from duplicate inserts is expected — verify they're clean failures
-    internal_errors = [e for e in race_errors if "IntegrityError" not in e and "UNIQUE" not in e.upper()]
-    assert len(internal_errors) == 0, f"Unexpected non-integrity errors: {internal_errors[:3]}"
-    print(f"  {len(race_errors)} duplicate inserts failed cleanly (IntegrityError — expected)")
+    # After the IntegrityError fix in submit_order(), duplicates are handled
+    # internally without raising. Any errors here are unexpected.
+    print(f"  WARNING: {len(race_errors)} unexpected errors: {race_errors[:3]}")
+    assert len(race_errors) == 0, f"All race errors should be handled internally now"
+else:
+    print(f"  No race errors — IntegrityErrors handled silently inside submit_order()")
 
 # ── [4] Worker thread survival after repeated errors ─────────────────────────
 
@@ -303,6 +307,88 @@ assert worker3._thread.is_alive(), "Worker DIED after per-receipt errors"
 worker3.stop()
 print(f"  Worker survived {len(bad_receipts)} consecutive per-receipt exceptions")
 
+# ── [6] IntegrityError path: session clean after rollback ────────────────────
+
+print("\n[6] submit_order() IntegrityError -> clean rollback, session reusable...")
+
+# Seed a PODProduct for this test
+clean_pod_id = str(uuid.uuid4())
+clean_listing_id = "7777777"
+db = SessionLocal()
+db.add(PODProduct(
+    id=clean_pod_id, task_id=task_ids[0],
+    printify_product_id="printify-clean-test",
+    blueprint_id=5, print_provider_id=3,
+    variant_ids=[101], etsy_listing_id=clean_listing_id,
+    created_at=datetime.utcnow(),
+))
+db.commit()
+db.close()
+
+clean_addr = {
+    "first_name": "Clean", "last_name": "Test", "address1": "1 Clean St",
+    "address2": "", "city": "Cleantown", "region": "CA", "country": "US",
+    "zip": "90000", "email": "", "phone": "",
+}
+
+clean_svc = PODFulfillmentService(printify_client=fake_printify)
+
+async def _noop_push2(r, t, c): pass
+clean_svc._push_tracking_to_etsy = _noop_push2
+
+# First call — must succeed
+r1 = clean_svc.submit_order(
+    receipt_id="CLEAN-RECEIPT-001",
+    task_id=task_ids[0],
+    pod_product_id=clean_pod_id,
+    shipping_address=clean_addr,
+    variant_id=101,
+    quantity=1,
+    transaction_id="CLEAN-TXN-001",
+)
+assert r1 is not None, "First submit_order() must return a record"
+assert r1.status == "submitted"
+
+# Second call — same (receipt_id, transaction_id). Must catch IntegrityError
+# internally, rollback cleanly, and return the existing record WITHOUT raising.
+r2 = clean_svc.submit_order(
+    receipt_id="CLEAN-RECEIPT-001",
+    task_id=task_ids[0],
+    pod_product_id=clean_pod_id,
+    shipping_address=clean_addr,
+    variant_id=101,
+    quantity=1,
+    transaction_id="CLEAN-TXN-001",
+)
+assert r2 is not None, "Second submit_order() must return the existing record (not raise)"
+assert r2.id == r1.id, f"Both calls must return same record: {r1.id} vs {r2.id}"
+
+# DB must have exactly 1 record for this receipt+txn
+db = SessionLocal()
+count_clean = db.query(FulfillmentRecord).filter(
+    FulfillmentRecord.etsy_receipt_id == "CLEAN-RECEIPT-001",
+    FulfillmentRecord.etsy_transaction_id == "CLEAN-TXN-001",
+).count()
+db.close()
+assert count_clean == 1, f"Expected 1 FulfillmentRecord after duplicate submit, got {count_clean}"
+
+# Session must be reusable — submit a DIFFERENT receipt on same service instance
+r3 = clean_svc.submit_order(
+    receipt_id="CLEAN-RECEIPT-002",
+    task_id=task_ids[0],
+    pod_product_id=clean_pod_id,
+    shipping_address=clean_addr,
+    variant_id=101,
+    quantity=1,
+    transaction_id="CLEAN-TXN-002",
+)
+assert r3 is not None, "Third submit_order() on different receipt must succeed"
+assert r3.etsy_receipt_id == "CLEAN-RECEIPT-002"
+
+print(f"  First call: FulfillmentRecord {r1.id[:8]} created")
+print(f"  Duplicate call: returned same record {r2.id[:8]} — no exception, no alert")
+print(f"  Post-rollback session reusable: new receipt {r3.id[:8]} created successfully")
+
 # ── [5] DB integrity check ────────────────────────────────────────────────────
 
 print("\n[5] DB integrity check...")
@@ -318,18 +404,23 @@ try:
     assert len(stuck) == 0, f"{len(stuck)} tasks stuck in non-terminal state: {[t.status for t in stuck]}"
 
     all_pods = db.query(PODProduct).all()
-    assert len(all_pods) == POD_COUNT
+    assert len(all_pods) == POD_COUNT + 1  # +1 from the clean-session test [6]
 
     all_records = db.query(FulfillmentRecord).all()
-    assert len(all_records) == POD_COUNT, f"Expected {POD_COUNT} FulfillmentRecords, got {len(all_records)}"
+    # POD_COUNT from the race test + 2 from the clean-session test [6]
+    expected_fr = POD_COUNT + 2
+    assert len(all_records) == expected_fr, (
+        f"Expected {expected_fr} FulfillmentRecords ({POD_COUNT} race + 2 clean-session), "
+        f"got {len(all_records)}"
+    )
 
-    # No duplicate receipt IDs
-    ids = [r.etsy_receipt_id for r in all_records]
-    assert len(ids) == len(set(ids)), "Duplicate etsy_receipt_id found in FulfillmentRecord table"
+    # Composite key (receipt_id, txn_id) must be unique across all rows
+    keys = [(r.etsy_receipt_id, r.etsy_transaction_id) for r in all_records]
+    assert len(keys) == len(set(keys)), "Duplicate (receipt_id, txn_id) found in FulfillmentRecord table"
 
     print(f"  Tasks: {TASK_COUNT} all terminal")
     print(f"  PODProducts: {len(all_pods)}")
-    print(f"  FulfillmentRecords: {len(all_records)}, all unique receipt IDs")
+    print(f"  FulfillmentRecords: {len(all_records)}, all unique composite keys")
 finally:
     db.close()
 
@@ -344,6 +435,7 @@ print(f"  Real API spend: ${budget.spent:.4f} (limit: ${BudgetTracker.LIMIT_USD:
 print(f"  [{TASK_COUNT}] tasks processed without worker crash")
 print(f"  [30] concurrent receipt attempts -> {POD_COUNT} records (idempotency held)")
 print(f"  [5] consecutive per-receipt errors did NOT kill worker thread")
+print(f"  [6] IntegrityError caught, session rolled back cleanly, reusable after")
 print(f"  [DB] all tables consistent, no duplicate keys")
 print("  Zero real Printify/Etsy/OpenRouter API calls made.")
 print("=" * 60)

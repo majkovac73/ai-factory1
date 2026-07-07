@@ -1,0 +1,90 @@
+FIX — Investigate step 83 failure, clean up test data pollution, harden idempotency and alerting
+
+═══════════════════════════════════════════════════════════════
+PART 1 — Diagnose: pollution vs. real bug
+═══════════════════════════════════════════════════════════════
+
+Before changing any fulfillment logic, query the actual FulfillmentRecord
+rows currently in the Railway production database (railway run python -c
+or a small throwaway script) and print every row's etsy_receipt_id,
+etsy_transaction_id, and created_at, sorted by created_at. Determine
+whether 3 of the 13 rows counted in step 83's failed assertion are
+leftovers from step 81's test run (created earlier, tied to
+listing=999000111/999000222) rather than duplicates created during
+step 83's actual race test. Report which explanation is correct before
+proceeding — do not assume, confirm from the real data.
+
+═══════════════════════════════════════════════════════════════
+PART 2 — Stop tests from polluting the real production database
+═══════════════════════════════════════════════════════════════
+
+Every test script run via `railway run` has been writing directly into
+the same persistent /data/app.db that the live app uses. This must
+stop before going further:
+
+1. Clean up ALL known test-created rows currently sitting in the real
+   Railway database: PODProduct rows with listing_id 999000111/999000222
+   (from step 81's test), FulfillmentRecords tied to those, any
+   STRESS-RECEIPT-* records from step 83, and any test Task/ImageAsset
+   rows created by steps 68/76/etc. that weren't cleaned up. Write a
+   one-off cleanup script, run it, and confirm the tables are clean
+   afterward.
+
+2. Going forward, every test script that writes to the database must
+   either (a) use a separate test database path (e.g. check for a
+   TEST_DATABASE_PATH env var and use SQLite's in-memory or a temp-file
+   DB when set, defaulting to the real path only for actual app
+   runtime), or (b) explicitly clean up every row it creates at the end
+   of the script, the way scripts/test_step68_image_storage.py already
+   correctly does. Retrofit this into test_step81_pod_fulfillment.py
+   and test_step83_stress.py specifically, since those are the two that
+   don't currently clean up.
+
+═══════════════════════════════════════════════════════════════
+PART 3 — Harden the idempotency check itself
+═══════════════════════════════════════════════════════════════
+
+Regardless of what part 1 finds, the check-then-act pattern in
+EtsyReceiptWorker/PODFulfillmentService has a genuine race window
+under concurrent processing (confirmed by the real IntegrityErrors in
+the stress test log). Fix this properly:
+
+1. Wrap the FulfillmentRecord insert in a try/except catching the
+   specific IntegrityError on the (etsy_receipt_id, etsy_transaction_id)
+   unique constraint.
+2. On catching it, treat this as "another concurrent process already
+   handled this receipt+transaction" — log it at debug/info level (not
+   as a failure), roll back the session cleanly, and move on WITHOUT
+   calling AlertService (this is expected behavior under concurrency,
+   not an actionable error).
+3. Confirm the session is properly rolled back after a caught
+   IntegrityError before the worker's next iteration reuses it — verify
+   this explicitly with a test, since a dirty session after a caught
+   exception is a common source of follow-on bugs in SQLAlchemy.
+
+═══════════════════════════════════════════════════════════════
+PART 4 — Prevent Discord alert storms
+═══════════════════════════════════════════════════════════════
+
+Add simple debouncing to AlertService: track the last-sent timestamp
+per alert "key" (e.g. event_type + a coarse identifier), and skip
+sending (just log locally instead) if an alert of the same key was
+sent within the last N seconds (e.g. 60). This prevents a burst of
+concurrent identical failures from all trying to hit Discord at once
+and getting rate-limited — you want ONE alert telling you "fulfillment
+failures happening," not fifteen attempts where most get silently
+dropped by a 429.
+
+═══════════════════════════════════════════════════════════════
+PART 5 — Re-run and confirm
+═══════════════════════════════════════════════════════════════
+
+After parts 2-4: re-run scripts/test_step83_stress.py via
+`railway run` again. It should now pass cleanly with exactly the
+expected FulfillmentRecord count, no stray IntegrityErrors surfacing
+as logged failures (they should be silently and correctly handled),
+and no Discord 429s in the output.
+
+Changelog entry: document what part 1 found (pollution vs. real bug —
+report the actual answer), the cleanup performed, and confirm the
+re-run passes cleanly.
