@@ -8,6 +8,7 @@ from app.agents.roles import get_role_for_task_type
 from app.schemas.enums import TaskStatus
 from app.services.task_service import TaskService
 from app.services.log_service import LogService
+from app.services.analytics_service import AnalyticsService
 
 logger = logging.getLogger("ai-factory")
 
@@ -26,6 +27,7 @@ class TaskProcessor:
     def __init__(self):
         self.task_service = TaskService()
         self.log_service = LogService()
+        self.analytics_service = AnalyticsService()
 
     MAX_QA_RETRIES = 3
 
@@ -67,6 +69,12 @@ class TaskProcessor:
 
             if qa_passed:
                 self._advance(task_id, TaskStatus.DONE.value)
+                self.analytics_service.record_event(
+                    event_type="task_completed",
+                    entity_type="task",
+                    entity_id=task_id,
+                    payload={"task_type": task.type or "general"},
+                )
             else:
                 fail_msg = f"Task {task_id} failed QA after {self.MAX_QA_RETRIES} retries, marking FAILED"
                 logger.error(fail_msg)

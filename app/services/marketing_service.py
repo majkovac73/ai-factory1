@@ -2,6 +2,7 @@ import logging
 
 from app.db.database import SessionLocal
 from app.models.marketing_post import MarketingPost
+from app.services.analytics_service import AnalyticsService
 
 logger = logging.getLogger("ai-factory")
 
@@ -14,6 +15,9 @@ class MarketingService:
     channels) and passed in here rather than imported directly, so this
     service has no hard dependency on any specific platform.
     """
+
+    def __init__(self):
+        self.analytics_service = AnalyticsService()
 
     def post_to_channel(self, task_id: str, listing: dict, channel) -> dict:
         """
@@ -53,6 +57,13 @@ class MarketingService:
             db.commit()
         finally:
             db.close()
+
+        self.analytics_service.record_event(
+            event_type="marketing_post_success" if result.get("success") else "marketing_post_failed",
+            entity_type="marketing_post",
+            entity_id=record.id,
+            payload={"task_id": task_id, "channel": channel.name},
+        )
 
         return result
 
