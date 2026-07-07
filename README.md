@@ -13,12 +13,6 @@ or SaaS platform, and it is not intended for use by any other Etsy seller.
 - All drafts are manually reviewed and published by the shop owner — the app does not
   auto-publish listings
 
-**What it does not do:**
-- Does not access, read, or modify any shop other than the developer's own
-- Does not scrape or collect data from Etsy beyond what is needed to manage the owner's
-  own shop
-- Does not interact with buyers, messages, or orders on Etsy
-- Does not automate purchasing or any buyer-facing activity
 
 **Etsy API scopes used:**
 - `listings_r` — read the owner's own existing listings
