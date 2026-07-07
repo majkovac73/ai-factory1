@@ -9,6 +9,7 @@ from app.schemas.enums import TaskStatus
 from app.services.task_service import TaskService
 from app.services.log_service import LogService
 from app.services.analytics_service import AnalyticsService
+from app.services.pipeline_orchestrator import PipelineOrchestrator
 
 logger = logging.getLogger("ai-factory")
 
@@ -28,6 +29,7 @@ class TaskProcessor:
         self.task_service = TaskService()
         self.log_service = LogService()
         self.analytics_service = AnalyticsService()
+        self.pipeline = PipelineOrchestrator()
 
     MAX_QA_RETRIES = 3
 
@@ -75,6 +77,10 @@ class TaskProcessor:
                     entity_id=task_id,
                     payload={"task_type": task.type or "general"},
                 )
+                try:
+                    self.pipeline.run_post_completion(task_id)
+                except Exception as pipeline_err:
+                    logger.error(f"Task {task_id}: post-completion pipeline raised unexpectedly: {pipeline_err}")
             else:
                 fail_msg = f"Task {task_id} failed QA after {self.MAX_QA_RETRIES} retries, marking FAILED"
                 logger.error(fail_msg)
