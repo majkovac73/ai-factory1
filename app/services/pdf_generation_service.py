@@ -40,6 +40,18 @@ from config import settings
 
 logger = logging.getLogger("ai-factory")
 
+# Per-page image request parameters. Pages are portrait, so aspect_ratio="2:3".
+# Seedream 4.5 rejects any request below 3,686,400 pixels with an HTTP 400
+# ("image size must be at least 3686400 pixels"). A 2:3 page at "2K" is only
+# ~2.8M pixels (1365×2048) — below that floor — which is exactly what failed in
+# production (task 127d5130). "4K" at 2:3 produces 2732×4096 = ~11.2M pixels,
+# comfortably above the floor. Seedream is flat-rate ($0.04/image) regardless of
+# resolution, so this is a pure correctness fix with no cost change. This mirrors
+# the same 2K→4K fix already applied to the Pinterest pin (see
+# social_image_agent.PINTEREST_RESOLUTION).
+PDF_PAGE_ASPECT_RATIO = "2:3"
+PDF_PAGE_RESOLUTION = "4K"
+
 
 class PDFGenerationError(Exception):
     """Raised when PDF assembly cannot produce a valid, complete multi-page deliverable."""
@@ -116,7 +128,11 @@ class PDFGenerationService:
             for attempt in range(1, qa_attempts + 1):
                 try:
                     result = asyncio.run(
-                        self.image_provider.generate_image(prompt, aspect_ratio="2:3", resolution="2K")
+                        self.image_provider.generate_image(
+                            prompt,
+                            aspect_ratio=PDF_PAGE_ASPECT_RATIO,
+                            resolution=PDF_PAGE_RESOLUTION,
+                        )
                     )
                     img = self._load_image(result)
                 except Exception as e:
