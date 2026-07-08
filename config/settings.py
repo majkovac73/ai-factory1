@@ -67,6 +67,15 @@ class Settings(BaseSettings):
     # real, billable image-generation call — this must never be unbounded.
     MAX_PDF_PAGES: int = 6
 
+    # Content-quality gate (step 96): a VISION-capable model inspects the
+    # actual generated delivery asset for legibility/coherence/correctness —
+    # image-generation models garble text (e.g. "2 þutter"), which no
+    # structural check catches. gpt-4o-mini is vision-capable and cheap; a
+    # stronger model (openai/gpt-4o, a Claude vision model) can be swapped in
+    # here if QA accuracy needs improving.
+    CONTENT_QA_MODEL: str = "openai/gpt-4o-mini"
+    CONTENT_QA_MAX_ATTEMPTS: int = 2  # regenerate-and-recheck attempts before blocking
+
     class Config:
         env_file = ".env"
         extra = "ignore"

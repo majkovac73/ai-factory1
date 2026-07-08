@@ -77,6 +77,18 @@ import app.models.task, app.models.log, app.models.analytics_event
 import app.models.image_asset, app.models.marketing_post
 Base.metadata.create_all(bind=engine)
 
+# ── step 96: bypass the real vision content-quality gate ──────────────────────
+# These pre-96 suites exercise structural gates; replace ContentQualityService
+# with an always-pass double so run_post_completion doesn't make real vision
+# API calls. The gate's own behaviour is covered in test_step96.
+import unittest.mock as _mock96
+class _PassCQ96:
+    def __init__(self, *a, **k): pass
+    def review_asset_file(self, *a, **k): return _mock96.Mock(passed=True, specific_issues=[])
+    def review_asset_bytes(self, *a, **k): return _mock96.Mock(passed=True, specific_issues=[])
+    def check_marketing_consistency(self, *a, **k): return _mock96.Mock(passed=True, specific_issues=[])
+_mock96.patch("app.services.content_quality_service.ContentQualityService", _PassCQ96).start()
+
 from PIL import Image as PILImage
 
 from app.services.task_service import TaskService
@@ -238,8 +250,10 @@ with tempfile.TemporaryDirectory() as tmp:
     etsy3 = FakeEtsyClientHappy()
 
     eis3 = MagicMock()
+    _st3 = {"n": 0}
 
     async def _attach3(listing_id, listing_image_paths, digital_file_path=None):
+        _st3["n"] = len(listing_image_paths)
         return {
             "listing_id": listing_id,
             "uploaded_images": [{"path": p, "result": {"ok": True}} for p in listing_image_paths],
@@ -248,7 +262,7 @@ with tempfile.TemporaryDirectory() as tmp:
         }
 
     async def _get_images3(listing_id):
-        return [{"listing_image_id": 1}]
+        return [{"listing_image_id": i} for i in range(_st3["n"])]
 
     async def _get_files3(listing_id):
         return []  # ground truth: nothing is actually there
@@ -288,8 +302,10 @@ with tempfile.TemporaryDirectory() as tmp:
     etsy4 = FakeEtsyClientHappy()
 
     eis4 = MagicMock()
+    _st4 = {"n": 0}
 
     async def _attach4(listing_id, listing_image_paths, digital_file_path=None):
+        _st4["n"] = len(listing_image_paths)
         return {
             "listing_id": listing_id,
             "uploaded_images": [{"path": p, "result": {"ok": True}} for p in listing_image_paths],
@@ -300,7 +316,7 @@ with tempfile.TemporaryDirectory() as tmp:
         }
 
     async def _get_images4(listing_id):
-        return [{"listing_image_id": 1}]
+        return [{"listing_image_id": i} for i in range(_st4["n"])]
 
     async def _get_files4(listing_id):
         return [{"listing_file_id": 1, "filetype": "image/png"}]

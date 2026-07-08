@@ -52,9 +52,18 @@ class PDFGenerationService:
     plugs into the same readback-verification gate as single-image products.
     """
 
-    def __init__(self, image_provider=None):
+    def __init__(self, image_provider=None, content_quality_service=None):
         self.image_provider = image_provider or ImageProviderManager.get_provider()
         self.file_service = ImageFileService()
+        # Injected lazily (avoids a hard import cost when QA isn't used, and
+        # lets tests pass a double). None -> built on first use.
+        self._content_qa = content_quality_service
+
+    def _qa_service(self):
+        if self._content_qa is None:
+            from app.services.content_quality_service import ContentQualityService
+            self._content_qa = ContentQualityService()
+        return self._content_qa
 
     def generate_pdf(
         self,
@@ -92,20 +101,45 @@ class PDFGenerationService:
                 f"requested {page_count} pages exceeds MAX_PDF_PAGES cap of {settings.MAX_PDF_PAGES}"
             )
 
+        from config import settings as _settings
+        qa_attempts = max(1, _settings.CONTENT_QA_MAX_ATTEMPTS)
+
         pages: List[PILImage.Image] = []
         for i, brief in enumerate(page_briefs, start=1):
             prompt = self._build_page_prompt(product_name, visual_brief, brief, i, page_count)
-            try:
-                result = asyncio.run(
-                    self.image_provider.generate_image(prompt, aspect_ratio="2:3", resolution="2K")
-                )
-                img = self._load_image(result)
-            except Exception as e:
-                raise PDFGenerationError(f"page {i}/{page_count} image generation failed: {e}") from e
+            page_img = None
+            last_issues = None
+            # Per-page content QA (step 96): a garbled/illegible page must never
+            # make it into the assembled PDF. Regenerate the failing page up to
+            # CONTENT_QA_MAX_ATTEMPTS times, then fail the whole PDF (which the
+            # orchestrator treats as a delivery failure → task blocked).
+            for attempt in range(1, qa_attempts + 1):
+                try:
+                    result = asyncio.run(
+                        self.image_provider.generate_image(prompt, aspect_ratio="2:3", resolution="2K")
+                    )
+                    img = self._load_image(result)
+                except Exception as e:
+                    raise PDFGenerationError(f"page {i}/{page_count} image generation failed: {e}") from e
 
-            img = img.convert("RGB")
-            img = self._with_caption(img, brief)
-            pages.append(img)
+                img = img.convert("RGB")
+                img = self._with_caption(img, brief)
+
+                qa = self._review_page(img, product_name, brief, i, page_count)
+                if qa is None or qa.passed:
+                    page_img = img
+                    break
+                last_issues = qa.specific_issues
+                logger.warning(
+                    f"PDFGenerationService: page {i}/{page_count} failed content QA "
+                    f"(attempt {attempt}/{qa_attempts}): {last_issues}"
+                )
+
+            if page_img is None:
+                raise PDFGenerationError(
+                    f"page {i}/{page_count} failed content quality after {qa_attempts} attempts: {last_issues}"
+                )
+            pages.append(page_img)
 
         pdf_bytes = self._assemble_pdf_bytes(pages)
         pdf_path = self.file_service.save_bytes(pdf_bytes, task_id, "delivery", filename)
@@ -132,6 +166,24 @@ class PDFGenerationService:
             "Clean print-ready layout, portrait orientation, consistent visual "
             "style with the rest of the set. No watermarks."
         )
+
+    def _review_page(self, img: PILImage.Image, product_name: str, brief: str, page_num: int, total: int):
+        """Content-QA a single rendered page. Returns a ContentQualityResult or
+        None if QA is unavailable (never silently passes on infra error — a
+        None result is treated as pass only when QA genuinely cannot run, e.g.
+        a test double omitted it; a real failed judgment returns passed=False)."""
+        try:
+            buf = BytesIO()
+            img.save(buf, format="PNG")
+            return self._qa_service().review_asset_bytes(
+                buf.getvalue(),
+                product_name=product_name,
+                product_format="pdf_planner_or_guide",
+                description=f"Page {page_num} of {total}: {brief}",
+            )
+        except Exception as e:
+            logger.warning(f"PDFGenerationService: page content QA unavailable: {e}")
+            return None
 
     def _load_image(self, result) -> PILImage.Image:
         if getattr(result, "b64_data", None):

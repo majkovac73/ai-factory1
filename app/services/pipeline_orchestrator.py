@@ -122,6 +122,41 @@ class PipelineOrchestrator:
         else:
             design_path = self._stage_pod_design(task_id, product_name, visual_brief, task_type, report)
 
+        # 2.5 — CONTENT-QUALITY GATE (step 96). The FIRST check that inspects
+        # actual content, not structure — catches garbled/incoherent
+        # image-model text (e.g. "2 þutter") that every structural gate missed.
+        # Runs BEFORE anything is uploaded to Etsy/Printify: no point
+        # taxonomy-checking or uploading content already known to be garbage.
+        # PDFs are content-QA'd per-page inside PDFGenerationService during
+        # generation, so only single-image formats are reviewed here.
+        if design_path and not is_pdf:
+            design_path = self._stage_content_quality(task_id, design_path, product_name, visual_brief, task_type, report)
+            if report.get("blocked"):
+                return report
+
+        # 2.6 — For DIGITAL single-image products, the honest primary listing
+        # photo IS the (now content-verified) delivered design — not an
+        # independently-generated generic mockup that can depict something
+        # completely different (the misrepresentation Maj found). Prepend it so
+        # Etsy's featured photo shows exactly what the buyer receives.
+        if design_path and digital_required and not is_pdf:
+            if design_path not in image_paths:
+                # Just prepend for upload ordering — do NOT re-register it in
+                # the catalog under a "listing" variant: register is
+                # idempotent-on-path and would clobber the "delivery" record
+                # the hard gate relies on (get_delivery_asset).
+                image_paths = [design_path] + list(image_paths)
+
+        # 2.7 — MARKETING/DELIVERABLE CONSISTENCY GATE (step 96): backstop that
+        # every listing photo plausibly depicts the same product as the
+        # delivery asset, blocking a buyer-misrepresentation before listing.
+        if design_path and image_paths:
+            image_paths = self._stage_marketing_consistency(
+                task_id, design_path, image_paths, product_name, visual_brief, is_autonomy, report
+            )
+            if report.get("blocked"):
+                return report
+
         # 3 — POD physical: a real Printify product must exist BEFORE a listing
         # is created, so its failure can block listing creation outright.
         pod_product = None
@@ -210,9 +245,107 @@ class PipelineOrchestrator:
                 "Please delete this draft listing manually in Etsy's Shop Manager.",
             )
 
+    # ── Content-quality gate (step 96) ────────────────────────────────────────
+
+    def _stage_content_quality(self, task_id, design_path, product_name, visual_brief, task_type, report):
+        """
+        Vision-model review of the delivered single-image asset for legible,
+        coherent, correct, sellable content. On failure, REGENERATE the
+        delivery asset and re-review up to CONTENT_QA_MAX_ATTEMPTS times, then
+        block the task (same as every other gate failure). Returns the
+        content-verified design path, or None if blocked.
+        """
+        from config import settings
+        from app.services.content_quality_service import ContentQualityService
+
+        svc = ContentQualityService()
+        attempts = max(1, settings.CONTENT_QA_MAX_ATTEMPTS)
+        current = design_path
+        last_issues = ["content quality check did not pass"]
+
+        for attempt in range(1, attempts + 1):
+            try:
+                result = svc.review_asset_file(current, product_name, task_type, visual_brief)
+            except Exception as e:
+                logger.error(f"PipelineOrchestrator: content_quality raised for {task_id}: {e}")
+                result = None
+                last_issues = [f"content quality check raised: {e}"]
+
+            if result and result.passed:
+                report["stages"]["content_quality"] = {"ok": True, "attempt": attempt}
+                return current
+
+            if result:
+                last_issues = result.specific_issues or ["content quality check did not pass"]
+            logger.warning(
+                f"PipelineOrchestrator: content quality failed for {task_id} "
+                f"(attempt {attempt}/{attempts}): {last_issues}"
+            )
+
+            if attempt < attempts:
+                # Regenerate the delivery asset (overwrites design.png) and re-review.
+                current = self._stage_pod_design(task_id, product_name, visual_brief, task_type, report)
+                if not current:
+                    break
+
+        reason = f"content quality gate failed: {'; '.join(last_issues)[:300]}"
+        report["stages"]["content_quality"] = {"ok": False, "error": reason, "issues": last_issues}
+        self._block_task(task_id, reason, report, pre_listing=True)
+        return None
+
+    def _stage_marketing_consistency(self, task_id, design_path, image_paths, product_name, visual_brief, is_autonomy, report):
+        """
+        Vision-model check that the listing/marketing photos plausibly depict
+        the SAME product as the delivery asset. On failure, regenerate the
+        (generated) listing images and re-check up to CONTENT_QA_MAX_ATTEMPTS
+        times, then block. Returns the (possibly regenerated) image path list,
+        or None if blocked. The delivery asset — when it was prepended as the
+        primary photo — is kept across regenerations.
+        """
+        from config import settings
+        from app.services.content_quality_service import ContentQualityService
+
+        svc = ContentQualityService()
+        attempts = max(1, settings.CONTENT_QA_MAX_ATTEMPTS)
+        current_paths = list(image_paths)
+        primary_is_delivery = current_paths and str(current_paths[0]) == str(design_path)
+        last_issues = ["marketing images do not match the delivered product"]
+
+        for attempt in range(1, attempts + 1):
+            try:
+                result = svc.check_marketing_consistency(design_path, current_paths, product_name)
+            except Exception as e:
+                logger.error(f"PipelineOrchestrator: marketing_consistency raised for {task_id}: {e}")
+                result = None
+                last_issues = [f"marketing consistency check raised: {e}"]
+
+            if result and result.passed:
+                report["stages"]["marketing_consistency"] = {"ok": True, "attempt": attempt}
+                return current_paths
+
+            if result:
+                last_issues = result.specific_issues or last_issues
+            logger.warning(
+                f"PipelineOrchestrator: marketing/deliverable mismatch for {task_id} "
+                f"(attempt {attempt}/{attempts}): {last_issues}"
+            )
+
+            if attempt < attempts:
+                regenerated = self._stage_listing_images(
+                    task_id, product_name, visual_brief, is_autonomy, report, record_spend=False
+                )
+                current_paths = ([design_path] + list(regenerated)) if primary_is_delivery else list(regenerated)
+                if not regenerated:
+                    break
+
+        reason = f"marketing/deliverable mismatch: {'; '.join(last_issues)[:300]}"
+        report["stages"]["marketing_consistency"] = {"ok": False, "error": reason, "issues": last_issues}
+        self._block_task(task_id, reason, report, pre_listing=True)
+        return None
+
     # ── Stages ────────────────────────────────────────────────────────────────
 
-    def _stage_listing_images(self, task_id: str, product_name: str, visual_brief: str, is_autonomy: bool, report: dict) -> list:
+    def _stage_listing_images(self, task_id: str, product_name: str, visual_brief: str, is_autonomy: bool, report: dict, record_spend: bool = True) -> list:
         from config import settings
 
         saved_paths = []
@@ -248,7 +381,9 @@ class PipelineOrchestrator:
 
             # Record image-gen cost for autonomy tasks — worker only charged $0.05
             # upfront for the text-LLM; record the remaining $0.20 here on success.
-            if is_autonomy and saved_paths:
+            # record_spend=False on consistency-driven regeneration avoids
+            # double-charging for the same product's listing images.
+            if is_autonomy and saved_paths and record_spend:
                 try:
                     from app.services.autonomy_service import AutonomyService
                     AutonomyService().record_spend(0.20, f"images generated task={task_id[:8]}")

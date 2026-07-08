@@ -57,6 +57,18 @@ import app.models.task, app.models.log, app.models.analytics_event
 import app.models.image_asset, app.models.marketing_post
 Base.metadata.create_all(bind=engine)
 
+# ── step 96: bypass the real vision content-quality gate ──────────────────────
+# These pre-96 suites exercise structural gates; replace ContentQualityService
+# with an always-pass double so run_post_completion doesn't make real vision
+# API calls. The gate's own behaviour is covered in test_step96.
+import unittest.mock as _mock96
+class _PassCQ96:
+    def __init__(self, *a, **k): pass
+    def review_asset_file(self, *a, **k): return _mock96.Mock(passed=True, specific_issues=[])
+    def review_asset_bytes(self, *a, **k): return _mock96.Mock(passed=True, specific_issues=[])
+    def check_marketing_consistency(self, *a, **k): return _mock96.Mock(passed=True, specific_issues=[])
+_mock96.patch("app.services.content_quality_service.ContentQualityService", _PassCQ96).start()
+
 from PIL import Image as PILImage
 
 from app.services.task_service import TaskService
@@ -170,9 +182,11 @@ def _make_etsy_image_service_mock(get_images_result=None, get_images_error=None)
     from unittest.mock import MagicMock
 
     mock_cls = MagicMock()
+    _state = {"n": 0}
 
     async def _attach(listing_id, listing_image_paths, digital_file_path=None):
         uploaded = [{"path": p, "result": {"ok": True}} for p in listing_image_paths]
+        _state["n"] = len(uploaded)
         digital_upload = {"ok": True} if digital_file_path else None
         return {
             "listing_id": listing_id,
@@ -184,7 +198,9 @@ def _make_etsy_image_service_mock(get_images_result=None, get_images_error=None)
     async def _get_images(listing_id):
         if get_images_error:
             raise RuntimeError(get_images_error)
-        return get_images_result if get_images_result is not None else [{"listing_image_id": 1}]
+        # Echo back as many images as were uploaded (the delivery asset is now
+        # prepended as the primary photo for digital single-image products).
+        return get_images_result if get_images_result is not None else [{"listing_image_id": i} for i in range(_state["n"])]
 
     async def _get_files(listing_id):
         return [{"listing_file_id": 1, "filetype": "image/png"}]

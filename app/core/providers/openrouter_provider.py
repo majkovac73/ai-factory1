@@ -59,10 +59,54 @@ class OpenRouterProvider(BaseLLMProvider):
 
         return response.choices[0].message.content
 
-    async def generate_structured(
-        self, 
+    async def generate_with_images(
+        self,
         model: str,
-        prompt: str, 
+        prompt: str,
+        image_data_urls: list,
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.0,
+        max_tokens: Optional[int] = None,
+        **kwargs
+    ) -> str:
+        """
+        Multimodal completion: sends `prompt` plus one or more images to a
+        VISION-capable model (e.g. openai/gpt-4o-mini) and returns the text
+        response. `image_data_urls` are full data URLs
+        ("data:image/png;base64,...."). Used by ContentQualityService to
+        inspect actual generated content — a different capability from image
+        GENERATION (which produces images; this consumes them).
+        """
+        content = [{"type": "text", "text": prompt}]
+        for url in image_data_urls:
+            content.append({"type": "image_url", "image_url": {"url": url}})
+
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": content})
+
+        response = await self.client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs
+        )
+
+        usage = getattr(response, "usage", None)
+        self.last_usage = {
+            "prompt_tokens": getattr(usage, "prompt_tokens", None),
+            "completion_tokens": getattr(usage, "completion_tokens", None),
+            "total_tokens": getattr(usage, "total_tokens", None),
+        } if usage else None
+
+        return response.choices[0].message.content
+
+    async def generate_structured(
+        self,
+        model: str,
+        prompt: str,
         response_model: Type[BaseModel],
         system_prompt: Optional[str] = None, 
         temperature: float = 0.0,

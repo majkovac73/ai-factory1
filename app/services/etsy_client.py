@@ -51,12 +51,18 @@ class EtsyClient:
         # Only include optional fields when explicitly provided — sending null
         # shipping_profile_id causes 422 on physical listings; sending no type
         # field defaults to physical which then requires a shipping profile.
+        is_download = listing.get("type") == "download"
         if listing.get("type"):
             payload["type"] = listing["type"]
-        if listing.get("shipping_profile_id"):
-            payload["shipping_profile_id"] = listing["shipping_profile_id"]
-        if listing.get("readiness_state_id"):
-            payload["readiness_state_id"] = listing["readiness_state_id"]
+        # Physical-only fields must NEVER be sent on a digital download —
+        # a download listing has no shipping and no made-after-order readiness.
+        # Sending them makes Etsy present the listing as a hybrid/physical-ish
+        # item. Strip them defensively regardless of what the caller passed.
+        if not is_download:
+            if listing.get("shipping_profile_id"):
+                payload["shipping_profile_id"] = listing["shipping_profile_id"]
+            if listing.get("readiness_state_id"):
+                payload["readiness_state_id"] = listing["readiness_state_id"]
 
         async with httpx.AsyncClient() as client:
             response = await client.post(

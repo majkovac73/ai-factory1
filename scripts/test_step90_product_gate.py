@@ -59,6 +59,18 @@ import app.models.task, app.models.log, app.models.analytics_event
 import app.models.image_asset, app.models.marketing_post
 Base.metadata.create_all(bind=engine)
 
+# ── step 96: bypass the real vision content-quality gate ──────────────────────
+# These pre-96 suites exercise structural gates; replace ContentQualityService
+# with an always-pass double so run_post_completion doesn't make real vision
+# API calls. The gate's own behaviour is covered in test_step96.
+import unittest.mock as _mock96
+class _PassCQ96:
+    def __init__(self, *a, **k): pass
+    def review_asset_file(self, *a, **k): return _mock96.Mock(passed=True, specific_issues=[])
+    def review_asset_bytes(self, *a, **k): return _mock96.Mock(passed=True, specific_issues=[])
+    def check_marketing_consistency(self, *a, **k): return _mock96.Mock(passed=True, specific_issues=[])
+_mock96.patch("app.services.content_quality_service.ContentQualityService", _PassCQ96).start()
+
 from app.services.task_service import TaskService
 from app.schemas.task import TaskCreate
 from app.schemas.enums import TaskStatus
