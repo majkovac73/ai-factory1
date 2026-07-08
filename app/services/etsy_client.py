@@ -55,6 +55,51 @@ class EtsyClient:
 
             return response.json()
 
+    async def get_listing(self, listing_id: str) -> dict:
+        """
+        Readback verification (step 93): re-fetch a listing to confirm real
+        attributes (e.g. taxonomy_id) rather than trusting the create/update
+        response alone. Etsy endpoint: GET /v3/application/listings/{listing_id}
+        (not shop-scoped — verified live against production, 200 OK).
+        """
+        access_token = await get_valid_access_token()
+        api_key_header = f"{settings.ETSY_API_KEY}:{settings.ETSY_SHARED_SECRET}"
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{ETSY_API_BASE}/listings/{listing_id}",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "x-api-key": api_key_header,
+                },
+            )
+            if response.status_code >= 400:
+                raise Exception(f"Etsy API error {response.status_code}: {response.text}")
+            return response.json()
+
+    async def update_listing(self, listing_id: str, fields: dict) -> dict:
+        """
+        Update arbitrary fields on an existing listing (step 93 — used to
+        correct taxonomy_id on listings created before this fix). Etsy
+        endpoint: PATCH /v3/application/shops/{shop_id}/listings/{listing_id}
+        (shop-scoped — same pattern as EtsyImageService.publish_listing).
+        """
+        access_token = await get_valid_access_token()
+        api_key_header = f"{settings.ETSY_API_KEY}:{settings.ETSY_SHARED_SECRET}"
+
+        async with httpx.AsyncClient() as client:
+            response = await client.patch(
+                f"{ETSY_API_BASE}/shops/{settings.ETSY_SHOP_ID}/listings/{listing_id}",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "x-api-key": api_key_header,
+                },
+                json=fields,
+            )
+            if response.status_code >= 400:
+                raise Exception(f"Etsy API error {response.status_code}: {response.text}")
+            return response.json()
+
     async def delete_listing(self, listing_id: str) -> bool:
         """
         Delete a listing outright. Used by PipelineOrchestrator's hard product

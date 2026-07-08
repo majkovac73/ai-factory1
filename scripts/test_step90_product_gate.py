@@ -183,6 +183,10 @@ with tempfile.TemporaryDirectory() as tmp:
             return {"listing_id": "L200"}
         m_etsy2.return_value.create_draft_listing.side_effect = _create2
 
+        async def _get_listing2(listing_id):
+            return {"listing_id": listing_id, "taxonomy_id": 2078}
+        m_etsy2.return_value.get_listing.side_effect = _get_listing2
+
         async def _attach2(**kw):
             return {
                 "listing_id": "L200",
@@ -268,6 +272,9 @@ with tempfile.TemporaryDirectory() as tmp:
     class FakeEtsyClient4:
         async def create_draft_listing(self, listing):
             return {"listing_id": "L400"}
+
+        async def get_listing(self, listing_id):
+            return {"listing_id": listing_id, "taxonomy_id": 2078}
 
         async def delete_listing(self, listing_id):
             delete_calls4.append(listing_id)

@@ -399,6 +399,8 @@ class PipelineOrchestrator:
     def _stage_create_listing(self, task_id: str, product_name: str, output_data: dict, task_type: str, is_pod: bool, report: dict) -> Optional[str]:
         from app.services.etsy_shipping_service import EtsyShippingService
 
+        intended_taxonomy_id = PRODUCT_FORMATS.get(task_type, {}).get("taxonomy_id", 1)
+
         try:
             product = {
                 "product_name": product_name,
@@ -408,6 +410,7 @@ class PipelineOrchestrator:
                 "target_audience": "",
             }
             listing = ListingGeneratorAgent().generate_listing(product, output_data)
+            listing["taxonomy_id"] = intended_taxonomy_id
 
             if is_pod:
                 listing["type"] = "physical"
@@ -425,12 +428,39 @@ class PipelineOrchestrator:
                 raise RuntimeError(f"Etsy API returned no listing_id: {draft}")
 
             report["stages"]["create_listing"] = {"ok": True, "listing_id": listing_id}
-            return listing_id
         except Exception as e:
             logger.error(f"PipelineOrchestrator: create_listing failed for {task_id}: {e}")
             self._alert("Etsy listing creation failed", f"task_id={task_id}: {e}")
             report["stages"]["create_listing"] = {"ok": False, "error": str(e)}
             return None
+
+        # Readback verification (step 93): confirm the REAL listing's
+        # taxonomy_id matches what was intended, rather than trusting the
+        # create response alone. Every listing had silently been created
+        # with taxonomy_id=1 ("Accessories", Etsy's top-level, most-generic
+        # node) because nothing upstream had ever set it — confirmed live
+        # against production listing 4534427807 and Etsy's own "too broad"
+        # warning in its listing editor. This also catches Etsy silently
+        # falling back to a different category than requested.
+        try:
+            real_listing = asyncio.run(EtsyClient().get_listing(listing_id))
+        except Exception as e:
+            reason = f"taxonomy readback call failed: {e}"
+            report["stages"]["create_listing"] = {"ok": False, "listing_id": listing_id, "error": reason}
+            self._cleanup_unbacked_listing(listing_id, report)
+            self._block_task(task_id, reason, report, pre_listing=False)
+            return None
+
+        real_taxonomy_id = real_listing.get("taxonomy_id")
+        if real_taxonomy_id != intended_taxonomy_id:
+            reason = f"taxonomy_id mismatch: intended {intended_taxonomy_id}, listing actually has {real_taxonomy_id}"
+            report["stages"]["create_listing"] = {"ok": False, "listing_id": listing_id, "error": reason}
+            self._cleanup_unbacked_listing(listing_id, report)
+            self._block_task(task_id, reason, report, pre_listing=False)
+            return None
+
+        report["stages"]["create_listing"]["taxonomy_id"] = real_taxonomy_id
+        return listing_id
 
     def _stage_attach_publish(self, task_id: str, listing_id: str, image_paths: list, design_path: Optional[Path], digital_required: bool, report: dict):
         try:
