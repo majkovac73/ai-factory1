@@ -302,7 +302,7 @@ with tempfile.TemporaryDirectory() as tmp:
         return [{"listing_image_id": 1}]
 
     async def _get_files4(listing_id):
-        return [{"listing_file_id": 1}]
+        return [{"listing_file_id": 1, "filetype": "image/png"}]
 
     eis4.return_value.attach_images_and_publish.side_effect = _attach4
     eis4.return_value.get_listing_images.side_effect = _get_images4

@@ -99,6 +99,55 @@ class _FakePODPipelineServiceDefault:
         return {"task_id": task_id, "design_path": str(self._design_path), "ready_for_pod": True}
 
 
+class _FakeEtsyClientHappy:
+    """Real async fake so asyncio.run works — echoes back taxonomy_id for the
+    step-93 readback, and returns a listing_id for create."""
+    def __init__(self, listing_id="L-89"):
+        self._listing_id = listing_id
+        self._tax = {}
+
+    async def create_draft_listing(self, listing):
+        self._tax[self._listing_id] = listing.get("taxonomy_id")
+        return {"listing_id": self._listing_id}
+
+    async def get_listing(self, listing_id):
+        return {"listing_id": listing_id, "taxonomy_id": self._tax.get(listing_id)}
+
+    async def delete_listing(self, listing_id):
+        return True
+
+
+def _fake_etsy_image_service_happy():
+    """MagicMock EtsyImageService whose async methods all succeed. Stateful:
+    the image readback echoes back exactly as many images as attach reported
+    uploading (so the step-91 image-count readback passes), and the file
+    readback returns a real-MIME file (so the step-92/93b gates pass)."""
+    from unittest.mock import MagicMock
+    m = MagicMock()
+    state = {"n_images": 0}
+
+    async def _attach(listing_id, listing_image_paths, digital_file_path=None):
+        uploaded = [{"path": p, "result": {"ok": True}} for p in listing_image_paths]
+        state["n_images"] = len(uploaded)
+        return {
+            "listing_id": listing_id,
+            "uploaded_images": uploaded,
+            "digital_upload": {"ok": True} if digital_file_path else None,
+            "publish_result": {"published": True, "state": "active"},
+        }
+
+    async def _get_images(listing_id):
+        return [{"listing_image_id": i} for i in range(state["n_images"])]
+
+    async def _get_files(listing_id):
+        return [{"listing_file_id": 1, "filetype": "image/png"}]
+
+    m.return_value.attach_images_and_publish.side_effect = _attach
+    m.return_value.get_listing_images.side_effect = _get_images
+    m.return_value.get_listing_files.side_effect = _get_files
+    return m
+
+
 # ── [1] run_post_completion called after task DONE ────────────────────────────
 print("[1] TaskProcessor calls PipelineOrchestrator after DONE...")
 
@@ -260,13 +309,11 @@ with tempfile.TemporaryDirectory() as tmp:
         def enrich_listing_with_image(self, listing, task_id, visual_brief):
             return {**listing, "image_base64": "FAKEBASE64", "pin_image_path": str(pin4)}
 
-    fixed_result4 = {"listing_id": "L44", "taxonomy_id": 2078, "digital_upload": {"ok": True}, "uploaded_images": [], "publish_result": {"published": True, "state": "active"}}
-
     with patch("app.services.pipeline_orchestrator.ProductImageAgent") as m_pia4, \
          patch("app.services.pipeline_orchestrator.PODPipelineService", lambda: _FakePODPipelineServiceDefault(design4)), \
-         patch("app.services.pipeline_orchestrator.asyncio.run", return_value=fixed_result4), \
          patch("app.services.pipeline_orchestrator.ListingGeneratorAgent") as m_lga4, \
-         patch("app.services.pipeline_orchestrator.EtsyClient"), \
+         patch("app.services.pipeline_orchestrator.EtsyClient", return_value=_FakeEtsyClientHappy("L44")), \
+         patch("app.services.pipeline_orchestrator.EtsyImageService", _fake_etsy_image_service_happy()), \
          patch("app.services.pipeline_orchestrator.PinterestImageService", FakePinterestImageService4), \
          patch("app.services.pipeline_orchestrator.MarketingService", FakeMarketingService4), \
          patch("app.services.pipeline_orchestrator.PinterestChannel"):
@@ -300,13 +347,11 @@ with tempfile.TemporaryDirectory() as tmp:
             post_calls5.append(True)
             return {"success": True}
 
-    fixed_result5 = {"listing_id": "L55", "taxonomy_id": 2078, "digital_upload": {"ok": True}, "uploaded_images": [], "publish_result": {"published": True, "state": "active"}}
-
     with patch("app.services.pipeline_orchestrator.ProductImageAgent") as m_pia5, \
          patch("app.services.pipeline_orchestrator.PODPipelineService", lambda: _FakePODPipelineServiceDefault(design5)), \
-         patch("app.services.pipeline_orchestrator.asyncio.run", return_value=fixed_result5), \
          patch("app.services.pipeline_orchestrator.ListingGeneratorAgent") as m_lga5, \
-         patch("app.services.pipeline_orchestrator.EtsyClient"), \
+         patch("app.services.pipeline_orchestrator.EtsyClient", return_value=_FakeEtsyClientHappy("L55")), \
+         patch("app.services.pipeline_orchestrator.EtsyImageService", _fake_etsy_image_service_happy()), \
          patch("app.services.pipeline_orchestrator.PinterestImageService"), \
          patch("app.services.pipeline_orchestrator.MarketingService", FakeMarketingService5):
         m_pia5.return_value.generate_listing_images.return_value = {"hero": h5, "lifestyle": l5}
@@ -388,13 +433,11 @@ with tempfile.TemporaryDirectory() as tmp:
         def post_to_channel(self, task_id, listing, channel):
             pin_calls7.append(True); return {"success": True}
 
-    fixed_result7 = {"listing_id": "L77", "taxonomy_id": 2078, "digital_upload": {"ok": True}, "uploaded_images": [], "publish_result": {"published": True, "state": "active"}}
-
     with patch("app.services.pipeline_orchestrator.ProductImageAgent", FakeProductImageAgent7), \
          patch("app.services.pipeline_orchestrator.PODPipelineService", lambda: _FakePODPipelineServiceDefault(design7)), \
-         patch("app.services.pipeline_orchestrator.asyncio.run", return_value=fixed_result7), \
          patch("app.services.pipeline_orchestrator.ListingGeneratorAgent") as m_lga7, \
-         patch("app.services.pipeline_orchestrator.EtsyClient"), \
+         patch("app.services.pipeline_orchestrator.EtsyClient", return_value=_FakeEtsyClientHappy("L77")), \
+         patch("app.services.pipeline_orchestrator.EtsyImageService", _fake_etsy_image_service_happy()), \
          patch("app.services.pipeline_orchestrator.PinterestImageService", FakePinterestImageService7), \
          patch("app.services.pipeline_orchestrator.MarketingService", FakeMarketingService7), \
          patch("app.services.pipeline_orchestrator.PinterestChannel"):

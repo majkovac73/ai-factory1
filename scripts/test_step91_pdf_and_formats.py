@@ -187,7 +187,7 @@ def _make_etsy_image_service_mock(get_images_result=None, get_images_error=None)
         return get_images_result if get_images_result is not None else [{"listing_image_id": 1}]
 
     async def _get_files(listing_id):
-        return [{"listing_file_id": 1}]
+        return [{"listing_file_id": 1, "filetype": "image/png"}]
 
     mock_cls.return_value.attach_images_and_publish.side_effect = _attach
     mock_cls.return_value.get_listing_images.side_effect = _get_images

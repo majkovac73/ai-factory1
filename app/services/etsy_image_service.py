@@ -50,6 +50,7 @@ silently the first time it runs.
 All methods share the same auth/header pattern as EtsyClient.create_draft_listing.
 """
 import asyncio
+import mimetypes
 import httpx
 
 from app.services.etsy_oauth import get_valid_access_token
@@ -58,6 +59,28 @@ from config import settings
 ETSY_API_BASE = "https://openapi.etsy.com/v3/application"
 
 PUBLISH_RETRY_DELAY_SECONDS = 2
+
+# Content-type Etsy stores for a file it can't recognise. A file stored with
+# this type IS attached (getAllListingFiles counts it) but Etsy's listing
+# editor will NOT display/render it — confirmed live against production
+# listing 4534427807, whose design.png was uploaded as octet-stream and never
+# appeared in the editor, versus a manually-made listing whose file carried a
+# real MIME type and displayed correctly. Never send this for a file whose
+# real type we can determine.
+GENERIC_BINARY_CONTENT_TYPE = "application/octet-stream"
+
+
+def _guess_content_type(file_path: str, filename: str) -> str:
+    """
+    Resolve a real MIME type from the file's extension, falling back to the
+    generic binary type only when the extension is genuinely unknown. Etsy
+    stores exactly what we send as the multipart content-type, and its editor
+    only renders files with a recognised type — so sending image/png for a
+    .png (rather than octet-stream) is what makes the uploaded file actually
+    display for the buyer/seller.
+    """
+    guess = mimetypes.guess_type(str(file_path))[0] or mimetypes.guess_type(filename)[0]
+    return guess or GENERIC_BINARY_CONTENT_TYPE
 
 
 class EtsyImageService:
@@ -127,7 +150,13 @@ class EtsyImageService:
         with open(file_path, "rb") as f:
             file_bytes = f.read()
 
-        files = {"file": (filename, file_bytes, "application/octet-stream")}
+        # Send the file's REAL MIME type (image/png, application/pdf, ...), not
+        # a hardcoded application/octet-stream. Etsy stores what we send and its
+        # editor only displays files with a recognised type — sending
+        # octet-stream is what caused the "file attached but invisible in the
+        # editor" bug on listing 4534427807.
+        content_type = _guess_content_type(file_path, filename)
+        files = {"file": (filename, file_bytes, content_type)}
         data = {"name": filename, "rank": 1}
 
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -145,6 +174,31 @@ class EtsyImageService:
                     f"Etsy digital file upload error {response.status_code}: {response.text}"
                 )
             return response.json()
+
+    async def delete_listing_file(self, listing_id: str, listing_file_id: str) -> bool:
+        """
+        Delete a single digital file from a listing. Etsy endpoint:
+        DELETE /v3/application/shops/{shop_id}/listings/{listing_id}/files/{listing_file_id}
+
+        CAUTION (per Etsy's own docs): deleting the FINAL file of a digital
+        listing converts it back into a physical listing. Callers replacing a
+        file must upload the replacement FIRST, then delete the old one, so the
+        file count never passes through zero.
+        """
+        access_token = await get_valid_access_token()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.delete(
+                f"{ETSY_API_BASE}/shops/{settings.ETSY_SHOP_ID}/listings/{listing_id}/files/{listing_file_id}",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "x-api-key": self._api_key_header(),
+                },
+            )
+            if response.status_code >= 400:
+                raise RuntimeError(
+                    f"Etsy delete listing file error {response.status_code}: {response.text}"
+                )
+            return True
 
     async def _patch_listing_state_active(self, listing_id: str) -> dict:
         access_token = await get_valid_access_token()

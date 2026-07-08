@@ -537,6 +537,30 @@ class PipelineOrchestrator:
                     self._block_task(task_id, f"digital file readback failed: {reason}", report, pre_listing=False)
                     return
 
+                # Step 93b: a file can be attached (count >= 1) yet stored with
+                # an unrecognised content-type (application/octet-stream), in
+                # which case Etsy's editor never DISPLAYS it — the file exists
+                # but is functionally invisible/unusable. Confirmed live on
+                # listing 4534427807. Treat an octet-stream-only file set as a
+                # readback failure the same as no file at all: a buyer can't
+                # get a file the listing won't surface.
+                from app.services.etsy_image_service import GENERIC_BINARY_CONTENT_TYPE
+                displayable = [
+                    f for f in actual_files
+                    if f.get("filetype") and f.get("filetype") != GENERIC_BINARY_CONTENT_TYPE
+                ]
+                if not displayable:
+                    filetypes = [f.get("filetype") for f in actual_files]
+                    reason = f"attached file(s) have unrecognised filetype {filetypes} (won't display in Etsy's editor)"
+                    report["stages"]["attach_publish"] = {
+                        "ok": False,
+                        "images_uploaded": len(result.get("uploaded_images", [])),
+                        "error": f"digital file readback failed: {reason}",
+                    }
+                    self._cleanup_unbacked_listing(listing_id, report)
+                    self._block_task(task_id, f"digital file readback failed: {reason}", report, pre_listing=False)
+                    return
+
             # Publish-state verification (step 92): a 200 OK from Etsy's
             # publish PATCH does NOT guarantee the listing actually
             # transitioned to "active" — confirmed live in production (task

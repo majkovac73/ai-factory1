@@ -201,7 +201,7 @@ with tempfile.TemporaryDirectory() as tmp:
         m_eis2.return_value.get_listing_images.side_effect = _get_images2
 
         async def _get_files2(listing_id):
-            return [{"listing_file_id": 1}]
+            return [{"listing_file_id": 1, "filetype": "image/png"}]
         m_eis2.return_value.get_listing_files.side_effect = _get_files2
 
         report2 = orch2.run_post_completion(done2.id)
