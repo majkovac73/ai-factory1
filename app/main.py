@@ -12,6 +12,7 @@ from app.api.api import api_router
 from app.db.database import Base, engine
 from app.db.migrations import run_all_migrations
 from app.models import agent_execution, log, task, task_step, etsy_token, marketing_post, pinterest_token, analytics_event, image_asset, pod_product, fulfillment_record  # noqa: F401
+import app.core.providers.openrouter_image_provider  # noqa: F401 — triggers provider self-registration
 from app.workers.task_worker import TaskWorker
 from app.workers.etsy_receipt_worker import EtsyReceiptWorker
 from app.workers.autonomy_worker import AutonomyWorker
@@ -41,6 +42,8 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     logger.info("AI Factory server starting...")
+    from app.core.providers.image_manager import ImageProviderManager
+    logger.info(f"Image providers registered: {list(ImageProviderManager._registry.keys())}")
 
     from app.services.task_service import TaskService
     recovery_results = TaskService().recover_orphaned_tasks()

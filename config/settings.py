@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     PRINTIFY_API_KEY: str | None = None
     PRINTIFY_SHOP_ID: str | None = None
 
+    ETSY_SHIPPING_PROFILE_ID: str | None = None
+    ETSY_SHOP_ORIGIN_COUNTRY: str = "US"  # ISO 3166-1 alpha-2; set in env if shop is not US-based
+
     ETSY_RECEIPT_POLL_SECONDS: int = 300
 
     # Persistent storage paths — override in Railway env vars:

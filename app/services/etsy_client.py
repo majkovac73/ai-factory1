@@ -26,11 +26,19 @@ class EtsyClient:
             "who_made": "i_did",
             "when_made": "made_to_order",
             "taxonomy_id": listing.get("taxonomy_id", 1),
-            "shipping_profile_id": listing.get("shipping_profile_id"),
-            "readiness_state_id": listing.get("readiness_state_id"),
             "tags": listing.get("tags", [])[:13],
             "materials": listing.get("materials", [])[:13],
         }
+
+        # Only include optional fields when explicitly provided — sending null
+        # shipping_profile_id causes 422 on physical listings; sending no type
+        # field defaults to physical which then requires a shipping profile.
+        if listing.get("type"):
+            payload["type"] = listing["type"]
+        if listing.get("shipping_profile_id"):
+            payload["shipping_profile_id"] = listing["shipping_profile_id"]
+        if listing.get("readiness_state_id"):
+            payload["readiness_state_id"] = listing["readiness_state_id"]
 
         async with httpx.AsyncClient() as client:
             response = await client.post(

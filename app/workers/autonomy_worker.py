@@ -94,13 +94,15 @@ class AutonomyWorker:
             logger.info("AutonomyWorker: daily task cap reached, skipping cycle")
             return
 
-        # Estimated cost per cycle: TrendResearchAgent (LLM call) + TaskService
-        # (image gen + Etsy listing). Conservative estimate $0.30 per full cycle.
-        estimated_spend = 0.30
-        if not autonomy.can_spend(estimated_spend):
+        # Gate check uses worst-case estimate so the daily cap is never silently
+        # exceeded — but we only record the text-LLM portion ($0.05) upfront.
+        # PipelineOrchestrator records the image-gen portion ($0.20) on success,
+        # so a failed pipeline only burns $0.05 instead of the full $0.30.
+        estimated_max = 0.30
+        if not autonomy.can_spend(estimated_max):
             logger.info(
                 f"AutonomyWorker: daily spend cap would be exceeded "
-                f"(estimated ${estimated_spend:.2f}), skipping cycle"
+                f"(estimated ${estimated_max:.2f}), skipping cycle"
             )
             return
 
@@ -127,6 +129,6 @@ class AutonomyWorker:
         ))
 
         autonomy.record_task_created()
-        autonomy.record_spend(estimated_spend, f"autonomy cycle task={task.id[:8]}")
+        autonomy.record_spend(0.05, f"text-LLM cycle task={task.id[:8]}")
 
         logger.info(f"AutonomyWorker: created task {task.id} for concept: {concept[:80]}")

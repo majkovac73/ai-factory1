@@ -68,10 +68,11 @@ class PipelineOrchestrator:
         task_type = task.type or "general"
         is_pod = task_type in POD_TASK_TYPES
 
+        is_autonomy = bool((task.metadata_ or {}).get("source") == "autonomy_worker")
         report: dict = {"task_id": task_id, "task_type": task_type, "stages": {}}
 
         # 1 — listing images
-        image_paths = self._stage_listing_images(task_id, product_name, visual_brief, report)
+        image_paths = self._stage_listing_images(task_id, product_name, visual_brief, is_autonomy, report)
 
         # 2 — POD design (if applicable)
         design_path = None
@@ -79,7 +80,7 @@ class PipelineOrchestrator:
             design_path = self._stage_pod_design(task_id, product_name, visual_brief, task_type, report)
 
         # 3 — create Etsy draft listing
-        listing_id = self._stage_create_listing(task_id, product_name, output_data, report)
+        listing_id = self._stage_create_listing(task_id, product_name, output_data, task_type, is_pod, report)
 
         # 4 — attach images and publish (only if listing was created)
         if listing_id:
@@ -108,7 +109,7 @@ class PipelineOrchestrator:
 
     # ── Stages ────────────────────────────────────────────────────────────────
 
-    def _stage_listing_images(self, task_id: str, product_name: str, visual_brief: str, report: dict) -> list:
+    def _stage_listing_images(self, task_id: str, product_name: str, visual_brief: str, is_autonomy: bool, report: dict) -> list:
         from config import settings
 
         saved_paths = []
@@ -141,6 +142,16 @@ class PipelineOrchestrator:
                     logger.warning(f"PipelineOrchestrator: {label} image failed validation: {ve}")
 
             report["stages"]["listing_images"] = {"ok": True, "count": len(saved_paths)}
+
+            # Record image-gen cost for autonomy tasks — worker only charged $0.05
+            # upfront for the text-LLM; record the remaining $0.20 here on success.
+            if is_autonomy and saved_paths:
+                try:
+                    from app.services.autonomy_service import AutonomyService
+                    AutonomyService().record_spend(0.20, f"images generated task={task_id[:8]}")
+                except Exception as spend_err:
+                    logger.warning(f"PipelineOrchestrator: failed to record autonomy image spend: {spend_err}")
+
         except Exception as e:
             logger.error(f"PipelineOrchestrator: listing_images failed for {task_id}: {e}")
             self._alert("Listing image generation failed", f"task_id={task_id}: {e}")
@@ -187,7 +198,9 @@ class PipelineOrchestrator:
             report["stages"]["pod_design"] = {"ok": False, "error": str(e)}
             return None
 
-    def _stage_create_listing(self, task_id: str, product_name: str, output_data: dict, report: dict) -> Optional[str]:
+    def _stage_create_listing(self, task_id: str, product_name: str, output_data: dict, task_type: str, is_pod: bool, report: dict) -> Optional[str]:
+        from app.services.etsy_shipping_service import EtsyShippingService
+
         try:
             product = {
                 "product_name": product_name,
@@ -197,6 +210,17 @@ class PipelineOrchestrator:
                 "target_audience": "",
             }
             listing = ListingGeneratorAgent().generate_listing(product, output_data)
+
+            if is_pod:
+                listing["type"] = "physical"
+                listing["quantity"] = 1
+                shipping_id = asyncio.run(EtsyShippingService().get_or_create())
+                if shipping_id:
+                    listing["shipping_profile_id"] = shipping_id
+            else:
+                listing["type"] = "download"
+                listing["quantity"] = 999  # unlimited digital supply
+
             draft = asyncio.run(EtsyClient().create_draft_listing(listing))
             listing_id = str(draft.get("listing_id", ""))
             if not listing_id:
