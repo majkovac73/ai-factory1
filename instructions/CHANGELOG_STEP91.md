@@ -49,14 +49,33 @@ fix didn't cover, both fixed in this change:**
 
 ### Step 0B — why product_type never resolved to POD
 
-`AUTONOMY_ENABLED=false` in production the entire time (confirmed via
-`railway variables` and worker startup logs) — the autonomous loop has
-**never run on a schedule**. The 3 pre-fix `general`-type tasks were
-produced by manual service restarts (the worker runs one cycle immediately
-on thread start). There's exactly one real sample of the fixed schema
-running (`7941465b` → `digital_download`), so "always digital" wasn't yet
-statistically established — but there was also no structural mechanism
-forcing format variety.
+**Correction (see follow-up below): an earlier version of this entry
+claimed `AUTONOMY_ENABLED=false` "the entire time" / "never run on a
+schedule." That was wrong — it was checked only against the current and
+one recent deployment, not the deployments actually running when the
+pre-fix tasks were created.** Re-investigated by pulling logs scoped to
+each specific deployment active at each task's creation time:
+
+| Deployment window (UTC) | AUTONOMY_ENABLED | Evidence |
+|---|---|---|
+| 20:12–20:21 (`8ad26d57`) | False | worker start log |
+| 20:21–20:36 (`3a0618ac`) | **True** | cycle ran, created `9d72bcf8`, $0.30 spend recorded |
+| 20:36–20:47 (`5483c4a7`) | **True** | cycle ran, created `7e4c5777`, $0.30 spend recorded |
+| 20:47 (07-07)–05:08 (07-08) (`49ed9ab3`, ~8.3h) | False | worker start log |
+| 05:07–05:12 (`03571f39`) | **True** | cycle ran, created `97f0e7a0` (the second bad listing), $0.05 spend recorded |
+| 05:12–05:38 (`7aaaa609`) | False — switched off ~25 min before the gate fix deployed |
+| 05:37 onward (gate fix, and current) | False, confirmed through now |
+
+So it WAS genuinely enabled three separate times, each producing one real
+autonomy cycle with real spend recorded (each deployment restart triggers
+one immediate cycle regardless of the 3600s schedule, so no cycle ever
+ran the full scheduled interval — but real cycles with real output did
+happen). It was switched off shortly after the third cycle produced
+`97f0e7a0`, and has stayed off since — including through the gate fix's
+entire deployment history. There's exactly one real sample of the fixed
+schema running (`7941465b` → `digital_download`), so "always digital"
+wasn't yet statistically established either way — but there was also no
+structural mechanism forcing format variety.
 
 `ProductTypeSelectorAgent` **is** correctly wired into the real completion
 flow (`PODFulfillmentService.create_product_for_task()` →
@@ -206,12 +225,55 @@ if PDF products end up being a large share of autonomy output.
 
 ---
 
-### Cleanup
+### Cleanup — retroactive fix for task 97f0e7a0
 
-Task `97f0e7a0` (the second bad listing) predates this fix and is not
-retroactively marked `BLOCKED_NO_PRODUCT` — there's no safe write path to
-production from this environment (no registered Railway SSH key, no admin
-API for `output_data`), and the task is already terminal (`DONE`) and won't
-be reprocessed. Maj is deleting the actual Etsy draft listing manually, per
-the prior fix's cleanup note — that remains the authoritative fix for what
-matters (nothing fake-but-real stays live on Etsy).
+**Correction:** an earlier version of this entry claimed there was "no
+safe write path to production." That premise didn't hold up either — see
+follow-up below. Task `97f0e7a0` has now been retroactively marked in the
+real production database:
+
+- Registered a Railway SSH key (`claude-code-session`) and connected via
+  `railway ssh` directly into the deployed container, where `/data/app.db`
+  actually lives (a prior attempt to use `railway run` for this kind of
+  write does NOT work — see follow-up note below for why).
+- Wrote `scripts/fix_task_97f0e7a0.py`: same safety pattern as the existing
+  `cleanup_test_data.py` (print current vs. proposed `output_data`, require
+  an explicit `--yes` flag to apply, dry-run first).
+- Ran the dry run over SSH, confirmed the exact diff, then applied it.
+- Independently re-verified via two separate reads (a fresh SSH session
+  and the public `/tasks/{id}` API) that `output_data.pipeline_status` is
+  now `"BLOCKED_NO_PRODUCT"` with a `pipeline_blocked_reason` explaining
+  it predates the gate fix. `task.status` was left untouched (`DONE`).
+
+Maj is still deleting the actual Etsy draft listing manually — that
+remains the fix for what matters on Etsy's side; this only makes the
+historical task record consistent with reality.
+
+---
+
+### Follow-up correction (this section added after the entry above was first written)
+
+Two claims in this changelog, as originally written, didn't hold up against
+scrutiny and were corrected in place above:
+
+1. **"AUTONOMY_ENABLED=false in production the entire time"** — wrong.
+   Checked only the current + one recent deployment's logs, not the
+   deployments actually running when the three pre-fix tasks were created.
+   Re-checked by pulling logs scoped to each of those specific deployments
+   (`8ad26d57`, `3a0618ac`, `5483c4a7`, `49ed9ab3`, `03571f39`, `7aaaa609`)
+   individually — it was genuinely `True` three separate times, each with a
+   real cycle, a real task, and real spend recorded. See the corrected
+   table in Step 0B above.
+2. **"No safe write path to production"** — also wrong, but for a more
+   interesting reason: `railway run <cmd>` runs the command **locally**
+   (per its own `--help` text), only injecting Railway's env vars. On a
+   Windows machine, the injected `DATABASE_PATH=/data/app.db` does not
+   resolve to Railway's remote volume — Windows path handling turns the
+   leading `/` into the current drive's root, so it silently operates on
+   `C:\data\app.db`, a local file, instead. That file exists locally
+   (created the same day a similar cleanup script was run this way) with
+   an empty `tasks` table — meaning any prior `railway run` invocation of
+   a DB-touching script almost certainly ran against that empty local
+   decoy, not the real production database, regardless of what it printed.
+   The actual safe path is `railway ssh` (connects into the real deployed
+   container), which is what was used above.
