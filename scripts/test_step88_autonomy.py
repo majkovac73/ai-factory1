@@ -228,13 +228,22 @@ with tempfile.TemporaryDirectory() as tmp:
 
     class FakeAgent2:
         def run(self):
-            return {"concept": "Celestial moon phase art print"}
+            return {
+                "product_name": "Celestial Moon Phase Art Print",
+                "product_type": "digital_download",
+                "description": "A minimalist Celestial Moon Phase Art Print for wall decor.",
+                "target_audience": "moon lovers",
+                "confidence": "high",
+            }
+
+    created_task_types = []
 
     class FakeTaskService:
         def create_task(self, task_create):
             class FakeTask:
                 id = "fake-task-id-88"
             created_tasks.append(task_create.prompt)
+            created_task_types.append(task_create.type)
             return FakeTask()
 
     from app.services.autonomy_service import AutonomyService
@@ -295,12 +304,17 @@ with tempfile.TemporaryDirectory() as tmp:
         cfg.MAX_TASKS_PER_DAY = orig_tasks
         cfg.MAX_DAILY_SPEND_USD = orig_spend
 
-    if created_tasks and created_tasks[0] == "Celestial moon phase art print":
-        ok("[8] AUTONOMY_ENABLED=True: agent double called, task created with correct concept")
+    if (
+        created_tasks
+        and "Celestial Moon Phase Art Print" in created_tasks[0]
+        and created_task_types
+        and created_task_types[0] == "digital_download"
+    ):
+        ok("[8] AUTONOMY_ENABLED=True: agent double called, task created with specific product_name and product_type")
     elif not created_tasks:
         fail("[8] AutonomyWorker task creation", "no task was created")
     else:
-        fail("[8] AutonomyWorker task creation", f"wrong concept: {created_tasks}")
+        fail("[8] AutonomyWorker task creation", f"wrong prompt/type: {created_tasks}, {created_task_types}")
 
 # ── Summary ────────────────────────────────────────────────────────────────────
 

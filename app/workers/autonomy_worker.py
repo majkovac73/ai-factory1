@@ -118,17 +118,28 @@ class AutonomyWorker:
             logger.info("AutonomyWorker: TrendResearchAgent returned no opportunity, skipping")
             return
 
-        concept = opportunity.get("concept") or opportunity.get("title") or str(opportunity)
-        logger.info(f"AutonomyWorker: creating task for concept: {concept[:80]}")
+        product_name = opportunity.get("product_name") or "Product"
+        product_type = opportunity.get("product_type") or "digital_download"
+        description = opportunity.get("description", "")
+        target_audience = opportunity.get("target_audience", "")
+
+        prompt_parts = [f"Create a {product_type.replace('_', ' ')} product: {product_name}."]
+        if description:
+            prompt_parts.append(description)
+        if target_audience:
+            prompt_parts.append(f"Target audience: {target_audience}.")
+        prompt = " ".join(prompt_parts)
+
+        logger.info(f"AutonomyWorker: creating task for product: {product_name[:80]}")
 
         task_service = TaskService()
         task = task_service.create_task(TaskCreate(
-            prompt=concept,
-            type="general",
-            metadata={"source": "autonomy_worker"},
+            prompt=prompt,
+            type=product_type,
+            metadata={"source": "autonomy_worker", "product_name": product_name},
         ))
 
         autonomy.record_task_created()
         autonomy.record_spend(0.05, f"text-LLM cycle task={task.id[:8]}")
 
-        logger.info(f"AutonomyWorker: created task {task.id} for concept: {concept[:80]}")
+        logger.info(f"AutonomyWorker: created task {task.id} for product: {product_name[:80]}")

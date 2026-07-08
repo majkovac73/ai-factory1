@@ -138,6 +138,25 @@ class PODFulfillmentService:
         finally:
             db.close()
 
+    def set_etsy_listing_id(self, pod_product_id: str, etsy_listing_id: str) -> bool:
+        """
+        Link a PODProduct row to the Etsy listing created for it. Called by
+        PipelineOrchestrator after create_product_for_task() ran as a
+        pre-listing precondition check (no listing existed yet at that point).
+
+        Returns True if a record was found and updated, False otherwise.
+        """
+        db = SessionLocal()
+        try:
+            pod = db.query(PODProduct).filter(PODProduct.id == pod_product_id).first()
+            if not pod:
+                return False
+            pod.etsy_listing_id = etsy_listing_id
+            db.commit()
+            return True
+        finally:
+            db.close()
+
     # ── Order submission ─────────────────────────────────────────────────────
 
     def submit_order(

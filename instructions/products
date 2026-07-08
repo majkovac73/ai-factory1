@@ -1,0 +1,130 @@
+FIX — Enforce a hard product-before-listing gate, and fix vague
+concept generation that produces non-specific "products"
+
+═══════════════════════════════════════════════════════════════
+CONTEXT
+═══════════════════════════════════════════════════════════════
+
+A real listing went out reading as "a collection of digital products
+and print-on-demand products" — a description of the whole business,
+not a specific item — with no real deliverable file behind it. Two
+root causes, both must be fixed:
+
+1. PipelineOrchestrator does not currently treat "a real product
+   artifact exists and passes quality checks" as a hard blocking
+   requirement before Etsy listing creation. It logs failures (per the
+   image-provider bug just fixed) but still proceeds to create/publish
+   a listing regardless.
+2. AutonomyWorker/TrendResearchAgent produces a vague market-strategy
+   sentence (e.g. "Focus on niche markets catering to specific hobbies
+   or demographics") and passes it straight through as if it were a
+   specific product concept. Nothing converts this into one concrete,
+   nameable, sellable item before the rest of the pipeline runs.
+
+═══════════════════════════════════════════════════════════════
+FIX 1 — Hard gate: no listing without a verified real product
+═══════════════════════════════════════════════════════════════
+
+In PipelineOrchestrator (or wherever the completion chain from the
+recent orchestrator fix lives), restructure the flow so these are
+BLOCKING preconditions, not best-effort side steps:
+
+For DIGITAL products:
+  - A delivery-quality asset MUST exist (ImageCatalogService.
+    get_delivery_asset(task_id) returns a real, non-null asset)
+  - That asset MUST pass ImageValidationService's checks (step 72)
+  - The digital file MUST be successfully uploaded to Etsy via
+    upload_digital_file() (step 73)
+  - ONLY IF all three succeed: proceed to create/publish the listing.
+
+For POD/physical products:
+  - PODFulfillmentService.create_product_for_task() MUST succeed
+    (real Printify product created)
+  - The design asset MUST pass validation the same way
+  - ONLY IF this succeeds: proceed to create/publish the listing,
+    with the real shipping_profile_id from the recent fix.
+
+If ANY required precondition fails: do NOT call
+EtsyClient.create_draft_listing() at all — not even as a draft. Mark
+the task with a clear terminal state (e.g. a new status like
+"BLOCKED_NO_PRODUCT" or reuse FAILED with a specific reason logged),
+send an AlertService notification, and stop. A listing existing on
+Etsy's side with nothing real behind it is worse than no listing —
+treat it as a hard failure, not a degraded success.
+
+Add a test that specifically proves: given a task where image
+generation is forced to fail (test double), the orchestrator does
+NOT call create_draft_listing() at all — assert the Etsy client mock
+was never invoked, not just that the listing wasn't published.
+
+═══════════════════════════════════════════════════════════════
+FIX 2 — Concept generation must produce ONE specific, concrete product
+═══════════════════════════════════════════════════════════════
+
+In app/agents/trend_research_agent.py, the current output shape is
+{"concept": str, "confidence": str} where concept can be a vague
+strategic sentence. Change this so the agent is required to output a
+SPECIFIC, buildable product idea, not a market observation.
+
+Update the prompt/schema so the LLM must return something like:
+  {
+    "product_name": str,          # e.g. "Plant Parent Weekly Care Planner"
+    "product_type": str,          # "digital_download" or "pod"
+    "description": str,          # 1-2 sentences, specific to THIS item
+    "target_audience": str,
+    "confidence": str
+  }
+
+Add validation (reuse the existing JSONSanitizer/retry-repair pattern
+already used elsewhere in this codebase) that REJECTS and retries if:
+  - product_name is missing, empty, or reads as a category/strategy
+    rather than a specific item (heuristic: reject if it contains
+    phrases like "niche market", "various products", "collection of",
+    "focus on" — these are strategy-language markers, not product
+    names)
+  - description doesn't reference the specific product_name
+
+If research/market-intelligence agents (step 50) produce a broad
+insight as their natural output, treat TrendResearchAgent's job as
+explicitly translating that broad insight into one specific product
+concept — this may mean a second LLM call within the agent: first get
+the broad insight (existing behavior), then a follow-up call that
+says "given this market insight, propose ONE specific, nameable
+product a solo Etsy seller could actually create" — validate that
+second output strictly.
+
+Update AutonomyWorker to use product_name (not the old vague concept
+string) as what gets passed into task creation, so the whole
+downstream pipeline (title generation, image prompts, etc.) is working
+from something concrete from the very first step.
+
+═══════════════════════════════════════════════════════════════
+CLEANUP
+═══════════════════════════════════════════════════════════════
+
+The already-created bad listing needs to be removed from Etsy — check
+whether EtsyClient has a delete/deactivate listing method; if not,
+Maj should be told to manually delete this specific draft listing from
+Etsy's Shop Manager UI, since leaving a "collection of digital
+products and print-on-demand products" listing sitting there — even
+as a draft — doesn't reflect anything real and shouldn't stay.
+
+═══════════════════════════════════════════════════════════════
+VERIFY
+═══════════════════════════════════════════════════════════════
+
+Test both fixes together with a test double for the full chain:
+confirm a task with a forced image-generation failure produces ZERO
+Etsy API calls for listing creation, and confirm a task given a
+deliberately vague fake "concept" input triggers a retry that
+produces a specific, validated product_name before proceeding.
+
+Then, if Maj wants to verify with something real: one more live
+autonomy cycle (or manually triggered task) should now either (a)
+produce a real, specific product with a real file/design behind it and
+a real listing describing that specific item, or (b) fail cleanly and
+visibly with no listing created — never the vague, productless outcome
+from before.
+
+Changelog entry documenting both root causes and confirming the bad
+listing was cleaned up.

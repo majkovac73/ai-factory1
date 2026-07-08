@@ -160,6 +160,35 @@ class TaskService:
         finally:
             db.close()
 
+    def record_pipeline_block(self, task_id: str, reason: str):
+        """
+        Record that the post-completion pipeline refused to create a listing
+        for this task because no verified real product was behind it (step 90
+        hard gate). Does not change task.status — the task's own QA/execution
+        already completed successfully; it's the downstream Etsy listing that
+        was blocked. Surfaced via output_data so the dashboard can show it.
+        """
+        db = SessionLocal()
+        try:
+            task = db.query(Task).filter(Task.id == task_id).first()
+            if not task:
+                raise HTTPException(status_code=404, detail="Task not found")
+
+            merged = dict(task.output_data or {})
+            merged["pipeline_status"] = "BLOCKED_NO_PRODUCT"
+            merged["pipeline_blocked_reason"] = reason
+            task.output_data = merged
+            db.commit()
+            db.refresh(task)
+            return task
+        except HTTPException:
+            raise
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(status_code=500, detail=f"Failed to record pipeline block: {e}")
+        finally:
+            db.close()
+
     MAX_TASK_RETRIES = 5
 
     def retry_failed_task(self, task_id: str):

@@ -54,3 +54,29 @@ class EtsyClient:
                 raise Exception(f"Etsy API error {response.status_code}: {response.text}")
 
             return response.json()
+
+    async def delete_listing(self, listing_id: str) -> bool:
+        """
+        Delete a listing outright. Used by PipelineOrchestrator's hard product
+        gate (step 90) to remove a draft listing that was created but turned
+        out to have no verified product/file behind it — a listing with
+        nothing real behind it is worse than no listing at all.
+
+        Etsy endpoint: DELETE /v3/application/listings/{listing_id}
+        """
+        access_token = await get_valid_access_token()
+        api_key_header = f"{settings.ETSY_API_KEY}:{settings.ETSY_SHARED_SECRET}"
+
+        async with httpx.AsyncClient() as client:
+            response = await client.delete(
+                f"{ETSY_API_BASE}/listings/{listing_id}",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "x-api-key": api_key_header,
+                },
+            )
+
+            if response.status_code >= 400:
+                raise Exception(f"Etsy API error {response.status_code}: {response.text}")
+
+            return True
