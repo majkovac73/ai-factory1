@@ -63,6 +63,10 @@ class Settings(BaseSettings):
 
     AUTO_PUBLISH_LISTINGS: bool = False
 
+    # Hard cap on pages for a multi-page PDF product (step 91). Each page is a
+    # real, billable image-generation call — this must never be unbounded.
+    MAX_PDF_PAGES: int = 6
+
     class Config:
         env_file = ".env"
         extra = "ignore"

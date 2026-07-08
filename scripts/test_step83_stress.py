@@ -99,6 +99,8 @@ class FakePrintifyClient:
     def list_print_providers(self, bp): return [{"id": 3, "title": "Provider"}]
     def list_variants(self, bp, pp): return {"variants": [{"id": 101, "is_enabled": True}]}
     def create_product(self, **kw): return {"id": "prod-stress"}
+    def get_product(self, product_id):
+        return {"print_areas": [{"placeholders": [{"images": [{"id": "img-id"}]}]}]}
 
 
 # ── Seed DB ───────────────────────────────────────────────────────────────────

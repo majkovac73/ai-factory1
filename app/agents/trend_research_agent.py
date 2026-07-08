@@ -1,14 +1,17 @@
 """
-TrendResearchAgent — step 88 (schema hardened in step 90).
+TrendResearchAgent — step 88 (schema hardened in step 90, format allow-list
+tied to real pipeline capability in step 91).
 
 Thin orchestrator used by AutonomyWorker. Calls ResearchAgent + IntelligenceAgent
 to surface a broad market opportunity, then a third LLM call translates that
-opportunity into ONE specific, nameable, buildable product — the broad
-"focus on niche markets" style output IntelligenceAgent naturally produces is
-never passed downstream as if it were a product concept.
+opportunity into ONE specific, nameable, buildable product tied to a concrete
+product_format the pipeline can actually produce — never a vague market
+sentence, and never a concept (like an interactive app) that no amount of
+image generation could ever fulfill.
 
-Returns a dict with product_name, product_type, description, target_audience,
-and confidence, or None if nothing promising / valid was produced.
+Returns a dict with product_name, product_format, description,
+target_audience, page_count (only meaningful for pdf_planner_or_guide), and
+confidence, or None if nothing promising / valid was produced.
 """
 import json
 import logging
@@ -16,14 +19,14 @@ import logging
 from app.agents.base_agent import BaseAgent
 from app.agents.market_intelligence.research import ResearchAgent
 from app.agents.market_intelligence.intelligence import IntelligenceAgent
+from app.core.product_formats import PRODUCT_FORMATS
 from app.core.utils.json_sanitizer import JSONSanitizer
+from config import settings
 
 logger = logging.getLogger("ai-factory")
 
 _RESEARCH_TOPIC = "Etsy digital download and print-on-demand trending products"
 _RESEARCH_SCOPE = "trends"
-
-_VALID_PRODUCT_TYPES = {"digital_download", "pod"}
 
 # Strategy/category language markers — a real product_name never reads like
 # these; if it does, the LLM described the market instead of naming an item.
@@ -40,6 +43,23 @@ _STRATEGY_MARKERS = (
     "assortment of",
 )
 
+# Multi-item language — the fix here is enabling genuinely richer SINGLE
+# products (a real multi-page planner, a real sticker sheet), not
+# reintroducing "a collection of everything" under a new name.
+_MULTI_ITEM_MARKERS = (
+    "bundle",
+    "bundles",
+    " set of",
+    "gift set",
+    " kit",
+    "collection",
+    "pack of",
+    "starter pack",
+    "assortment",
+)
+
+_FORMAT_LIST = sorted(PRODUCT_FORMATS.keys())
+
 
 class TrendResearchAgent(BaseAgent):
 
@@ -54,8 +74,8 @@ class TrendResearchAgent(BaseAgent):
     def run(self) -> dict | None:
         """
         Run a market research + synthesis + concept-specification cycle.
-        Returns {'product_name', 'product_type', 'description',
-        'target_audience', 'confidence'} or None.
+        Returns {'product_name', 'product_format', 'description',
+        'target_audience', 'page_count', 'confidence'} or None.
         """
         try:
             research = self._research.research(_RESEARCH_TOPIC, _RESEARCH_SCOPE)
@@ -78,8 +98,8 @@ class TrendResearchAgent(BaseAgent):
         product = self._propose_product(insight, intel.get("confidence", "low"))
         if not product:
             logger.error(
-                "TrendResearchAgent: could not produce a specific, valid product "
-                f"concept after {self.MAX_CONCEPT_ATTEMPTS} attempts"
+                "TrendResearchAgent: could not produce a specific, valid, buildable "
+                f"product concept after {self.MAX_CONCEPT_ATTEMPTS} attempts"
             )
             return None
 
@@ -87,10 +107,10 @@ class TrendResearchAgent(BaseAgent):
 
     def _propose_product(self, insight: str, fallback_confidence: str) -> dict | None:
         """
-        Translate a broad market insight into one specific, nameable product.
-        Retries with the rejection reason fed back to the model, the same
-        retry -> repair pattern used elsewhere (JSONSanitizer + targeted
-        feedback), up to MAX_CONCEPT_ATTEMPTS times.
+        Translate a broad market insight into one specific, nameable,
+        buildable product tied to a real product_format. Retries with the
+        rejection reason fed back to the model, up to MAX_CONCEPT_ATTEMPTS
+        times.
         """
         feedback = ""
         for attempt in range(1, self.MAX_CONCEPT_ATTEMPTS + 1):
@@ -119,7 +139,7 @@ class TrendResearchAgent(BaseAgent):
             logger.warning(f"TrendResearchAgent: concept attempt {attempt} rejected: {error}")
             feedback = (
                 f"Your previous answer was rejected: {error}. "
-                "Propose a different, more specific product_name that fixes this."
+                "Propose a different, more specific product that fixes this."
             )
 
         return None
@@ -127,11 +147,30 @@ class TrendResearchAgent(BaseAgent):
     def _build_concept_prompt(self, insight: str, feedback: str) -> str:
         retry_note = f"\n\nIMPORTANT — retry feedback:\n{feedback}" if feedback else ""
         return f"""
-You are a product strategist for a solo Etsy seller.
+You are a product strategist for a solo Etsy seller. Your pipeline can ONLY
+produce products in these exact formats — nothing else is buildable:
+
+  Single-image digital:
+    - single_print (poster/wall art/quote print)
+    - coloring_page
+    - greeting_card_design
+    - phone_wallpaper
+
+  Multi-image digital:
+    - pdf_planner_or_guide (a real multi-page PDF — must set page_count,
+      an integer from 1 to {settings.MAX_PDF_PAGES})
+    - sticker_sheet_design (ONE image containing multiple sticker designs
+      laid out on a single sheet — still one product, one image)
+
+  Multi-image print-on-demand:
+    - pod_apparel_design (one core design printed on apparel/merchandise;
+      the pipeline generates additional listing photos separately)
 
 Given this market insight, propose ONE specific, nameable, buildable product
-that could actually be listed on Etsy today — NOT a market strategy, category,
-or description of a whole business.
+that fits EXACTLY ONE of the formats above — NOT a market strategy, NOT a
+category, NOT a bundle/set/kit/collection of multiple items, and NOT
+anything requiring software/interactivity (no apps, no AR, no "tools" —
+only something a static image or PDF can actually be).
 
 Market insight:
 {insight}
@@ -139,7 +178,8 @@ Market insight:
 Return ONLY valid JSON with this structure:
 {{
   "product_name": "a specific, concrete product name, e.g. 'Plant Parent Weekly Care Planner'",
-  "product_type": "digital_download or pod",
+  "product_format": "one of: {', '.join(_FORMAT_LIST)}",
+  "page_count": <integer, ONLY meaningful/required if product_format is pdf_planner_or_guide, otherwise omit or set to 1>,
   "description": "1-2 sentences specific to THIS item, mentioning it by name",
   "target_audience": "who this is for",
   "confidence": "high/medium/low"
@@ -147,7 +187,7 @@ Return ONLY valid JSON with this structure:
 """
 
     def _validate_product(self, data: dict) -> str | None:
-        """Return an error string if data isn't a valid, specific product concept, else None."""
+        """Return an error string if data isn't a valid, specific, buildable product concept, else None."""
         if not isinstance(data, dict):
             return "response was not a JSON object"
 
@@ -159,15 +199,31 @@ Return ONLY valid JSON with this structure:
         for marker in _STRATEGY_MARKERS:
             if marker in lowered:
                 return f"product_name reads as a strategy/category ('{marker}'), not a specific product"
+        for marker in _MULTI_ITEM_MARKERS:
+            if marker in lowered:
+                return f"product_name implies multiple distinct items ('{marker.strip()}'), not one specific product"
 
-        product_type = data.get("product_type")
-        if product_type not in _VALID_PRODUCT_TYPES:
-            return f"product_type must be one of {sorted(_VALID_PRODUCT_TYPES)}, got {product_type!r}"
+        product_format = data.get("product_format")
+        if product_format not in PRODUCT_FORMATS:
+            return f"product_format must be one of {_FORMAT_LIST}, got {product_format!r}"
 
         description = (data.get("description") or "").strip()
         if not description:
             return "description is missing or empty"
         if name.lower() not in description.lower():
             return "description does not reference the specific product_name"
+        lowered_desc = description.lower()
+        for marker in _MULTI_ITEM_MARKERS:
+            if marker in lowered_desc:
+                return f"description implies multiple distinct items ('{marker.strip()}'), not one specific product"
+
+        if product_format == "pdf_planner_or_guide":
+            page_count = data.get("page_count")
+            if not isinstance(page_count, int) or isinstance(page_count, bool):
+                return "page_count is required for pdf_planner_or_guide and must be an integer"
+            if page_count < 1:
+                return "page_count must be at least 1"
+            if page_count > settings.MAX_PDF_PAGES:
+                return f"page_count {page_count} exceeds MAX_PDF_PAGES cap of {settings.MAX_PDF_PAGES}"
 
         return None

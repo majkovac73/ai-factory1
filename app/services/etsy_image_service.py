@@ -143,7 +143,7 @@ class EtsyImageService:
         access_token = await get_valid_access_token()
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.patch(
-                f"{ETSY_API_BASE}/listings/{listing_id}",
+                f"{ETSY_API_BASE}/shops/{settings.ETSY_SHOP_ID}/listings/{listing_id}",
                 headers={
                     "Authorization": f"Bearer {access_token}",
                     "x-api-key": self._api_key_header(),
@@ -155,6 +155,28 @@ class EtsyImageService:
                     f"Etsy publish listing error {response.status_code}: {response.text}"
                 )
             return response.json()
+
+    async def get_listing_images(self, listing_id: str) -> list:
+        """
+        Readback verification (step 91): confirm images are really attached
+        to a listing rather than trusting upload_listing_image()'s response
+        alone. Etsy endpoint: GET /v3/application/listings/{listing_id}/images
+        """
+        access_token = await get_valid_access_token()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                f"{ETSY_API_BASE}/listings/{listing_id}/images",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "x-api-key": self._api_key_header(),
+                },
+            )
+            if response.status_code >= 400:
+                raise RuntimeError(
+                    f"Etsy get listing images error {response.status_code}: {response.text}"
+                )
+            data = response.json()
+            return data.get("results", [])
 
     async def attach_images_and_publish(
         self,

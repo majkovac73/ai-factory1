@@ -61,7 +61,7 @@ print("\nStep 89 — PipelineOrchestrator tests\n")
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def _make_done_task(prompt="Moon phase wall art print", task_type="general"):
+def _make_done_task(prompt="Moon phase wall art print", task_type="single_print"):
     """Create a task and push it to DONE with fake output_data."""
     ts = TaskService()
     t = ts.create_task(TaskCreate(prompt=prompt, type=task_type))
@@ -79,20 +79,24 @@ def _make_done_task(prompt="Moon phase wall art print", task_type="general"):
 
 
 def _fake_image_path(tmp_dir, name="hero.png"):
-    """Write a minimal valid PNG to a temp dir for testing."""
-    import struct, zlib
+    """Write a real 1024x1024 PNG to a temp dir — passes ImageValidationService's
+    real dimension/ratio checks (Pillow is a hard dependency, so a 1x1 stub
+    would fail the min-size check rather than being skipped)."""
+    from PIL import Image as PILImage
     p = Path(tmp_dir) / name
-    # Minimal 1x1 white PNG
-    def _chunk(tag, data):
-        c = zlib.crc32(tag + data) & 0xffffffff
-        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", c)
-    sig = b"\x89PNG\r\n\x1a\n"
-    ihdr = _chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
-    raw = b"\x00\xFF\xFF\xFF"
-    idat = _chunk(b"IDAT", zlib.compress(raw))
-    iend = _chunk(b"IEND", b"")
-    p.write_bytes(sig + ihdr + idat + iend)
+    img = PILImage.new("RGB", (1024, 1024), color=(180, 140, 90))
+    img.save(p, format="PNG")
     return p
+
+
+class _FakePODPipelineServiceDefault:
+    """Returns a valid, already-generated delivery design so the hard gate
+    passes without hitting a real image provider."""
+    def __init__(self, design_path):
+        self._design_path = design_path
+
+    def build_product_record(self, task_id, product_name, visual_brief, product_type):
+        return {"task_id": task_id, "design_path": str(self._design_path), "ready_for_pod": True}
 
 
 # ── [1] run_post_completion called after task DONE ────────────────────────────
@@ -132,6 +136,7 @@ print("[2] listing_images stage: ProductImageAgent + catalog registration...")
 with tempfile.TemporaryDirectory() as tmp:
     hero_path = _fake_image_path(tmp, "hero.png")
     lifestyle_path = _fake_image_path(tmp, "lifestyle.png")
+    design_path2 = _fake_image_path(tmp, "design2.png")
 
     done_task2 = _make_done_task()
     orch = PipelineOrchestrator()
@@ -152,6 +157,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
     report = {}
     with patch("app.services.pipeline_orchestrator.ProductImageAgent", FakeProductImageAgent), \
+         patch("app.services.pipeline_orchestrator.PODPipelineService", lambda: _FakePODPipelineServiceDefault(design_path2)), \
          patch("app.services.pipeline_orchestrator.asyncio.run", return_value={"listing_id": "FAKE-LID"}), \
          patch("app.services.pipeline_orchestrator.ListingGeneratorAgent") as mock_lga, \
          patch("app.services.pipeline_orchestrator.EtsyClient"), \
@@ -171,27 +177,43 @@ with tempfile.TemporaryDirectory() as tmp:
         fail("[2] listing_images", f"stage={img_stage}, agent_calls={agent_calls}, catalog_calls={catalog_calls}")
 
 
-# ── [3] pod_design stage only fires for pod/digital_download type ─────────────
-print("[3] pod_design stage: conditional on task type...")
+# ── [3] delivery_asset fires for any recognized format; printify_precheck ──────
+#      only fires for the pod category; an unrecognized type is skipped
+#      entirely (default-deny gate, step 91).
+print("[3] delivery_asset / printify_precheck: conditional on product_format...")
 
-done_general = _make_done_task(task_type="general")
-done_pod     = _make_done_task(task_type="pod")
+done_unrecognized = _make_done_task(task_type="general")
+done_single       = _make_done_task(task_type="single_print")
+done_pod          = _make_done_task(task_type="pod_apparel_design")
 
 pod_design_calls = []
+printify_precheck_calls = []
 
 class FakePODPipelineService:
     def build_product_record(self, task_id, product_name, visual_brief, product_type):
         pod_design_calls.append(task_id)
         return {"task_id": task_id, "design_path": None, "ready_for_pod": False}
 
+class FakePODFulfillmentService3:
+    def create_product_for_task(self, task_id, etsy_listing_id=None):
+        printify_precheck_calls.append(task_id)
+        raise RuntimeError("no delivery asset in this test double")
+
 with tempfile.TemporaryDirectory() as tmp:
     h = _fake_image_path(tmp, "h.png"); l = _fake_image_path(tmp, "l.png")
 
-    for task, expect_pod in [(done_general, False), (done_pod, True)]:
+    cases = [
+        (done_unrecognized, False, False),
+        (done_single, True, False),
+        (done_pod, True, True),
+    ]
+    for task, expect_delivery, expect_printify in cases:
         pod_design_calls.clear()
+        printify_precheck_calls.clear()
         orch3 = PipelineOrchestrator()
         with patch("app.services.pipeline_orchestrator.ProductImageAgent") as mock_pia, \
              patch("app.services.pipeline_orchestrator.PODPipelineService", FakePODPipelineService), \
+             patch("app.services.pipeline_orchestrator.PODFulfillmentService", FakePODFulfillmentService3), \
              patch("app.services.pipeline_orchestrator.asyncio.run", return_value={"listing_id": "L99"}), \
              patch("app.services.pipeline_orchestrator.ListingGeneratorAgent") as mock_lga2, \
              patch("app.services.pipeline_orchestrator.EtsyClient"), \
@@ -204,11 +226,16 @@ with tempfile.TemporaryDirectory() as tmp:
             mock_ms3.return_value.post_to_channel.return_value = {"success": True}
             orch3.run_post_completion(task.id)
 
-        fired = bool(pod_design_calls)
-        if fired == expect_pod:
-            ok(f"[3] pod_design fires={fired} for type='{task.type}' (expected={expect_pod})")
+        delivery_fired = bool(pod_design_calls)
+        printify_fired = bool(printify_precheck_calls)
+        if delivery_fired == expect_delivery and printify_fired == expect_printify:
+            ok(f"[3] type='{task.type}': delivery_asset={delivery_fired}, printify_precheck={printify_fired}")
         else:
-            fail(f"[3] pod_design for type='{task.type}'", f"fired={fired}, expected={expect_pod}")
+            fail(
+                f"[3] type='{task.type}'",
+                f"delivery_asset={delivery_fired} (expected {expect_delivery}), "
+                f"printify_precheck={printify_fired} (expected {expect_printify})",
+            )
 
 
 # ── [4] pinterest stage: SocialImageAgent + MarketingService called ────────────
@@ -217,6 +244,7 @@ print("[4] pinterest stage: image generated and post attempted...")
 with tempfile.TemporaryDirectory() as tmp:
     h4 = _fake_image_path(tmp, "h4.png"); l4 = _fake_image_path(tmp, "l4.png")
     pin4 = _fake_image_path(tmp, "pin4.png")
+    design4 = _fake_image_path(tmp, "design4.png")
 
     done4 = _make_done_task()
     orch4 = PipelineOrchestrator()
@@ -232,8 +260,11 @@ with tempfile.TemporaryDirectory() as tmp:
         def enrich_listing_with_image(self, listing, task_id, visual_brief):
             return {**listing, "image_base64": "FAKEBASE64", "pin_image_path": str(pin4)}
 
+    fixed_result4 = {"listing_id": "L44", "digital_upload": {"ok": True}, "uploaded_images": [], "publish_result": {"published": False}}
+
     with patch("app.services.pipeline_orchestrator.ProductImageAgent") as m_pia4, \
-         patch("app.services.pipeline_orchestrator.asyncio.run", return_value={"listing_id": "L44"}), \
+         patch("app.services.pipeline_orchestrator.PODPipelineService", lambda: _FakePODPipelineServiceDefault(design4)), \
+         patch("app.services.pipeline_orchestrator.asyncio.run", return_value=fixed_result4), \
          patch("app.services.pipeline_orchestrator.ListingGeneratorAgent") as m_lga4, \
          patch("app.services.pipeline_orchestrator.EtsyClient"), \
          patch("app.services.pipeline_orchestrator.PinterestImageService", FakePinterestImageService4), \
@@ -254,6 +285,7 @@ print("[5] pinterest stage: skipped if already successfully posted...")
 
 with tempfile.TemporaryDirectory() as tmp:
     h5 = _fake_image_path(tmp, "h5.png"); l5 = _fake_image_path(tmp, "l5.png")
+    design5 = _fake_image_path(tmp, "design5.png")
     done5 = _make_done_task()
     orch5 = PipelineOrchestrator()
     post_calls5 = []
@@ -268,8 +300,11 @@ with tempfile.TemporaryDirectory() as tmp:
             post_calls5.append(True)
             return {"success": True}
 
+    fixed_result5 = {"listing_id": "L55", "digital_upload": {"ok": True}, "uploaded_images": [], "publish_result": {"published": False}}
+
     with patch("app.services.pipeline_orchestrator.ProductImageAgent") as m_pia5, \
-         patch("app.services.pipeline_orchestrator.asyncio.run", return_value={"listing_id": "L55"}), \
+         patch("app.services.pipeline_orchestrator.PODPipelineService", lambda: _FakePODPipelineServiceDefault(design5)), \
+         patch("app.services.pipeline_orchestrator.asyncio.run", return_value=fixed_result5), \
          patch("app.services.pipeline_orchestrator.ListingGeneratorAgent") as m_lga5, \
          patch("app.services.pipeline_orchestrator.EtsyClient"), \
          patch("app.services.pipeline_orchestrator.PinterestImageService"), \
@@ -291,6 +326,7 @@ print("[6] create_listing failure: attach_publish skipped, pinterest still runs.
 with tempfile.TemporaryDirectory() as tmp:
     h6 = _fake_image_path(tmp, "h6.png"); l6 = _fake_image_path(tmp, "l6.png")
     pin6 = _fake_image_path(tmp, "pin6.png")
+    design6 = _fake_image_path(tmp, "design6.png")
     done6 = _make_done_task()
     orch6 = PipelineOrchestrator()
     pin_calls6 = []
@@ -308,6 +344,7 @@ with tempfile.TemporaryDirectory() as tmp:
             pin_calls6.append(True); return {"success": True}
 
     with patch("app.services.pipeline_orchestrator.ProductImageAgent") as m_pia6, \
+         patch("app.services.pipeline_orchestrator.PODPipelineService", lambda: _FakePODPipelineServiceDefault(design6)), \
          patch("app.services.pipeline_orchestrator.ListingGeneratorAgent") as m_lga6, \
          patch("app.services.pipeline_orchestrator.asyncio.run", side_effect=_raise_etsy), \
          patch("app.services.pipeline_orchestrator.EtsyClient"), \
@@ -333,6 +370,7 @@ print("[7] listing_images failure: isolated, subsequent stages still run...")
 
 with tempfile.TemporaryDirectory() as tmp:
     pin7 = _fake_image_path(tmp, "pin7.png")
+    design7 = _fake_image_path(tmp, "design7.png")
     done7 = _make_done_task()
     orch7 = PipelineOrchestrator()
     pin_calls7 = []
@@ -350,8 +388,11 @@ with tempfile.TemporaryDirectory() as tmp:
         def post_to_channel(self, task_id, listing, channel):
             pin_calls7.append(True); return {"success": True}
 
+    fixed_result7 = {"listing_id": "L77", "digital_upload": {"ok": True}, "uploaded_images": [], "publish_result": {"published": False}}
+
     with patch("app.services.pipeline_orchestrator.ProductImageAgent", FakeProductImageAgent7), \
-         patch("app.services.pipeline_orchestrator.asyncio.run", return_value={"listing_id": "L77"}), \
+         patch("app.services.pipeline_orchestrator.PODPipelineService", lambda: _FakePODPipelineServiceDefault(design7)), \
+         patch("app.services.pipeline_orchestrator.asyncio.run", return_value=fixed_result7), \
          patch("app.services.pipeline_orchestrator.ListingGeneratorAgent") as m_lga7, \
          patch("app.services.pipeline_orchestrator.EtsyClient"), \
          patch("app.services.pipeline_orchestrator.PinterestImageService", FakePinterestImageService7), \

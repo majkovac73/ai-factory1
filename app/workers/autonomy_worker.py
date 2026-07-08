@@ -119,24 +119,29 @@ class AutonomyWorker:
             return
 
         product_name = opportunity.get("product_name") or "Product"
-        product_type = opportunity.get("product_type") or "digital_download"
+        product_format = opportunity.get("product_format") or "single_print"
         description = opportunity.get("description", "")
         target_audience = opportunity.get("target_audience", "")
+        page_count = opportunity.get("page_count")
 
-        prompt_parts = [f"Create a {product_type.replace('_', ' ')} product: {product_name}."]
+        prompt_parts = [f"Create a {product_format.replace('_', ' ')} product: {product_name}."]
         if description:
             prompt_parts.append(description)
         if target_audience:
             prompt_parts.append(f"Target audience: {target_audience}.")
         prompt = " ".join(prompt_parts)
 
-        logger.info(f"AutonomyWorker: creating task for product: {product_name[:80]}")
+        logger.info(f"AutonomyWorker: creating task for product: {product_name[:80]} (format={product_format})")
+
+        metadata = {"source": "autonomy_worker", "product_name": product_name}
+        if page_count:
+            metadata["page_count"] = page_count
 
         task_service = TaskService()
         task = task_service.create_task(TaskCreate(
             prompt=prompt,
-            type=product_type,
-            metadata={"source": "autonomy_worker", "product_name": product_name},
+            type=product_format,
+            metadata=metadata,
         ))
 
         autonomy.record_task_created()

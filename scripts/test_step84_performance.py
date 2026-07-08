@@ -176,6 +176,8 @@ class TrackingPrintifyClient:
     def list_print_providers(self, bp): return [{"id": 3, "title": "Provider"}]
     def list_variants(self, bp, pp): return {"variants": [{"id": 101, "is_enabled": True}]}
     def create_product(self, **kw): return {"id": "prod-dedup"}
+    def get_product(self, product_id):
+        return {"print_areas": [{"placeholders": [{"images": [{"id": "img-id-dedup"}]}]}]}
     def create_order(self, **kw): return "order-dedup"
 
 tracking_catalog = ImageCatalogService()

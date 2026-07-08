@@ -83,7 +83,7 @@ print("\nStep 90 — hard product gate + specific concept generation tests\n")
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 
-def _make_done_task(prompt="Celestial Moon Phase Art Print", task_type="digital_download"):
+def _make_done_task(prompt="Celestial Moon Phase Art Print", task_type="single_print"):
     ts = TaskService()
     t = ts.create_task(TaskCreate(prompt=prompt, type=task_type))
     ts.update_status(t.id, TaskStatus.PLANNED.value)
@@ -168,8 +168,8 @@ with tempfile.TemporaryDirectory() as tmp:
 
     with patch("app.services.pipeline_orchestrator.ProductImageAgent") as m_pia2, \
          patch("app.services.pipeline_orchestrator.PODPipelineService", OkPODPipelineService2), \
-         patch("app.services.pipeline_orchestrator.asyncio.run") as m_run2, \
-         patch("app.services.pipeline_orchestrator.EtsyClient"), \
+         patch("app.services.pipeline_orchestrator.EtsyClient") as m_etsy2, \
+         patch("app.services.pipeline_orchestrator.EtsyImageService") as m_eis2, \
          patch("app.services.pipeline_orchestrator.ListingGeneratorAgent") as m_lga2, \
          patch("app.services.pipeline_orchestrator.PinterestImageService") as m_pis2, \
          patch("app.services.pipeline_orchestrator.MarketingService") as m_ms2:
@@ -179,16 +179,23 @@ with tempfile.TemporaryDirectory() as tmp:
         m_ms2.return_value.get_posts_for_task.return_value = []
         m_ms2.return_value.post_to_channel.return_value = {"success": True}
 
-        def _run2_side_effect(coro):
-            coro.close()
+        async def _create2(listing):
+            return {"listing_id": "L200"}
+        m_etsy2.return_value.create_draft_listing.side_effect = _create2
+
+        async def _attach2(**kw):
             return {
                 "listing_id": "L200",
                 "digital_upload": {"ok": True},
-                "uploaded_images": ["hero2.png"],
+                "uploaded_images": [{"path": "hero2.png", "result": {"ok": True}}],
                 "publish_result": {"published": False},
             }
+        m_eis2.return_value.attach_images_and_publish.side_effect = _attach2
 
-        m_run2.side_effect = _run2_side_effect
+        async def _get_images2(listing_id):
+            return [{"listing_image_id": 1}]
+        m_eis2.return_value.get_listing_images.side_effect = _get_images2
+
         report2 = orch2.run_post_completion(done2.id)
 
     cl2 = report2["stages"].get("create_listing", {})
@@ -204,7 +211,7 @@ print("[3] pod with failing Printify product creation: no listing created...")
 with tempfile.TemporaryDirectory() as tmp:
     hero3 = _fake_image_path(tmp, "hero3.png")
     design3 = _fake_image_path(tmp, "design3.png")
-    done3 = _make_done_task(task_type="pod")
+    done3 = _make_done_task(task_type="pod_apparel_design")
     orch3 = PipelineOrchestrator()
 
     class OkPODPipelineService3:
@@ -309,44 +316,79 @@ with patch("app.agents.trend_research_agent.ResearchAgent"), \
 
 vague = {
     "product_name": "Focus on niche markets catering to specific hobbies",
-    "product_type": "digital_download",
+    "product_format": "single_print",
     "description": "A great strategy for sellers.",
     "target_audience": "everyone",
 }
-missing_type = {
+bad_format = {
     "product_name": "Plant Parent Weekly Care Planner",
-    "product_type": "poster",
+    "product_format": "poster",
     "description": "The Plant Parent Weekly Care Planner helps you track watering.",
     "target_audience": "plant owners",
 }
 mismatched_desc = {
     "product_name": "Plant Parent Weekly Care Planner",
-    "product_type": "digital_download",
+    "product_format": "single_print",
     "description": "A great tool for tracking your houseplants.",
     "target_audience": "plant owners",
 }
+multi_item = {
+    "product_name": "Plant Lovers Sticker Bundle Set",
+    "product_format": "sticker_sheet_design",
+    "description": "The Plant Lovers Sticker Bundle Set includes many stickers.",
+    "target_audience": "plant owners",
+}
+pdf_missing_page_count = {
+    "product_name": "Plant Parent Weekly Care Planner",
+    "product_format": "pdf_planner_or_guide",
+    "description": "The Plant Parent Weekly Care Planner is a printable multi-page tracker.",
+    "target_audience": "plant owners",
+}
+pdf_over_cap = {
+    "product_name": "Plant Parent Weekly Care Planner",
+    "product_format": "pdf_planner_or_guide",
+    "description": "The Plant Parent Weekly Care Planner is a printable multi-page tracker.",
+    "target_audience": "plant owners",
+    "page_count": 999,
+}
 valid = {
     "product_name": "Plant Parent Weekly Care Planner",
-    "product_type": "digital_download",
+    "product_format": "single_print",
     "description": "The Plant Parent Weekly Care Planner is a printable tracker for watering schedules.",
     "target_audience": "plant owners",
+    "confidence": "high",
+}
+valid_pdf = {
+    "product_name": "Plant Parent Weekly Care Planner",
+    "product_format": "pdf_planner_or_guide",
+    "description": "The Plant Parent Weekly Care Planner is a printable multi-page tracker.",
+    "target_audience": "plant owners",
+    "page_count": 4,
     "confidence": "high",
 }
 
 results5 = {
     "vague": tra._validate_product(vague),
-    "missing_type": tra._validate_product(missing_type),
+    "bad_format": tra._validate_product(bad_format),
     "mismatched_desc": tra._validate_product(mismatched_desc),
+    "multi_item": tra._validate_product(multi_item),
+    "pdf_missing_page_count": tra._validate_product(pdf_missing_page_count),
+    "pdf_over_cap": tra._validate_product(pdf_over_cap),
     "valid": tra._validate_product(valid),
+    "valid_pdf": tra._validate_product(valid_pdf),
 }
 
 if (
     results5["vague"] is not None
-    and results5["missing_type"] is not None
+    and results5["bad_format"] is not None
     and results5["mismatched_desc"] is not None
+    and results5["multi_item"] is not None
+    and results5["pdf_missing_page_count"] is not None
+    and results5["pdf_over_cap"] is not None
     and results5["valid"] is None
+    and results5["valid_pdf"] is None
 ):
-    ok("[5] _validate_product rejects vague/invalid concepts, accepts a specific one")
+    ok("[5] _validate_product rejects vague/invalid/multi-item/over-cap concepts, accepts specific valid ones")
 else:
     fail("[5] _validate_product", f"results={results5}")
 
@@ -379,9 +421,9 @@ class FakeIntelligenceAgent6:
 def _fake_generate(self, prompt):
     gen_calls.append(prompt)
     if len(gen_calls) == 1:
-        return '{"product_name": "Focus on niche markets", "product_type": "digital_download", "description": "strategy", "target_audience": "everyone"}'
+        return '{"product_name": "Focus on niche markets", "product_format": "single_print", "description": "strategy", "target_audience": "everyone"}'
     return (
-        '{"product_name": "Plant Parent Weekly Care Planner", "product_type": "digital_download", '
+        '{"product_name": "Plant Parent Weekly Care Planner", "product_format": "single_print", '
         '"description": "The Plant Parent Weekly Care Planner is a printable watering tracker.", '
         '"target_audience": "plant owners", "confidence": "high"}'
     )

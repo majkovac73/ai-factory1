@@ -230,7 +230,7 @@ with tempfile.TemporaryDirectory() as tmp:
         def run(self):
             return {
                 "product_name": "Celestial Moon Phase Art Print",
-                "product_type": "digital_download",
+                "product_format": "single_print",
                 "description": "A minimalist Celestial Moon Phase Art Print for wall decor.",
                 "target_audience": "moon lovers",
                 "confidence": "high",
@@ -308,9 +308,9 @@ with tempfile.TemporaryDirectory() as tmp:
         created_tasks
         and "Celestial Moon Phase Art Print" in created_tasks[0]
         and created_task_types
-        and created_task_types[0] == "digital_download"
+        and created_task_types[0] == "single_print"
     ):
-        ok("[8] AUTONOMY_ENABLED=True: agent double called, task created with specific product_name and product_type")
+        ok("[8] AUTONOMY_ENABLED=True: agent double called, task created with specific product_name and product_format")
     elif not created_tasks:
         fail("[8] AutonomyWorker task creation", "no task was created")
     else:

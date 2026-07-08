@@ -5,31 +5,53 @@ Called by TaskProcessor immediately after a task transitions to DONE.
 Chains image generation → hard product gate → Etsy listing creation → image
 attachment / publish → Pinterest marketing → POD Printify product.
 
-Each stage runs in its own try/except — one failure does NOT prevent
-subsequent stages from being attempted, EXCEPT for the hard product gate
-(step 90): for 'digital_download' and 'pod' tasks, a verified real product
-artifact MUST exist before EtsyClient.create_draft_listing() is ever called.
-A listing with nothing real behind it is worse than no listing — so any
-precondition failure blocks listing creation entirely rather than degrading
-to a best-effort attempt. All failures are logged and alerted via the
-existing AlertService pattern.
+DEFAULT-DENY (step 91): task.type must be a recognized product_format
+(see app/core/product_formats.py). Any other task.type — "seo_writing",
+"general", or anything else — is NOT a product-listing task at all and the
+entire pipeline is skipped; create_draft_listing() is never reachable for
+it. (This closes a real bug: previously ANY task type that wasn't
+"pod"/"digital_download" fell through the gate entirely and went straight
+to listing creation with zero asset verification — exactly the original bug,
+through a different door — e.g. the "/tasks/etsy/listing" endpoint hardcodes
+type="seo_writing".)
+
+For every recognized format, a real, validated, READBACK-VERIFIED product
+artifact is a BLOCKING precondition — not a best-effort side step:
+  - single-image formats: ImageCatalogService.get_delivery_asset() must
+    return a real asset that already passed ImageValidationService (step 72).
+  - pdf_planner_or_guide: PDFGenerationService must produce AND independently
+    re-open (via pypdf) a PDF with exactly the expected page count. Any
+    single page failing mid-sequence fails the whole PDF — never a partial
+    deliverable.
+  - pod_apparel_design: PODFulfillmentService.create_product_for_task() must
+    succeed, which itself re-fetches the product from Printify to confirm
+    the submitted image is really attached (not just that create returned
+    200).
+  - After a listing is created, the digital file upload (digital formats) and
+    the listing-photo attachment (readback via Etsy's listing-images GET) are
+    ALSO verified. Etsy's upload endpoints require a listing_id to exist
+    first, so these can't be checked strictly before creation — instead, any
+    failure here deletes the just-created listing and blocks the task, so
+    nothing incomplete survives.
 
 Stage order:
-  1. listing_images    — ProductImageAgent hero + lifestyle (always)
-  2. pod_design         — PODPipelineService delivery asset (pod/digital_download)
-  3. printify_precheck  — PODFulfillmentService.create_product_for_task (pod only;
-                           runs BEFORE listing creation so a failure blocks it)
-  4. HARD GATE          — delivery asset must exist + pass validation (pod/digital);
-                           Printify product must exist (pod). Any failure: task is
-                           marked BLOCKED_NO_PRODUCT and create_draft_listing is
-                           never called.
-  5. create_listing     — Etsy draft listing via EtsyClient (always, if gate passed)
-  6. attach_publish     — EtsyImageService.attach_images_and_publish (needs listing_id).
-                           For digital products, a failed/missing digital file upload
-                           is also treated as a gate failure: the draft listing is
-                           deleted and the task is blocked.
-  7. printify_link      — link the precreated Printify product to the real listing_id
-  8. pinterest          — SocialImageAgent + MarketingService (independent of Etsy)
+  1. listing_images    — ProductImageAgent hero + lifestyle (always, for
+                          any recognized format)
+  2. delivery_asset     — single image (PODPipelineService) or multi-page
+                          PDF (PDFGenerationService), depending on format
+  3. printify_precheck  — pod_apparel_design only; runs BEFORE listing
+                          creation so a failure blocks it outright
+  4. HARD GATE           — delivery asset must exist+verified; POD product
+                          must exist. Any failure: task marked
+                          BLOCKED_NO_PRODUCT, create_draft_listing() never
+                          called.
+  5. create_listing     — Etsy draft listing via EtsyClient
+  6. attach_publish      — uploads images + digital file, then publish.
+                          Digital-file failure or missing listing-image
+                          readback both roll back (delete listing + block).
+  7. printify_link       — link the precreated Printify product to the
+                          real listing_id
+  8. pinterest           — independent of Etsy stages
 """
 import asyncio
 import logging
@@ -44,18 +66,16 @@ from app.agents.image.social_image_agent import SocialImageAgent
 from app.agents.etsy.listing_generator import ListingGeneratorAgent
 from app.services.image_validation_service import ImageValidationService, ImageValidationError
 from app.services.pod_pipeline_service import PODPipelineService
+from app.services.pdf_generation_service import PDFGenerationService, PDFGenerationError
 from app.services.etsy_client import EtsyClient
 from app.services.etsy_image_service import EtsyImageService
 from app.services.pod_fulfillment_service import PODFulfillmentService
 from app.services.pinterest_image_service import PinterestImageService
 from app.services.marketing_service import MarketingService
 from app.marketing.pinterest_channel import PinterestChannel
+from app.core.product_formats import PRODUCT_FORMATS
 
 logger = logging.getLogger("ai-factory")
-
-DIGITAL_DOWNLOAD_TYPE = "digital_download"
-POD_TYPE = "pod"
-DELIVERY_ASSET_TASK_TYPES = {POD_TYPE, DIGITAL_DOWNLOAD_TYPE}
 
 
 class PipelineOrchestrator:
@@ -76,23 +96,30 @@ class PipelineOrchestrator:
         if not task:
             return {"error": f"Task {task_id} not found"}
 
+        task_type = task.type or "general"
+        format_spec = PRODUCT_FORMATS.get(task_type)
+        report: dict = {"task_id": task_id, "task_type": task_type, "stages": {}}
+
+        if format_spec is None:
+            report["skipped"] = f"task_type '{task_type}' is not a recognized product_format — no listing pipeline runs"
+            return report
+
         output_data = task.output_data or {}
         product_name = (output_data.get("title") or task.prompt or "Product")[:140]
         visual_brief = output_data.get("description") or task.prompt or ""
-        task_type = task.type or "general"
-        is_pod = task_type == POD_TYPE
-        is_digital = task_type == DIGITAL_DOWNLOAD_TYPE
-        needs_delivery_asset = task_type in DELIVERY_ASSET_TASK_TYPES
+        is_pod = format_spec["category"] == "pod"
+        is_pdf = format_spec["delivery"] == "pdf"
+        digital_required = format_spec["category"] == "digital"
 
         is_autonomy = bool((task.metadata_ or {}).get("source") == "autonomy_worker")
-        report: dict = {"task_id": task_id, "task_type": task_type, "stages": {}}
 
         # 1 — listing images
         image_paths = self._stage_listing_images(task_id, product_name, visual_brief, is_autonomy, report)
 
-        # 2 — delivery asset (POD design / digital download file)
-        design_path = None
-        if needs_delivery_asset:
+        # 2 — delivery asset (single image or multi-page PDF)
+        if is_pdf:
+            design_path = self._stage_pdf_design(task, task_id, product_name, visual_brief, output_data, report)
+        else:
             design_path = self._stage_pod_design(task_id, product_name, visual_brief, task_type, report)
 
         # 3 — POD physical: a real Printify product must exist BEFORE a listing
@@ -102,18 +129,17 @@ class PipelineOrchestrator:
             pod_product = self._stage_printify_precheck(task_id, report)
 
         # 4 — HARD GATE: no listing without a verified real product behind it.
-        if needs_delivery_asset:
-            gate_error = self._delivery_gate_error(task_id, is_pod, pod_product)
-            if gate_error:
-                self._block_task(task_id, gate_error, report, pre_listing=True)
-                return report
+        gate_error = self._delivery_gate_error(task_id, is_pdf, is_pod, pod_product)
+        if gate_error:
+            self._block_task(task_id, gate_error, report, pre_listing=True)
+            return report
 
         # 5 — create Etsy draft listing
         listing_id = self._stage_create_listing(task_id, product_name, output_data, task_type, is_pod, report)
 
-        # 6 — attach images / digital file, then publish
+        # 6 — attach images / digital file, then publish; readback-verify both
         if listing_id:
-            self._stage_attach_publish(task_id, listing_id, image_paths, design_path, is_digital, report)
+            self._stage_attach_publish(task_id, listing_id, image_paths, design_path, digital_required, report)
         else:
             report["stages"]["attach_publish"] = {"skipped": "create_listing failed"}
 
@@ -141,16 +167,17 @@ class PipelineOrchestrator:
 
     # ── Hard product gate ────────────────────────────────────────────────────
 
-    def _delivery_gate_error(self, task_id: str, is_pod: bool, pod_product) -> Optional[str]:
+    def _delivery_gate_error(self, task_id: str, is_pdf: bool, is_pod: bool, pod_product) -> Optional[str]:
         """
         Returns a human-readable blocking reason if the required real product
         preconditions are not met, or None if the gate is satisfied.
         """
         asset = self.catalog.get_delivery_asset(task_id)
         if not asset or not Path(asset.local_path).exists():
-            return "no verified delivery asset — image generation or validation failed"
+            kind = "PDF" if is_pdf else "delivery asset"
+            return f"no verified {kind} — generation, page-count readback, or validation failed"
         if is_pod and not pod_product:
-            return "Printify product creation failed — no real POD product exists"
+            return "Printify product creation failed — no real POD product exists (or readback confirmation failed)"
         return None
 
     def _block_task(self, task_id: str, reason: str, report: dict, pre_listing: bool):
@@ -168,8 +195,8 @@ class PipelineOrchestrator:
     def _cleanup_unbacked_listing(self, listing_id: str, report: dict):
         """
         Delete a draft listing that was created but turned out to have no
-        real product behind it. If deletion itself fails, alert so Maj can
-        remove it manually from Etsy's Shop Manager UI.
+        real/complete product behind it. If deletion itself fails, alert so
+        Maj can remove it manually from Etsy's Shop Manager UI.
         """
         try:
             asyncio.run(EtsyClient().delete_listing(listing_id))
@@ -238,16 +265,21 @@ class PipelineOrchestrator:
     def _stage_pod_design(self, task_id: str, product_name: str, visual_brief: str, task_type: str, report: dict) -> Optional[Path]:
         from config import settings
 
+        # PODPipelineService/PODDesignAgent's product_type label only affects
+        # the generation prompt wording — map our format name to the
+        # digital/pod label they already understand rather than touching them.
+        mapped_type = "pod" if PRODUCT_FORMATS.get(task_type, {}).get("category") == "pod" else "digital_download"
+
         try:
             result = PODPipelineService().build_product_record(
                 task_id=task_id,
                 product_name=product_name,
                 visual_brief=visual_brief,
-                product_type=task_type,
+                product_type=mapped_type,
             )
             design_str = result.get("design_path")
             if not design_str:
-                report["stages"]["pod_design"] = {"ok": False, "error": "no design artifact was generated"}
+                report["stages"]["delivery_asset"] = {"ok": False, "error": "no design artifact was generated"}
                 return None
 
             design_path = Path(design_str)
@@ -263,24 +295,86 @@ class PipelineOrchestrator:
                     model=settings.OPENROUTER_IMAGE_MODEL,
                 )
             except ImageValidationError as ve:
-                logger.warning(f"PipelineOrchestrator: POD design failed validation: {ve}")
-                report["stages"]["pod_design"] = {"ok": False, "error": f"validation failed: {ve}"}
+                logger.warning(f"PipelineOrchestrator: delivery image failed validation: {ve}")
+                report["stages"]["delivery_asset"] = {"ok": False, "error": f"validation failed: {ve}"}
                 return None
 
-            report["stages"]["pod_design"] = {"ok": True, "design_path": design_str}
+            report["stages"]["delivery_asset"] = {"ok": True, "design_path": design_str}
             return design_path
         except Exception as e:
-            logger.error(f"PipelineOrchestrator: pod_design failed for {task_id}: {e}")
-            self._alert("POD design generation failed", f"task_id={task_id}: {e}")
-            report["stages"]["pod_design"] = {"ok": False, "error": str(e)}
+            logger.error(f"PipelineOrchestrator: delivery_asset (single image) failed for {task_id}: {e}")
+            self._alert("Delivery asset generation failed", f"task_id={task_id}: {e}")
+            report["stages"]["delivery_asset"] = {"ok": False, "error": str(e)}
             return None
+
+    def _stage_pdf_design(self, task, task_id: str, product_name: str, visual_brief: str, output_data: dict, report: dict) -> Optional[Path]:
+        from config import settings
+
+        page_briefs = self._resolve_pdf_page_briefs(task, output_data)
+
+        try:
+            pdf_path = PDFGenerationService().generate_pdf(
+                task_id=task_id,
+                product_name=product_name,
+                visual_brief=visual_brief,
+                page_briefs=page_briefs,
+            )
+            # PDFs aren't images — ImageValidationService's pixel/ratio checks
+            # don't apply. PDFGenerationService already performed its own
+            # stronger check (real per-page generation + independent pypdf
+            # readback of the actual page count), so register directly.
+            self.catalog.register(
+                task_id=task_id,
+                local_path=str(pdf_path),
+                variant="delivery",
+                use_case="delivery",
+                agent="PDFGenerationService",
+                provider=settings.IMAGE_PROVIDER,
+                model=settings.OPENROUTER_IMAGE_MODEL,
+            )
+            report["stages"]["delivery_asset"] = {"ok": True, "design_path": str(pdf_path), "page_count": len(page_briefs)}
+            return pdf_path
+        except PDFGenerationError as e:
+            logger.warning(f"PipelineOrchestrator: PDF delivery asset failed for {task_id}: {e}")
+            report["stages"]["delivery_asset"] = {"ok": False, "error": str(e)}
+            return None
+        except Exception as e:
+            logger.error(f"PipelineOrchestrator: PDF delivery_asset failed unexpectedly for {task_id}: {e}")
+            self._alert("PDF delivery asset generation failed", f"task_id={task_id}: {e}")
+            report["stages"]["delivery_asset"] = {"ok": False, "error": str(e)}
+            return None
+
+    def _resolve_pdf_page_briefs(self, task, output_data: dict) -> list:
+        """
+        Derive one content brief per PDF page. Prefers output_data['sections']
+        (already generated by the SEO/QA stage — genuinely differentiated
+        per-page topics, e.g. "Coffee Purchase Tracker", "Favorite Coffee
+        Brews") over a generic fallback. Always truncated to
+        settings.MAX_PDF_PAGES — the cap must hold even if an upstream stage
+        (unaware of the PDF page cap) generated more sections than that.
+        """
+        from config import settings
+
+        sections = output_data.get("sections") or []
+        if sections:
+            return [str(s) for s in sections[: settings.MAX_PDF_PAGES]]
+
+        page_count = (task.metadata_ or {}).get("page_count")
+        try:
+            page_count = int(page_count)
+        except (TypeError, ValueError):
+            page_count = 1
+        page_count = max(1, min(page_count, settings.MAX_PDF_PAGES))
+        return [f"Page {i}" for i in range(1, page_count + 1)]
 
     def _stage_printify_precheck(self, task_id: str, report: dict):
         """
         Create the real Printify product BEFORE any Etsy listing exists, so a
         failure here can block listing creation outright (per the hard gate).
-        Does not pass etsy_listing_id yet — _stage_link_printify_listing wires
-        it up once a real listing_id exists.
+        PODFulfillmentService.create_product_for_task() already re-fetches
+        the product from Printify to confirm the image is really attached.
+        Does not pass etsy_listing_id yet — _stage_link_printify_listing
+        wires it up once a real listing_id exists.
         """
         try:
             pod = PODFulfillmentService().create_product_for_task(task_id)
@@ -360,6 +454,31 @@ class PipelineOrchestrator:
                 self._cleanup_unbacked_listing(listing_id, report)
                 self._block_task(task_id, f"digital file upload failed: {reason}", report, pre_listing=False)
                 return
+
+            # Readback verification: confirm listing photos are REALLY
+            # attached (GET from Etsy), not just that the upload call
+            # returned success. Applies whenever we attempted at least one
+            # listing image (both digital and POD listings use this gallery).
+            expected_images = sum(1 for u in result.get("uploaded_images", []) if "error" not in u)
+            if expected_images > 0:
+                try:
+                    actual_images = asyncio.run(EtsyImageService().get_listing_images(listing_id))
+                except Exception as e:
+                    actual_images = None
+                    readback_error = str(e)
+                else:
+                    readback_error = None
+
+                if actual_images is None or len(actual_images) < expected_images:
+                    reason = readback_error or f"readback shows {len(actual_images or [])} image(s), expected at least {expected_images}"
+                    report["stages"]["attach_publish"] = {
+                        "ok": False,
+                        "images_uploaded": len(result.get("uploaded_images", [])),
+                        "error": f"listing image readback failed: {reason}",
+                    }
+                    self._cleanup_unbacked_listing(listing_id, report)
+                    self._block_task(task_id, f"listing image readback failed: {reason}", report, pre_listing=False)
+                    return
 
             report["stages"]["attach_publish"] = {
                 "ok": True,

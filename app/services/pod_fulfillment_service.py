@@ -114,6 +114,11 @@ class PODFulfillmentService:
         )
         printify_product_id = str(printify_product["id"])
 
+        # 6b. Readback verification (step 91) — re-fetch the product from
+        # Printify and confirm the submitted image is really attached,
+        # rather than trusting create_product()'s response alone.
+        self._verify_product_readback(printify_product_id, printify_image_id)
+
         # 7. Persist PODProduct
         db = SessionLocal()
         try:
@@ -137,6 +142,26 @@ class PODFulfillmentService:
             return pod
         finally:
             db.close()
+
+    def _verify_product_readback(self, printify_product_id: str, expected_image_id: str) -> None:
+        """
+        Re-fetch the just-created product from Printify (not the create
+        response) and confirm the submitted image_id is actually present in
+        at least one print area placeholder. Raises RuntimeError if not —
+        the caller treats this the same as any other creation failure.
+        """
+        product = self._printify.get_product(printify_product_id)
+        attached_image_ids = {
+            img.get("id")
+            for area in product.get("print_areas", [])
+            for placeholder in area.get("placeholders", [])
+            for img in placeholder.get("images", [])
+        }
+        if expected_image_id not in attached_image_ids:
+            raise RuntimeError(
+                f"Printify readback failed: product {printify_product_id} does not have "
+                f"image {expected_image_id} attached (found: {attached_image_ids or 'none'})"
+            )
 
     def set_etsy_listing_id(self, pod_product_id: str, etsy_listing_id: str) -> bool:
         """

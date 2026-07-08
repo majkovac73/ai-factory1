@@ -148,6 +148,15 @@ class PrintifyClient:
         }
         return self._post(f"/shops/{self._shop_id}/products.json", payload)
 
+    def get_product(self, product_id: str) -> Dict:
+        """
+        Readback verification (step 91): re-fetch a just-created product
+        from Printify rather than trusting create_product()'s response
+        alone. Confirms the product really exists and really has the
+        submitted image attached.
+        """
+        return self._get(f"/shops/{self._shop_id}/products/{product_id}.json")
+
     # ── Orders ───────────────────────────────────────────────────────────────
 
     def create_order(
