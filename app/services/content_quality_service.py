@@ -88,6 +88,35 @@ def _image_to_data_url(image_bytes: bytes, mime: str = "image/png") -> str:
     return f"data:{mime};base64,{base64.b64encode(_downscale_for_review(image_bytes)).decode('ascii')}"
 
 
+def _delivery_image_bytes(path: Path) -> bytes:
+    """Return image bytes a vision model can actually ingest for a delivery asset.
+
+    Single-image deliverables are read directly. A PDF deliverable cannot be
+    sent to a vision model as-is — the provider rejects any non-image payload
+    with `invalid_image_format` (jpeg/webp/gif/png only), which previously
+    blocked *every* pdf_planner_or_guide product at the marketing/deliverable
+    consistency gate. Our PDFs are assembled by Pillow from exactly one
+    full-page image per page (see PDFGenerationService), so the first page's
+    single embedded image IS the cover — extract it with pypdf (already a hard
+    dependency; no PDF rasterizer / system library needed) and re-encode it as
+    PNG. This gives the consistency check a faithful, decodable representation
+    of what the buyer actually receives.
+    """
+    if path.suffix.lower() == ".pdf":
+        from io import BytesIO
+        from PIL import Image as PILImage
+        from pypdf import PdfReader
+
+        reader = PdfReader(str(path))
+        images = reader.pages[0].images if reader.pages else []
+        if not images:
+            raise ValueError(f"PDF delivery asset has no extractable page image: {path}")
+        buf = BytesIO()
+        images[0].image.convert("RGB").save(buf, format="PNG")
+        return buf.getvalue()
+    return path.read_bytes()
+
+
 class ContentQualityService:
     def __init__(self, provider=None, model: str = None):
         self.provider = provider or ProviderManager.get_provider()
@@ -167,7 +196,7 @@ class ContentQualityService:
                 matches_intended_content=True,
                 specific_issues=["no comparable images"],
             )
-        data_urls = [_image_to_data_url(delivery.read_bytes())]
+        data_urls = [_image_to_data_url(_delivery_image_bytes(delivery))]
         data_urls += [_image_to_data_url(m.read_bytes()) for m in marketing]
         prompt = self._build_consistency_prompt(product_name, len(marketing))
         try:
