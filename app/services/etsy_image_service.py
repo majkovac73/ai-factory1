@@ -1,8 +1,9 @@
 """
-Etsy image pipeline integration — step 73.
+Etsy image pipeline integration — step 73 (extended in step 92 with a
+publish-state readback fix and a digital-file readback method).
 
-Extends EtsyClient with three new operations that are needed once we have
-real generated images:
+Extends EtsyClient with operations needed once we have real generated
+images/files:
 
   1. upload_listing_image(listing_id, image_path)
        Attaches a local image file to a draft Etsy listing as a listing photo.
@@ -15,22 +16,48 @@ real generated images:
 
   3. publish_listing(listing_id)
        Flips a draft listing to 'active' (live and publicly sellable).
-       Etsy endpoint: PATCH /v3/application/listings/{listing_id}
+       Etsy endpoint: PATCH /v3/application/shops/{shop_id}/listings/{listing_id}
        Only called when settings.AUTO_PUBLISH_LISTINGS is True.
+
+       Step 92 fix: a 200 OK response from this endpoint does NOT guarantee
+       the state actually transitioned. Confirmed live in production
+       (task fb66a81a, listing 4534427807): the PATCH returned 200 but the
+       listing's own `state` field in that same response body stayed
+       "edit" — Etsy accepted the request without erroring but the
+       activation didn't take effect, almost certainly a brief
+       eventual-consistency lag immediately following the image/file
+       uploads that happen in the same call sequence just before this one.
+       A manual re-invocation of the identical PATCH moments later DID
+       transition it to "active". This method now checks the response
+       BODY's `state` field (not just the HTTP status) and retries once
+       after a short delay before reporting failure.
+
+  4. get_listing_images(listing_id) / get_listing_files(listing_id)
+       Readback verification: confirm images/files are REALLY attached
+       rather than trusting the upload response alone.
+       Etsy endpoints: GET /v3/application/listings/{listing_id}/images
+                        GET /v3/application/shops/{shop_id}/listings/{listing_id}/files
+       (Per Etsy's published OpenAPI spec, getAllListingFiles IS
+       shop-scoped even though the images equivalent is not — verified
+       against the real spec, not assumed, after this project was burned
+       by an assumed-wrong endpoint shape once already.)
 
 AUTO_PUBLISH_LISTINGS defaults to False — nothing goes live without Maj
 explicitly enabling it in the environment. This is intentional: publishing a
 real public listing is a significant action, and this code should not do it
 silently the first time it runs.
 
-All three methods share the same auth/header pattern as EtsyClient.create_draft_listing.
+All methods share the same auth/header pattern as EtsyClient.create_draft_listing.
 """
+import asyncio
 import httpx
 
 from app.services.etsy_oauth import get_valid_access_token
 from config import settings
 
 ETSY_API_BASE = "https://openapi.etsy.com/v3/application"
+
+PUBLISH_RETRY_DELAY_SECONDS = 2
 
 
 class EtsyImageService:
@@ -119,27 +146,7 @@ class EtsyImageService:
                 )
             return response.json()
 
-    async def publish_listing(self, listing_id: str) -> dict:
-        """
-        Activate a draft listing (make it live and publicly sellable).
-
-        Only called when settings.AUTO_PUBLISH_LISTINGS is True. This setting
-        defaults to False — do not enable it until you have reviewed and approved
-        the listing content, as publishing creates a real public Etsy listing.
-
-        Args:
-            listing_id: Etsy listing ID.
-
-        Returns:
-            Updated Etsy listing dict.
-        """
-        if not settings.AUTO_PUBLISH_LISTINGS:
-            return {
-                "published": False,
-                "reason": "AUTO_PUBLISH_LISTINGS is False — listing left in DRAFT state",
-                "listing_id": listing_id,
-            }
-
+    async def _patch_listing_state_active(self, listing_id: str) -> dict:
         access_token = await get_valid_access_token()
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.patch(
@@ -155,6 +162,44 @@ class EtsyImageService:
                     f"Etsy publish listing error {response.status_code}: {response.text}"
                 )
             return response.json()
+
+    async def publish_listing(self, listing_id: str) -> dict:
+        """
+        Activate a draft listing (make it live and publicly sellable).
+
+        Only called when settings.AUTO_PUBLISH_LISTINGS is True. This setting
+        defaults to False — do not enable it until you have reviewed and approved
+        the listing content, as publishing creates a real public Etsy listing.
+
+        A 200 OK response does NOT guarantee the state actually transitioned
+        to "active" — confirmed live in production, where the PATCH returned
+        200 but the listing stayed in "edit" state (see module docstring).
+        This checks the response body's real `state` field and retries once
+        after a short delay to absorb the observed propagation lag, rather
+        than trusting the HTTP status code alone.
+
+        Args:
+            listing_id: Etsy listing ID.
+
+        Returns:
+            The Etsy listing dict, with an added "published" bool reflecting
+            whether `state` is actually "active" (not just whether the call
+            didn't error).
+        """
+        if not settings.AUTO_PUBLISH_LISTINGS:
+            return {
+                "published": False,
+                "reason": "AUTO_PUBLISH_LISTINGS is False — listing left in DRAFT state",
+                "listing_id": listing_id,
+            }
+
+        result = await self._patch_listing_state_active(listing_id)
+        if result.get("state") == "active":
+            return {**result, "published": True}
+
+        await asyncio.sleep(PUBLISH_RETRY_DELAY_SECONDS)
+        result = await self._patch_listing_state_active(listing_id)
+        return {**result, "published": result.get("state") == "active"}
 
     async def get_listing_images(self, listing_id: str) -> list:
         """
@@ -174,6 +219,31 @@ class EtsyImageService:
             if response.status_code >= 400:
                 raise RuntimeError(
                     f"Etsy get listing images error {response.status_code}: {response.text}"
+                )
+            data = response.json()
+            return data.get("results", [])
+
+    async def get_listing_files(self, listing_id: str) -> list:
+        """
+        Readback verification (step 92): confirm the digital download file
+        is really attached rather than trusting upload_digital_file()'s
+        response alone. Per Etsy's published OpenAPI spec, getAllListingFiles
+        is shop-scoped (unlike the images equivalent) — verified against the
+        real spec rather than assumed.
+        Etsy endpoint: GET /v3/application/shops/{shop_id}/listings/{listing_id}/files
+        """
+        access_token = await get_valid_access_token()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                f"{ETSY_API_BASE}/shops/{settings.ETSY_SHOP_ID}/listings/{listing_id}/files",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "x-api-key": self._api_key_header(),
+                },
+            )
+            if response.status_code >= 400:
+                raise RuntimeError(
+                    f"Etsy get listing files error {response.status_code}: {response.text}"
                 )
             data = response.json()
             return data.get("results", [])

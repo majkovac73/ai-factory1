@@ -260,7 +260,7 @@ with tempfile.TemporaryDirectory() as tmp:
         def enrich_listing_with_image(self, listing, task_id, visual_brief):
             return {**listing, "image_base64": "FAKEBASE64", "pin_image_path": str(pin4)}
 
-    fixed_result4 = {"listing_id": "L44", "digital_upload": {"ok": True}, "uploaded_images": [], "publish_result": {"published": False}}
+    fixed_result4 = {"listing_id": "L44", "digital_upload": {"ok": True}, "uploaded_images": [], "publish_result": {"published": True, "state": "active"}}
 
     with patch("app.services.pipeline_orchestrator.ProductImageAgent") as m_pia4, \
          patch("app.services.pipeline_orchestrator.PODPipelineService", lambda: _FakePODPipelineServiceDefault(design4)), \
@@ -300,7 +300,7 @@ with tempfile.TemporaryDirectory() as tmp:
             post_calls5.append(True)
             return {"success": True}
 
-    fixed_result5 = {"listing_id": "L55", "digital_upload": {"ok": True}, "uploaded_images": [], "publish_result": {"published": False}}
+    fixed_result5 = {"listing_id": "L55", "digital_upload": {"ok": True}, "uploaded_images": [], "publish_result": {"published": True, "state": "active"}}
 
     with patch("app.services.pipeline_orchestrator.ProductImageAgent") as m_pia5, \
          patch("app.services.pipeline_orchestrator.PODPipelineService", lambda: _FakePODPipelineServiceDefault(design5)), \
@@ -388,7 +388,7 @@ with tempfile.TemporaryDirectory() as tmp:
         def post_to_channel(self, task_id, listing, channel):
             pin_calls7.append(True); return {"success": True}
 
-    fixed_result7 = {"listing_id": "L77", "digital_upload": {"ok": True}, "uploaded_images": [], "publish_result": {"published": False}}
+    fixed_result7 = {"listing_id": "L77", "digital_upload": {"ok": True}, "uploaded_images": [], "publish_result": {"published": True, "state": "active"}}
 
     with patch("app.services.pipeline_orchestrator.ProductImageAgent", FakeProductImageAgent7), \
          patch("app.services.pipeline_orchestrator.PODPipelineService", lambda: _FakePODPipelineServiceDefault(design7)), \

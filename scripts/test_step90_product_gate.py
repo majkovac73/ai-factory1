@@ -188,13 +188,17 @@ with tempfile.TemporaryDirectory() as tmp:
                 "listing_id": "L200",
                 "digital_upload": {"ok": True},
                 "uploaded_images": [{"path": "hero2.png", "result": {"ok": True}}],
-                "publish_result": {"published": False},
+                "publish_result": {"published": True, "state": "active"},
             }
         m_eis2.return_value.attach_images_and_publish.side_effect = _attach2
 
         async def _get_images2(listing_id):
             return [{"listing_image_id": 1}]
         m_eis2.return_value.get_listing_images.side_effect = _get_images2
+
+        async def _get_files2(listing_id):
+            return [{"listing_file_id": 1}]
+        m_eis2.return_value.get_listing_files.side_effect = _get_files2
 
         report2 = orch2.run_post_completion(done2.id)
 

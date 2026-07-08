@@ -480,10 +480,60 @@ class PipelineOrchestrator:
                     self._block_task(task_id, f"listing image readback failed: {reason}", report, pre_listing=False)
                     return
 
+            # Readback verification (step 92): confirm the digital FILE is
+            # REALLY attached (GET from Etsy), not just that upload_digital_file()
+            # returned success. A listing with photos and no downloadable file
+            # is exactly the "worse than no listing" case this gate exists to
+            # prevent — production has hit this class of silent-success bug
+            # before (publish_listing's endpoint bug), so this can't be
+            # assumed away just because the upload call didn't error.
+            if digital_required and digital_upload:
+                try:
+                    actual_files = asyncio.run(EtsyImageService().get_listing_files(listing_id))
+                except Exception as e:
+                    actual_files = None
+                    file_readback_error = str(e)
+                else:
+                    file_readback_error = None
+
+                if not actual_files:
+                    reason = file_readback_error or "readback shows 0 files attached, expected at least 1"
+                    report["stages"]["attach_publish"] = {
+                        "ok": False,
+                        "images_uploaded": len(result.get("uploaded_images", [])),
+                        "error": f"digital file readback failed: {reason}",
+                    }
+                    self._cleanup_unbacked_listing(listing_id, report)
+                    self._block_task(task_id, f"digital file readback failed: {reason}", report, pre_listing=False)
+                    return
+
+            # Publish-state verification (step 92): a 200 OK from Etsy's
+            # publish PATCH does NOT guarantee the listing actually
+            # transitioned to "active" — confirmed live in production (task
+            # fb66a81a / listing 4534427807): the PATCH returned 200 but the
+            # listing stayed in "edit" (draft, invisible to buyers) due to a
+            # propagation lag. EtsyImageService.publish_listing() now checks
+            # the response body's real state and retries once, so
+            # publish_result["published"] reflects ground truth, not just
+            # "the HTTP call didn't error". Only treated as a blocking
+            # failure when we actually intended to go live.
+            publish_result = result.get("publish_result") or {}
+            intended_to_publish = "reason" not in publish_result  # AUTO_PUBLISH_LISTINGS=False sets "reason"
+            if intended_to_publish and not publish_result.get("published"):
+                reason = f"listing state is {publish_result.get('state', 'unknown')!r}, not 'active'"
+                report["stages"]["attach_publish"] = {
+                    "ok": False,
+                    "images_uploaded": len(result.get("uploaded_images", [])),
+                    "error": f"publish did not take effect: {reason}",
+                }
+                self._cleanup_unbacked_listing(listing_id, report)
+                self._block_task(task_id, f"publish did not take effect: {reason}", report, pre_listing=False)
+                return
+
             report["stages"]["attach_publish"] = {
                 "ok": True,
                 "images_uploaded": len(result.get("uploaded_images", [])),
-                "published": result.get("publish_result", {}).get("published", False),
+                "published": publish_result.get("published", False),
             }
         except Exception as e:
             logger.error(f"PipelineOrchestrator: attach_publish failed for listing {listing_id}: {e}")

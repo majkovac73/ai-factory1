@@ -170,7 +170,7 @@ def _make_etsy_image_service_mock(get_images_result=None, get_images_error=None)
             "listing_id": listing_id,
             "uploaded_images": uploaded,
             "digital_upload": digital_upload,
-            "publish_result": {"published": False},
+            "publish_result": {"published": True, "state": "active"},
         }
 
     async def _get_images(listing_id):
@@ -178,8 +178,12 @@ def _make_etsy_image_service_mock(get_images_result=None, get_images_error=None)
             raise RuntimeError(get_images_error)
         return get_images_result if get_images_result is not None else [{"listing_image_id": 1}]
 
+    async def _get_files(listing_id):
+        return [{"listing_file_id": 1}]
+
     mock_cls.return_value.attach_images_and_publish.side_effect = _attach
     mock_cls.return_value.get_listing_images.side_effect = _get_images
+    mock_cls.return_value.get_listing_files.side_effect = _get_files
     return mock_cls
 
 
