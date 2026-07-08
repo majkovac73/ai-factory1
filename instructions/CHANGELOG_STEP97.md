@@ -89,10 +89,38 @@ edge + aspect ratio, per the real dimensions recorded in the changelog):
 
 Both suites pass with zero real API calls.
 
-### Real post-fix verification
+### Real post-fix verification (done — this fix confirmed working in prod)
 
-- [ ] Deploy to Railway and trigger a real `pdf_planner_or_guide` task;
-      confirm on dashboard/logs that all pages generate, a real PDF is
-      produced + readback-validated, and it reaches the content-quality
-      gate. **Pending Maj's go-ahead** (real Seedream spend + production
-      deploy) — see session note.
+Deployed to Railway (commit `625a207`; verified `PDF_PAGE_RESOLUTION="4K"`
+present in the running container via `railway ssh`) and triggered a real
+`pdf_planner_or_guide` task in production — the same "Mindfulness Daily
+Planner", 6 pages, that failed as task `127d5130`. New task:
+`3c5180db-5443-418f-9b75-a3ced5aa78f0`.
+
+**The size fix works.** Logs show all image-generation calls returning
+`200 OK` (no more `400 image size must be at least 3686400 pixels`), and:
+
+```
+PDFGenerationService: generated and verified 6-page PDF for task
+3c5180db-...: /data/images/delivery/3c5180db-.../design.pdf
+```
+
+All 6 pages generated, the PDF was assembled and independently
+readback-verified (page count = 6), and the per-page content-QA gate
+passed. That is exactly the confirmation this step required.
+
+**Separately discovered blocker (NOT this fix — a distinct, pre-existing
+bug this run surfaced now that PDFs get far enough to hit it):** the
+pipeline then blocked at `BLOCKED_NO_PRODUCT` in the *marketing/deliverable
+consistency* gate. `ContentQualityService.check_marketing_consistency()`
+sends `delivery_path.read_bytes()` to a vision model as an image
+(`_image_to_data_url`). For a PDF deliverable those are PDF bytes — Pillow
+can't open them, so `_downscale_for_review` falls back to raw PDF bytes
+labeled `image/png`, which the vision provider rejects with
+`invalid_image_format` ("unsupported image ... [jpeg, webp, gif, png]").
+This blocks **every** PDF product from ever publishing. No Etsy listing was
+created (`etsy_listing_id: None`) — the block is upstream of listing
+creation, so nothing to clean up on the store. Fix needed: rasterize the
+PDF's first page to PNG before the consistency vision call (or skip/relax
+the consistency check for PDF deliverables). Tracked as the step-98
+follow-up.
