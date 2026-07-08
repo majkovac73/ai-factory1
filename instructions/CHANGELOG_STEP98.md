@@ -68,7 +68,35 @@ image is downscaled to ≤1024px as before).
 `scripts/test_step96_content_quality.py` still passes 5/5 (no regression to
 the per-asset review or the unrelated-marketing rejection path).
 
-### Real post-fix verification
+### Real post-fix verification (done — confirmed end-to-end in prod)
 
-- [ ] Deploy + re-run a full `pdf_planner_or_guide` cycle; confirm it now
-      passes the consistency gate and publishes a real Etsy listing.
+Deployed (commit `19d4492`; verified `_delivery_image_bytes` live in the
+container via `railway ssh`) and re-ran a full `pdf_planner_or_guide` cycle
+(task `b35b4ba9-f85c-4c78-982c-ebffe0156500`, Mindfulness Daily Planner, 6
+pages). Result — the whole pipeline ran through, no more consistency-gate
+block:
+
+- All 6 PDF pages generated (page-6 regenerated once by the legitimate
+  per-page content-QA gate for typo'd day abbreviations, then passed);
+  `generated and verified 6-page PDF`.
+- **Marketing/deliverable consistency gate PASSED** (previously the hard
+  block) — the PDF's first page was extracted and sent as a valid image.
+- Etsy listing `4534803479` created, 2 listing photos + the PDF digital file
+  attached, and both readback-verified (images + files GET → 200).
+- Listing correctly left in **draft** state — production now has
+  `AUTO_PUBLISH_LISTINGS=false` (was `true` at step 91), so
+  `_stage_attach_publish` intentionally does not publish-to-active. Draft is
+  the configured, correct outcome; not a failure.
+
+Both the step-97 size fix and this step-98 consistency fix are confirmed
+working against the real Seedream/Etsy APIs.
+
+**Two separate, out-of-scope items this run surfaced (neither is a PDF
+bug):**
+1. **Pinterest stage raises** `Instance <MarketingPost> is not bound to a
+   Session` (SQLAlchemy detached-instance error) — caught/non-fatal, fires
+   after listing creation, format-independent. No Pinterest pin is posted
+   and the marketing_post row isn't persisted. Worth a follow-up.
+2. **Draft listing `4534803479`** ("Mindfulness Daily Planner") now sits in
+   the Etsy shop from this verification run — a real draft with a real PDF
+   attached, not published. Delete from Etsy Shop Manager if unwanted.
