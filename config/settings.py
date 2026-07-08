@@ -36,6 +36,15 @@ class Settings(BaseSettings):
     PINTEREST_REDIRECT_URI: str = "http://localhost:8000/pinterest/oauth/callback"
     PINTEREST_BOARD_ID: str | None = None
 
+    # Tumblr (OAuth 2.0). Maj registered the app and set the consumer key/secret
+    # in Railway. The redirect_uri MUST match one registered on the Tumblr app —
+    # defaulted to the live Railway domain so the one-time prod authorization
+    # works without an extra env var; overridable for local dev.
+    TUMBLR_CONSUMER_KEY: str | None = None
+    TUMBLR_CONSUMER_SECRET: str | None = None
+    TUMBLR_BLOG_NAME: str | None = None
+    TUMBLR_REDIRECT_URI: str = "https://kind-liberation-production.up.railway.app/tumblr/oauth/callback"
+
     SECRET_KEY: str = "change_me"
 
     LOG_LEVEL: str = "info"
@@ -62,6 +71,16 @@ class Settings(BaseSettings):
     AUTONOMY_SCHEDULE_SECONDS: int = 3600
 
     AUTO_PUBLISH_LISTINGS: bool = False
+
+    # Recurring marketing-refresh automation (re-promotes EXISTING published
+    # products using their ALREADY-GENERATED assets — no new image generation).
+    # Same safety philosophy as AUTONOMY_ENABLED: OFF by default, Maj enables
+    # explicitly. The only spend is one optional cheap caption-rewrite LLM call
+    # per post (see MarketingRefreshService).
+    MARKETING_REFRESH_ENABLED: bool = False           # kill switch, off by default
+    MARKETING_REFRESH_SCHEDULE_SECONDS: int = 21600   # every 6 hours
+    MARKETING_REFRESH_MIN_INTERVAL_DAYS: int = 7      # don't re-promote same product+channel more often
+    MARKETING_REFRESH_MAX_POSTS_PER_CYCLE: int = 3    # hard cap per cycle
 
     # Hard cap on pages for a multi-page PDF product (step 91). Each page is a
     # real, billable image-generation call — this must never be unbounded.
