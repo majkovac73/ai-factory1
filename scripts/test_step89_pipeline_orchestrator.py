@@ -104,14 +104,15 @@ class _FakeEtsyClientHappy:
     step-93 readback, and returns a listing_id for create."""
     def __init__(self, listing_id="L-89"):
         self._listing_id = listing_id
-        self._tax = {}
+        self._sent = {}
 
     async def create_draft_listing(self, listing):
-        self._tax[self._listing_id] = listing.get("taxonomy_id")
+        self._sent[self._listing_id] = listing
         return {"listing_id": self._listing_id}
 
     async def get_listing(self, listing_id):
-        return {"listing_id": listing_id, "taxonomy_id": self._tax.get(listing_id)}
+        sent = self._sent.get(listing_id, {})
+        return {"listing_id": listing_id, "taxonomy_id": sent.get("taxonomy_id"), "when_made": sent.get("when_made")}
 
     async def delete_listing(self, listing_id):
         return True

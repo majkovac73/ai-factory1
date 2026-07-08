@@ -175,14 +175,15 @@ class FakeEtsyClientHappy:
     def __init__(self):
         self.created = []
         self.deleted = []
-        self._tax = {}
+        self._sent = {}
     async def create_draft_listing(self, listing):
         lid = f"L-{len(self.created) + 1}"
         self.created.append(lid)
-        self._tax[lid] = listing.get("taxonomy_id")
+        self._sent[lid] = listing
         return {"listing_id": lid}
     async def get_listing(self, listing_id):
-        return {"listing_id": listing_id, "taxonomy_id": self._tax.get(listing_id)}
+        sent = self._sent.get(listing_id, {})
+        return {"listing_id": listing_id, "taxonomy_id": sent.get("taxonomy_id"), "when_made": sent.get("when_made")}
     async def delete_listing(self, listing_id):
         self.deleted.append(listing_id)
         return True

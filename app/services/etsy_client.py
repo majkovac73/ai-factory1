@@ -5,6 +5,20 @@ from config import settings
 
 ETSY_API_BASE = "https://openapi.etsy.com/v3/application"
 
+# `when_made` for an INSTANT digital download. Must NOT be "made_to_order":
+# Etsy treats a made_to_order digital listing as a personalized/custom item
+# the seller delivers manually after purchase, so its editor HIDES the
+# instant-download file slot even when a file is attached via API — confirmed
+# live on listing 4534427807, whose file only became visible in the editor
+# after when_made was changed away from made_to_order. "made_to_order" IS
+# correct for POD physical goods (printed after purchase), so this only
+# applies to digital-download listings. This is a recent-era value from
+# Etsy's real when_made enum; if Etsy rolls the enum forward past 2026, this
+# constant needs bumping — the create-time when_made readback (step 95) will
+# surface it loudly if it ever becomes invalid/rejected.
+DIGITAL_WHEN_MADE = "2020_2026"
+POD_WHEN_MADE = "made_to_order"
+
 
 class EtsyClient:
     """
@@ -18,13 +32,17 @@ class EtsyClient:
         # Format: "keystring:shared_secret"
         api_key_header = f"{settings.ETSY_API_KEY}:{settings.ETSY_SHARED_SECRET}"
 
+        # when_made defaults to POD's made_to_order for backward-compat, but the
+        # orchestrator sets it explicitly per listing type: a real recent-era
+        # value for digital downloads (so Etsy shows the instant-download file
+        # slot) and made_to_order for POD physical goods.
         payload = {
             "quantity": listing.get("quantity", 1),
             "title": listing.get("title", "")[:140],
             "description": listing.get("description", ""),
             "price": listing.get("price") or 0,
             "who_made": "i_did",
-            "when_made": "made_to_order",
+            "when_made": listing.get("when_made", POD_WHEN_MADE),
             "taxonomy_id": listing.get("taxonomy_id", 1),
             "tags": listing.get("tags", [])[:13],
             "materials": listing.get("materials", [])[:13],

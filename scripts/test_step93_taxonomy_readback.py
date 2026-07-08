@@ -162,7 +162,7 @@ with tempfile.TemporaryDirectory() as tmp:
             return {"listing_id": "L-rec-1"}
 
         async def get_listing(self, listing_id):
-            return {"listing_id": listing_id, "taxonomy_id": captured_payload.get("taxonomy_id")}
+            return {"listing_id": listing_id, "taxonomy_id": captured_payload.get("taxonomy_id"), "when_made": captured_payload.get("when_made")}
 
         async def delete_listing(self, listing_id):
             return True

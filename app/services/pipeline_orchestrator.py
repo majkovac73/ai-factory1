@@ -398,8 +398,13 @@ class PipelineOrchestrator:
 
     def _stage_create_listing(self, task_id: str, product_name: str, output_data: dict, task_type: str, is_pod: bool, report: dict) -> Optional[str]:
         from app.services.etsy_shipping_service import EtsyShippingService
+        from app.services.etsy_client import DIGITAL_WHEN_MADE, POD_WHEN_MADE
 
         intended_taxonomy_id = PRODUCT_FORMATS.get(task_type, {}).get("taxonomy_id", 1)
+        # Digital downloads must NOT be made_to_order or Etsy hides the
+        # instant-download file slot in its editor (confirmed live on
+        # 4534427807). made_to_order is correct for POD physical goods.
+        intended_when_made = POD_WHEN_MADE if is_pod else DIGITAL_WHEN_MADE
 
         try:
             product = {
@@ -411,6 +416,7 @@ class PipelineOrchestrator:
             }
             listing = ListingGeneratorAgent().generate_listing(product, output_data)
             listing["taxonomy_id"] = intended_taxonomy_id
+            listing["when_made"] = intended_when_made
 
             if is_pod:
                 listing["type"] = "physical"
@@ -434,18 +440,17 @@ class PipelineOrchestrator:
             report["stages"]["create_listing"] = {"ok": False, "error": str(e)}
             return None
 
-        # Readback verification (step 93): confirm the REAL listing's
-        # taxonomy_id matches what was intended, rather than trusting the
-        # create response alone. Every listing had silently been created
-        # with taxonomy_id=1 ("Accessories", Etsy's top-level, most-generic
-        # node) because nothing upstream had ever set it — confirmed live
-        # against production listing 4534427807 and Etsy's own "too broad"
-        # warning in its listing editor. This also catches Etsy silently
-        # falling back to a different category than requested.
+        # Readback verification (steps 93 + 95): confirm the REAL listing's
+        # taxonomy_id AND when_made match what was intended, rather than
+        # trusting the create response alone. Both had silent, functionally-
+        # broken defaults confirmed live on 4534427807: taxonomy_id=1
+        # ("Accessories", too broad) and when_made=made_to_order (hides the
+        # digital file in Etsy's editor). This also catches Etsy silently
+        # storing something other than what was requested.
         try:
             real_listing = asyncio.run(EtsyClient().get_listing(listing_id))
         except Exception as e:
-            reason = f"taxonomy readback call failed: {e}"
+            reason = f"listing readback call failed: {e}"
             report["stages"]["create_listing"] = {"ok": False, "listing_id": listing_id, "error": reason}
             self._cleanup_unbacked_listing(listing_id, report)
             self._block_task(task_id, reason, report, pre_listing=False)
@@ -459,7 +464,16 @@ class PipelineOrchestrator:
             self._block_task(task_id, reason, report, pre_listing=False)
             return None
 
+        real_when_made = real_listing.get("when_made")
+        if real_when_made != intended_when_made:
+            reason = f"when_made mismatch: intended {intended_when_made}, listing actually has {real_when_made}"
+            report["stages"]["create_listing"] = {"ok": False, "listing_id": listing_id, "error": reason}
+            self._cleanup_unbacked_listing(listing_id, report)
+            self._block_task(task_id, reason, report, pre_listing=False)
+            return None
+
         report["stages"]["create_listing"]["taxonomy_id"] = real_taxonomy_id
+        report["stages"]["create_listing"]["when_made"] = real_when_made
         return listing_id
 
     def _stage_attach_publish(self, task_id: str, listing_id: str, image_paths: list, design_path: Optional[Path], digital_required: bool, report: dict):

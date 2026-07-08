@@ -179,12 +179,14 @@ with tempfile.TemporaryDirectory() as tmp:
         m_ms2.return_value.get_posts_for_task.return_value = []
         m_ms2.return_value.post_to_channel.return_value = {"success": True}
 
+        _sent2 = {}
         async def _create2(listing):
+            _sent2.update(listing)
             return {"listing_id": "L200"}
         m_etsy2.return_value.create_draft_listing.side_effect = _create2
 
         async def _get_listing2(listing_id):
-            return {"listing_id": listing_id, "taxonomy_id": 2078}
+            return {"listing_id": listing_id, "taxonomy_id": _sent2.get("taxonomy_id"), "when_made": _sent2.get("when_made")}
         m_etsy2.return_value.get_listing.side_effect = _get_listing2
 
         async def _attach2(**kw):
@@ -270,11 +272,15 @@ with tempfile.TemporaryDirectory() as tmp:
     delete_calls4 = []
 
     class FakeEtsyClient4:
+        def __init__(self):
+            self._sent = {}
+
         async def create_draft_listing(self, listing):
+            self._sent = listing
             return {"listing_id": "L400"}
 
         async def get_listing(self, listing_id):
-            return {"listing_id": listing_id, "taxonomy_id": 2078}
+            return {"listing_id": listing_id, "taxonomy_id": self._sent.get("taxonomy_id"), "when_made": self._sent.get("when_made")}
 
         async def delete_listing(self, listing_id):
             delete_calls4.append(listing_id)
