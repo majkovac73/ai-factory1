@@ -1,5 +1,11 @@
 # AI Factory — Automated Changelog
 
+**See `instructions/MIGRATION_NOTES.md`** for a critical operational note:
+`railway run` cannot reach production `/data` from this Windows dev
+machine (it silently operates on a local decoy `C:\data\...` path instead).
+Use `railway ssh` for any operation that touches the real production DB or
+image storage.
+
 ---
 
 ## Fix — Switch default image model to Seedream 4.5

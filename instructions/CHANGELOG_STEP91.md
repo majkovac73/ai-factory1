@@ -49,12 +49,12 @@ fix didn't cover, both fixed in this change:**
 
 ### Step 0B — why product_type never resolved to POD
 
-**Correction (see follow-up below): an earlier version of this entry
-claimed `AUTONOMY_ENABLED=false` "the entire time" / "never run on a
-schedule." That was wrong — it was checked only against the current and
-one recent deployment, not the deployments actually running when the
-pre-fix tasks were created.** Re-investigated by pulling logs scoped to
-each specific deployment active at each task's creation time:
+**Correction (twice — see follow-ups below): an earlier version of this
+entry claimed `AUTONOMY_ENABLED=false` "the entire time" / "never run on a
+schedule." That was wrong, and a first correction pass still missed one
+window.** Final, fully re-verified picture, built by pulling logs scoped
+to every individual deployment from the relevant window and cross-checking
+against real task/spend records:
 
 | Deployment window (UTC) | AUTONOMY_ENABLED | Evidence |
 |---|---|---|
@@ -63,16 +63,22 @@ each specific deployment active at each task's creation time:
 | 20:36–20:47 (`5483c4a7`) | **True** | cycle ran, created `7e4c5777`, $0.30 spend recorded |
 | 20:47 (07-07)–05:08 (07-08) (`49ed9ab3`, ~8.3h) | False | worker start log |
 | 05:07–05:12 (`03571f39`) | **True** | cycle ran, created `97f0e7a0` (the second bad listing), $0.05 spend recorded |
-| 05:12–05:38 (`7aaaa609`) | False — switched off ~25 min before the gate fix deployed |
-| 05:37 onward (gate fix, and current) | False, confirmed through now |
+| 05:12–05:38 (`7aaaa609`) | False |
+| 05:38–05:56 (`fb12c0f8`, the gate fix's FIRST live deployment) | False — the fix was never exercised by a real autonomy cycle in this window |
+| 05:56–05:59 (`314604be`, gate fix still live) | **True** | cycle ran, created `7941465b` ("AR Home Decor Visualizer"), $0.05 spend recorded — **the gate fix WAS exercised live here and worked**: correctly produced `BLOCKED_NO_PRODUCT` (root cause: the separate `publish_listing` endpoint bug documented above, now also fixed) |
+| 05:59 onward (`73a9e3a0` → current `abcdca7b`) | False, confirmed continuously through now |
 
-So it WAS genuinely enabled three separate times, each producing one real
-autonomy cycle with real spend recorded (each deployment restart triggers
-one immediate cycle regardless of the 3600s schedule, so no cycle ever
-ran the full scheduled interval — but real cycles with real output did
-happen). It was switched off shortly after the third cycle produced
-`97f0e7a0`, and has stayed off since — including through the gate fix's
-entire deployment history. There's exactly one real sample of the fixed
+So it was genuinely enabled **four** separate times (not three), each
+producing one real autonomy cycle with real spend recorded — each
+deployment restart triggers one immediate cycle regardless of the 3600s
+schedule, so no cycle ever ran the full scheduled interval, but real
+cycles with real output did happen every time. The fourth window is the
+most important correction: it happened *after* the gate fix deployed, and
+confirms the fix genuinely worked under a live autonomy cycle, not just in
+tests. Total daily spend recorded matches exactly: $0.60 on 2026-07-07
+(2 tasks), $0.10 on 2026-07-08 (2 tasks) — both fully accounted for by
+real tasks in the real database, not test artifacts (see the Cleanup
+section below). There's exactly one real sample of the fixed concept
 schema running (`7941465b` → `digital_download`), so "always digital"
 wasn't yet statistically established either way — but there was also no
 structural mechanism forcing format variety.
@@ -277,3 +283,57 @@ scrutiny and were corrected in place above:
    decoy, not the real production database, regardless of what it printed.
    The actual safe path is `railway ssh` (connects into the real deployed
    container), which is what was used above.
+
+---
+
+### Second follow-up — re-verified via railway ssh directly (real container)
+
+Given the finding above, the earlier "database pollution cleanup" session
+(`diagnose_db_pollution.py`, `cleanup_test_data.py`, "VERDICT: clean") was
+re-run for real, inside the actual deployed container this time
+(`railway ssh`, not `railway run`):
+
+- **`diagnose_db_pollution.py` against the real `/data/app.db`: genuinely
+  clean.** 0 `FulfillmentRecord` rows, 0 `PODProduct` rows, 5 `Task` rows
+  (all real — no `STRESS-RECEIPT-*`, no test `PODProduct` listing IDs, no
+  `"Stress test task"` / `"Concurrent write"` prompts), 6 `ImageAsset` rows
+  (0 tied to test task IDs). `cleanup_test_data.py` was NOT run since there
+  was nothing to clean — the real "clean" verdict this time is genuine,
+  not a decoy artifact of an empty local DB.
+- **`check_autonomy_state.py` against the real volume**: `data_dir resolved
+  to: /data` (confirms real container). Two state files exist —
+  `autonomy_state_2026-07-07.json` (`tasks_created=2, spend_usd=0.6`) and
+  `autonomy_state_2026-07-08.json` (`tasks_created=2, spend_usd=0.1`).
+  **The script's own comment ("non-zero values… came from a test run…
+  safe to delete") is wrong for this data** — both totals match real
+  autonomy activity exactly (see the corrected Step 0B table: $0.30+$0.30
+  on 07-07, $0.05+$0.05 on 07-08). These files were left untouched;
+  deleting them would have erased genuine historical spend/task counters,
+  not cleaned up test pollution. `check_autonomy_state.py`'s heuristic
+  should not be trusted at face value going forward — it assumes
+  `AUTONOMY_ENABLED=False` implies no real activity ever happened, which
+  this investigation disproves.
+- **Real env vars, read directly from `os.environ` inside the container**
+  (not `railway variables` from the local machine, which could in
+  principle have its own local/remote ambiguity even though it turned out
+  to agree here): `AUTONOMY_ENABLED='false'`, `AUTO_PUBLISH_LISTINGS='true'`.
+  Matches what was reported before, now confirmed from inside the actual
+  running process rather than inferred.
+- **Correcting the Step 0B table again**: this re-verification surfaced a
+  **fourth** `AUTONOMY_ENABLED=True` window that the first correction
+  missed (`314604be`, 05:56–05:59 UTC on 07-08) — see the updated table
+  above. It's the deployment that created task `7941465b`, and it happened
+  *after* the gate fix was already live, which is actually good news: it
+  confirms the gate fix worked under a real autonomy cycle, not just in
+  tests.
+
+**Practical technique note for future sessions:** `railway ssh -- "<long
+command>"` from this Windows/Git-Bash environment breaks silently (or with
+a confusing shell parse error) once the command line gets long — e.g. a
+single `echo <9000-char base64 blob> | base64 -d > file` failed outright.
+The fix is to chunk the payload into ~3000-character pieces and send them
+as separate `railway ssh -- "printf '%s' '<chunk>' >> /tmp/x.b64"` calls,
+then decode once fully assembled. This is very likely a Windows
+`CreateProcess` command-line-length ceiling (~8191 chars) being hit when
+Git Bash hands a long argument to the native `railway.exe`, not a Railway
+or SSH limitation.
