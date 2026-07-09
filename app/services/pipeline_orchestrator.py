@@ -219,8 +219,9 @@ class PipelineOrchestrator:
         if is_pod and listing_id and pod_product:
             self._stage_link_printify_listing(pod_product, listing_id, report)
 
-        # 8 — Pinterest (independent of Etsy stages)
+        # 8 — Social marketing (independent of Etsy stages): Pinterest + Tumblr.
         self._stage_pinterest(task_id, product_name, visual_brief, output_data, report)
+        self._stage_tumblr(task_id, product_name, output_data, listing_id, report)
 
         self.log_service.info(
             source="PipelineOrchestrator",
@@ -1115,6 +1116,62 @@ class PipelineOrchestrator:
             logger.error(f"PipelineOrchestrator: pinterest failed for {task_id}: {e}")
             self._alert("Pinterest post failed", f"task_id={task_id}: {e}")
             report["stages"]["pinterest"] = {"ok": False, "error": str(e)}
+
+    def _stage_tumblr(self, task_id: str, product_name: str, output_data: dict, listing_id: Optional[str], report: dict):
+        """Post the new listing to Tumblr (step 100i). Previously the pipeline
+        only posted to Pinterest, so a newly-created listing never got a Tumblr
+        post — Tumblr was only ever posted by the recurring marketing-refresh
+        worker (default OFF), so in practice new products were never shared on
+        Tumblr. This posts on creation using the attractive WATERMARKED listing
+        mockup (never the raw deliverable) + the Etsy listing URL. Best-effort;
+        skipped cleanly when Tumblr isn't configured/connected."""
+        from config import settings
+
+        try:
+            if not getattr(settings, "TUMBLR_CONSUMER_KEY", None):
+                report["stages"]["tumblr"] = {"skipped": "Tumblr not configured"}
+                return
+            from app.db.database import SessionLocal
+            from app.models.tumblr_token import TumblrToken
+            db = SessionLocal()
+            try:
+                connected = db.query(TumblrToken).first() is not None
+            finally:
+                db.close()
+            if not connected:
+                report["stages"]["tumblr"] = {"skipped": "Tumblr not connected"}
+                return
+
+            marketing_svc = MarketingService()
+            existing = marketing_svc.get_posts_for_task(task_id)
+            if any(p.channel == "tumblr" and p.status == "success" for p in existing):
+                report["stages"]["tumblr"] = {"skipped": "already posted successfully"}
+                return
+
+            # An attractive, watermarked listing photo — NEVER the raw delivery.
+            asset_path = None
+            for a in self.catalog.get_listing_assets(task_id):
+                if a.use_case == "listing" and Path(a.local_path).exists():
+                    asset_path = a.local_path
+                    break
+            if not asset_path:
+                report["stages"]["tumblr"] = {"skipped": "no listing image asset to post"}
+                return
+
+            listing = {
+                "title": output_data.get("title", "") or product_name,
+                "description": output_data.get("description", ""),
+                "keywords": output_data.get("keywords", []),
+                "image_path": asset_path,
+                "listing_url": f"https://www.etsy.com/listing/{listing_id}" if listing_id else "",
+            }
+            from app.marketing.tumblr_channel import TumblrChannel
+            result = marketing_svc.post_to_channel(task_id=task_id, listing=listing, channel=TumblrChannel())
+            report["stages"]["tumblr"] = {"ok": True, "success": result.get("success", False), "error": result.get("error")}
+        except Exception as e:
+            logger.error(f"PipelineOrchestrator: tumblr failed for {task_id}: {e}")
+            self._alert("Tumblr post failed", f"task_id={task_id}: {e}")
+            report["stages"]["tumblr"] = {"ok": False, "error": str(e)}
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
