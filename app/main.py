@@ -16,6 +16,7 @@ import app.core.providers.openrouter_image_provider  # noqa: F401 — triggers p
 from app.workers.task_worker import TaskWorker
 from app.workers.etsy_receipt_worker import EtsyReceiptWorker
 from app.workers.autonomy_worker import AutonomyWorker
+from app.workers.marketing_refresh_worker import MarketingRefreshWorker
 from config import settings
 
 logging.basicConfig(level=logging.INFO)
@@ -55,6 +56,7 @@ async def startup_event():
     task_worker.start()
     etsy_receipt_worker.start()
     autonomy_worker.start()
+    marketing_refresh_worker.start()
 
 
 @app.on_event("shutdown")
@@ -63,6 +65,7 @@ async def shutdown_event():
     task_worker.stop()
     etsy_receipt_worker.stop()
     autonomy_worker.stop()
+    marketing_refresh_worker.stop()
 
 
 app.include_router(api_router)
@@ -73,6 +76,7 @@ app.mount("/ui", StaticFiles(directory=_frontend_dir, html=True), name="ui")
 task_worker = TaskWorker()
 etsy_receipt_worker = EtsyReceiptWorker()
 autonomy_worker = AutonomyWorker()
+marketing_refresh_worker = MarketingRefreshWorker()
 
 logger.info("AI Factory API initialized")
 print(f"Loaded configuration for {settings.APP_NAME} ({settings.ENV})")

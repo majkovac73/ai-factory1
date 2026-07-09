@@ -81,17 +81,22 @@ def _resolve_image(listing: dict):
     return None, None
 
 
+STORE_IN_BIO_FALLBACK = "🛍️ Link to our Etsy store in bio"
+
+
 def _build_caption(listing: dict) -> str:
     title = (listing.get("title") or "").strip()
     description = (listing.get("description") or "").strip()
-    link = listing.get("listing_url") or listing.get("product_url") or ""
+    link = (listing.get("listing_url") or listing.get("product_url") or "").strip()
     parts = []
     if title:
         parts.append(title)
     if description:
         parts.append(description[:450])
-    if link:
-        parts.append(link)
+    # Always give buyers a way to reach the product: the direct listing link
+    # when we have it, otherwise a "store in bio" pointer so the post is never
+    # a dead end even if the listing URL couldn't be resolved.
+    parts.append(f"🛍️ Shop this: {link}" if link else STORE_IN_BIO_FALLBACK)
     return "\n\n".join(parts)
 
 

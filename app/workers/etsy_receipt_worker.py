@@ -306,9 +306,10 @@ class EtsyReceiptWorker:
         Railway's crash/restart notifications act as the external backstop.
         """
         stale_thresholds = {
-            "TaskWorker": 30,           # should beat every ~1s
-            "EtsyReceiptWorker": 660,   # beats every poll cycle (300s), allow 2x
-            "AutonomyWorker": 7200,     # beats every schedule cycle (3600s), allow 2x
+            "TaskWorker": 30,                 # should beat every ~1s
+            "EtsyReceiptWorker": 660,         # beats every poll cycle (300s), allow 2x
+            "AutonomyWorker": 7200,           # beats every schedule cycle (3600s), allow 2x
+            "MarketingRefreshWorker": 43200,  # beats every schedule cycle (21600s), allow 2x
         }
         stale = [
             name

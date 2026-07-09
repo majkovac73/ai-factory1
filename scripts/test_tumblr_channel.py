@@ -151,6 +151,7 @@ with tempfile.TemporaryDirectory() as tmp:
         ("media mime png", image_block and image_block["media"][0]["type"] == "image/png"),
         ("width/height set", image_block and image_block["media"][0].get("width") == 1024),
         ("text caption block", text_block is not None and "Mindfulness Daily Planner" in text_block["text"]),
+        ("listing link in caption", text_block is not None and "https://www.etsy.com/listing/4534803479" in text_block["text"]),
         ("tags comma-separated", body.get("tags") == "planner,mindfulness,printable,self care"),
         ("state published", body.get("state") == "published"),
         ("result success", result.get("success") is True),
@@ -221,6 +222,33 @@ with tempfile.TemporaryDirectory() as tmp:
         ok("[3] API failure returned cleanly (no raise), error surfaced")
     else:
         fail("[3] api failure", f"result={result}")
+
+
+# ── [4] no listing link -> "store in bio" fallback in caption ────────────────
+print("[4] with no listing link, caption falls back to a store-in-bio pointer...")
+
+with tempfile.TemporaryDirectory() as tmp:
+    img = _png_path(tmp)
+    listing = {k: v for k, v in LISTING.items() if k != "listing_url"}
+    listing["image_path"] = str(img)  # no listing_url / product_url
+
+    FakeAsyncClient._response = FakeResponse(201, {"response": {"id_string": "555"}})
+
+    with patch.object(tc, "httpx") as mock_httpx, \
+         patch.object(tc, "get_valid_access_token", return_value="fake-token"), \
+         patch.object(tc.settings, "TUMBLR_BLOG_NAME", "myblog"):
+        import httpx as _real_httpx
+        mock_httpx.AsyncClient = FakeAsyncClient
+        mock_httpx.HTTPStatusError = _real_httpx.HTTPStatusError
+        result = TumblrChannel().post(listing)
+
+    body = _parse_json_part(FakeAsyncClient.captured["files"])
+    text_block = next((b for b in body["content"] if b.get("type") == "text"), None)
+    caption = text_block["text"] if text_block else ""
+    if result.get("success") and "Etsy store in bio" in caption and "Shop this:" not in caption:
+        ok("[4] caption includes store-in-bio fallback when no link is present")
+    else:
+        fail("[4] fallback link", f"caption={caption!r}, result={result}")
 
 
 print(f"\nResults: {_passed} passed, {_failed} failed\n")

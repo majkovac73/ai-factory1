@@ -29,17 +29,25 @@ class MarketingService:
         Returns:
             The channel's result dict, also persisted to marketing_posts.
         """
+        # Capture the primary key as a plain value while the record is still
+        # bound to a live session. Accessing record.id after the session is
+        # closed triggers a DetachedInstanceError (SQLAlchemy re-loads expired
+        # attributes on access) — the real bug that made the Pinterest/refresh
+        # marketing step raise "Instance <MarketingPost> is not bound to a
+        # Session". Use record_id everywhere after this point.
         db = SessionLocal()
-        record = MarketingPost(
-            task_id=task_id,
-            channel=channel.name,
-            status="pending",
-            payload=listing,
-        )
-        db.add(record)
-        db.commit()
-        db.refresh(record)
-        db.close()
+        try:
+            record = MarketingPost(
+                task_id=task_id,
+                channel=channel.name,
+                status="pending",
+                payload=listing,
+            )
+            db.add(record)
+            db.commit()
+            record_id = record.id
+        finally:
+            db.close()
 
         try:
             result = channel.post(listing)
@@ -49,19 +57,20 @@ class MarketingService:
 
         db = SessionLocal()
         try:
-            record = db.query(MarketingPost).filter(MarketingPost.id == record.id).first()
-            record.status = "success" if result.get("success") else "failed"
-            record.external_id = result.get("external_id")
-            record.external_url = result.get("url")
-            record.error_message = result.get("error")
-            db.commit()
+            record = db.query(MarketingPost).filter(MarketingPost.id == record_id).first()
+            if record:
+                record.status = "success" if result.get("success") else "failed"
+                record.external_id = result.get("external_id")
+                record.external_url = result.get("url")
+                record.error_message = result.get("error")
+                db.commit()
         finally:
             db.close()
 
         self.analytics_service.record_event(
             event_type="marketing_post_success" if result.get("success") else "marketing_post_failed",
             entity_type="marketing_post",
-            entity_id=record.id,
+            entity_id=record_id,
             payload={"task_id": task_id, "channel": channel.name},
         )
 

@@ -733,6 +733,19 @@ class PipelineOrchestrator:
                 self._block_task(task_id, f"publish did not take effect: {reason}", report, pre_listing=False)
                 return
 
+            # Persist the real, readback-verified listing_id onto this task's
+            # catalog assets. This is the durable "genuinely published product"
+            # signal (blocked tasks never reach here), used by the marketing-
+            # refresh system to find real products to re-promote. Best-effort:
+            # a catalog write must never fail an otherwise-successful publish.
+            try:
+                if design_path:
+                    self.catalog.attach_listing(str(design_path), listing_id)
+                for p in (image_paths or []):
+                    self.catalog.attach_listing(str(p), listing_id)
+            except Exception as link_err:
+                logger.warning(f"PipelineOrchestrator: could not attach listing_id {listing_id} to catalog assets: {link_err}")
+
             report["stages"]["attach_publish"] = {
                 "ok": True,
                 "images_uploaded": len(result.get("uploaded_images", [])),
