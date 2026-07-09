@@ -88,6 +88,24 @@ and watermark are free (PIL).
   listing photo (only the watermarked mockups are).
 - Full regression green: steps **69, 89–96, 98, 100b, 100d, 100f, 100g**.
 
+## Update — watermark replaced by a perspective angle
+
+Per Maj: drop the watermark (it made the ads look like "just the product with a
+watermark") and instead **composite the design at a slight perspective ANGLE** so
+a screenshot isn't a clean, flat, usable copy — the product isn't really
+screenshot-able once foreshortened, so no watermark is needed.
+
+- `MockupService` now applies a mild PIL **perspective transform** to the framed
+  print (viewed off-axis, right edge foreshortened) and the desk flat-lay (rotated
+  + top edge receding). The watermark tiling was removed.
+- Perspective coefficients are solved with a small **pure-Python Gaussian
+  elimination** (no numpy — it isn't installed in prod).
+- Settings `LISTING_WATERMARK_TEXT` removed; `MOCKUP_USE_GENERATED_SCENES` kept.
+- `test_step100g` [5] now asserts the mockups are **not** watermarked and the
+  design is **angled** (non-horizontal top edge). Visually confirmed: framed art
+  viewed at an angle on a wall, and a tilted page on a desk — both clearly
+  foreshortened, no watermark.
+
 ## Verify
 
 Deploy, then run a real `coloring_page` task and **eyeball** the resulting Etsy

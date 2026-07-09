@@ -111,12 +111,10 @@ class Settings(BaseSettings):
     # CHANGELOG_STEP100b): worst case ≈ 2 × (remake images + re-check).
     MARKETING_CONSISTENCY_MAX_REMAKES: int = 2
 
-    # Digital single-image listing previews (step 100h): the listing photos are
-    # WATERMARKED renders of the real delivered design so a buyer can see exactly
-    # what they get, but can't lift a clean, usable copy from the public listing
-    # (the clean file is delivered only after purchase). Set this to the shop
-    # name for a branded watermark; defaults to "PREVIEW".
-    LISTING_WATERMARK_TEXT: str = "PREVIEW"
+    # Digital single-image listing previews (step 100h): the listing photos
+    # composite the real delivered design into a realistic scene at a PERSPECTIVE
+    # ANGLE, so a buyer sees exactly what they get but a screenshot isn't a usable
+    # flat copy (the clean, straight file is delivered only after purchase).
     # When True, listing/ad mockups composite the real design into a photorealistic
     # GENERATED scene (framed print on a wall, print in a desk flat-lay). When
     # False (or if generation fails), a deterministic PIL studio/desk background is

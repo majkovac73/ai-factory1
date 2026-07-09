@@ -610,12 +610,12 @@ class PipelineOrchestrator:
         """Build attractive listing/ad PREVIEW photos from the real delivery design
         (digital single-image formats): the actual delivered design composited into
         realistic scenes (a framed print on a wall, a print in a desk flat-lay) via
-        MockupService, then WATERMARKED. So each photo is a professional-looking ad
-        that honestly depicts the delivered product but can't be used as it (the
-        clean, unwatermarked file is delivered only after purchase, never as a
-        public listing photo). These same assets are reused by the Tumblr/Pinterest
-        marketing refresh. Returns validated + catalog-registered Paths (empty on
-        failure).
+        MockupService, at a PERSPECTIVE ANGLE. So each photo is a professional-
+        looking ad that honestly depicts the delivered product but isn't a usable
+        flat copy if screenshotted (the clean, straight file is delivered only after
+        purchase, never as a public listing photo). These same assets are reused by
+        the Tumblr/Pinterest marketing refresh. Returns validated + catalog-
+        registered Paths (empty on failure).
         """
         from config import settings
         from app.services.image_file_service import ImageFileService
@@ -626,7 +626,6 @@ class PipelineOrchestrator:
             report["stages"]["listing_images"] = {"ok": False, "error": "delivery missing", "source": "delivery_mockup"}
             return []
 
-        wm_text = (getattr(settings, "LISTING_WATERMARK_TEXT", "") or "PREVIEW").strip()
         mockups = MockupService()
         fs = ImageFileService()
         validator = ImageValidationService()
@@ -635,7 +634,7 @@ class PipelineOrchestrator:
         variants = [("hero.png", "framed"), ("lifestyle.png", "flatlay")]
         for fname, role in variants:
             try:
-                png = mockups.build_mockup_bytes(delivery_path, role=role, size=1024, watermark_text=wm_text)
+                png = mockups.build_mockup_bytes(delivery_path, role=role, size=1024)
                 p = Path(fs.save_bytes(png, task_id, "listing", fname))
                 validator.validate(p, use_case="listing")
                 self.catalog.register(

@@ -109,36 +109,51 @@ with tempfile.TemporaryDirectory() as tmp:
     report = {"stages": {}}
     paths = orch._build_listing_mockups("task-100g", delivery, report)
 
+    def _top_red_y(im, x):
+        for y in range(0, 1024):
+            px = im.getpixel((x, y))
+            if px[0] > 150 and px[1] < 90 and px[2] < 90:
+                return y
+        return None
+
     # [1] two valid 1024x1024 PNG listing images named hero/lifestyle
     names = sorted(Path(p).name for p in paths)
     dims_ok = True
-    design_ok = bg_ok = wm_ok = True
+    design_ok = bg_ok = no_wm_ok = angled_ok = True
     for p in paths:
         with PILImage.open(p) as im:
             im = im.convert("RGB")
             if im.size != (1024, 1024):
                 dims_ok = False
-            # [2] the composite CONTAINS the real design: sample the central area
-            #     (where the framed/flat print sits) — the delivery red must be the
-            #     dominant colour there. [5] it must also be WATERMARKED: light
-            #     text pixels blended over the red design.
-            red = light = total = 0
+            # [2] the composite CONTAINS the real design: the delivery red must
+            #     be dominant in the central area where the print sits.
+            #     [5a] NO watermark: almost no light text pixels over the red.
+            red = total = 0
             for yy in range(300, 724, 8):
                 for xx in range(300, 724, 8):
                     px = im.getpixel((xx, yy)); total += 1
                     if px[0] > 150 and px[1] < 90 and px[2] < 90:
                         red += 1
-                    # watermark text blended over the red design -> red stays high
-                    # but green/blue lift toward white
-                    if px[0] > 150 and px[1] > 105 and px[2] > 105:
-                        light += 1
             if red < total * 0.25:
                 design_ok = False
-            if light < 20:  # a meaningful amount of watermark coverage over the design
-                wm_ok = False
-            # a corner is the scene background, not the raw design
+            # NO watermark: in a TIGHT central box (deep inside the solid design,
+            # away from the white matte border) there should be ~no light pixels;
+            # a tiled watermark would blend many.
+            light = 0
+            for yy in range(460, 566, 6):
+                for xx in range(460, 566, 6):
+                    px = im.getpixel((xx, yy))
+                    if px[0] > 150 and px[1] > 110 and px[2] > 110:
+                        light += 1
+            if light > 4:
+                no_wm_ok = False
             if im.getpixel((5, 5)) == DELIVERY_COLOR:
                 bg_ok = False
+            # [5b] ANGLED: the design's top edge is NOT horizontal (perspective /
+            #      rotation), so a screenshot isn't a clean flat rectangle.
+            tops = [t for t in (_top_red_y(im, x) for x in range(340, 690, 25)) if t is not None]
+            if not tops or (max(tops) - min(tops)) < 10:
+                angled_ok = False
 
     if len(paths) == 2 and names == ["hero.png", "lifestyle.png"] and dims_ok:
         ok("[1] two valid 1024x1024 listing mockups (hero.png, lifestyle.png)")
@@ -150,10 +165,10 @@ with tempfile.TemporaryDirectory() as tmp:
     else:
         fail("[2] mockup content", f"design_ok={design_ok}, bg_ok={bg_ok}")
 
-    if wm_ok:
-        ok("[5] mockups are WATERMARKED (light watermark text over the design — unusable as the clean product)")
+    if no_wm_ok and angled_ok:
+        ok("[5] mockups are NOT watermarked and the design is composited at an ANGLE (not a usable flat copy)")
     else:
-        fail("[5] watermark", "no watermark pixels detected over the design")
+        fail("[5] no-watermark + angled", f"no_wm_ok={no_wm_ok}, angled_ok={angled_ok}")
 
     # [3] registered as listing assets by DeliveryMockup, and stage reported
     listing_regs = [c for c in catalog_calls if c.get("variant") == "listing" and c.get("agent") == "DeliveryMockup"]
@@ -181,7 +196,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
 
 # ── [6] SECURITY: the raw clean deliverable is NOT a public listing photo ─────
-print("[6] the raw clean deliverable is NEVER uploaded as a public listing photo (only watermarked mockups)...")
+print("[6] the raw clean deliverable is NEVER uploaded as a public listing photo (only the angled scene mockups)...")
 
 import app.models.task, app.models.log, app.models.image_asset, app.models.marketing_post  # noqa
 from app.db.database import Base as _Base, engine as _engine
@@ -261,7 +276,7 @@ with tempfile.TemporaryDirectory() as tmp:
     clean_is_digital_file = str(captured.get("digital_file")) == design_str
 
     if raw_not_public and only_mockups and clean_is_digital_file:
-        ok("[6] listing photos are ONLY the watermarked mockups; the raw clean file is the buyer-gated digital file, never a public photo")
+        ok("[6] listing photos are ONLY the angled scene mockups; the raw clean file is the buyer-gated digital file, never a public photo")
     else:
         fail("[6] product exposure", f"photos={photos}, raw_not_public={raw_not_public}, "
                                      f"clean_is_digital_file={clean_is_digital_file}")
