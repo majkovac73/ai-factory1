@@ -140,8 +140,21 @@ with tempfile.TemporaryDirectory() as tmp:
     body = _parse_json_part(cap["files"])
     blocks = body.get("content", [])
     image_block = next((b for b in blocks if b.get("type") == "image"), None)
-    text_block = next((b for b in blocks if b.get("type") == "text"), None)
+    text_blocks = [b for b in blocks if b.get("type") == "text"]
+    title_block = next((b for b in text_blocks if "Mindfulness Daily Planner" in b.get("text", "")), None)
+    link_block = next((b for b in text_blocks if b.get("formatting")), None)
     identifier = image_block["media"][0]["identifier"] if image_block else None
+
+    def _link_fmt(b):
+        return next((f for f in (b.get("formatting") or []) if f.get("type") == "link"), None) if b else None
+
+    lf = _link_fmt(link_block)
+    # The linked substring, sliced by the block's UTF-16 formatting offsets,
+    # must be the human-readable anchor (not a raw URL) and carry the real URL.
+    linked_text = None
+    if lf and link_block:
+        u16 = link_block["text"].encode("utf-16-le")
+        linked_text = u16[lf["start"] * 2:lf["end"] * 2].decode("utf-16-le")
 
     checks = [
         ("url", "/blog/myblog.tumblr.com/posts" in cap["url"]),
@@ -150,8 +163,9 @@ with tempfile.TemporaryDirectory() as tmp:
         ("identifier maps to a form part", identifier in cap["files"]),
         ("media mime png", image_block and image_block["media"][0]["type"] == "image/png"),
         ("width/height set", image_block and image_block["media"][0].get("width") == 1024),
-        ("text caption block", text_block is not None and "Mindfulness Daily Planner" in text_block["text"]),
-        ("listing link in caption", text_block is not None and "https://www.etsy.com/listing/4534803479" in text_block["text"]),
+        ("title text block", title_block is not None),
+        ("listing link is a real hyperlink", lf is not None and lf.get("url") == "https://www.etsy.com/listing/4534803479/mindfulness-daily-planner"),
+        ("link anchor is readable text, not raw URL", linked_text == "Shop this listing"),
         ("tags comma-separated", body.get("tags") == "planner,mindfulness,printable,self care"),
         ("state published", body.get("state") == "published"),
         ("result success", result.get("success") is True),
@@ -243,12 +257,13 @@ with tempfile.TemporaryDirectory() as tmp:
         result = TumblrChannel().post(listing)
 
     body = _parse_json_part(FakeAsyncClient.captured["files"])
-    text_block = next((b for b in body["content"] if b.get("type") == "text"), None)
-    caption = text_block["text"] if text_block else ""
-    if result.get("success") and "Etsy store in bio" in caption and "Shop this:" not in caption:
+    text_blocks = [b for b in body["content"] if b.get("type") == "text"]
+    captions = " ".join(b.get("text", "") for b in text_blocks)
+    has_link_fmt = any(b.get("formatting") for b in text_blocks)
+    if result.get("success") and "Etsy store in bio" in captions and not has_link_fmt:
         ok("[4] caption includes store-in-bio fallback when no link is present")
     else:
-        fail("[4] fallback link", f"caption={caption!r}, result={result}")
+        fail("[4] fallback link", f"captions={captions!r}, has_link_fmt={has_link_fmt}, result={result}")
 
 
 print(f"\nResults: {_passed} passed, {_failed} failed\n")

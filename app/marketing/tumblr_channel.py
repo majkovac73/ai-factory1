@@ -82,22 +82,53 @@ def _resolve_image(listing: dict):
 
 
 STORE_IN_BIO_FALLBACK = "🛍️ Link to our Etsy store in bio"
+SHOP_LINK_LABEL = "🛍️ Shop this listing"
+SHOP_LINK_ANCHOR = "Shop this listing"
 
 
-def _build_caption(listing: dict) -> str:
+def _utf16_len(s: str) -> int:
+    """Length of s in UTF-16 code units — the unit NPF formatting ranges use.
+
+    Tumblr's NPF `start`/`end` inline-formatting offsets are counted in UTF-16
+    code units (like JavaScript string indices), so a leading emoji shifts the
+    anchor's real offset past its visible character count.
+    """
+    return len(s.encode("utf-16-le")) // 2
+
+
+def _build_caption_blocks(listing: dict) -> list:
+    """Build the NPF text blocks for a post.
+
+    Title and description become plain text blocks. The shop line becomes a
+    text block whose label is a real hyperlink via NPF `link` formatting — so
+    buyers get an actual clickable link in the post, not a raw URL string. When
+    no listing link can be resolved, falls back to a "store in bio" pointer so
+    the post is never a dead end.
+    """
     title = (listing.get("title") or "").strip()
     description = (listing.get("description") or "").strip()
     link = (listing.get("listing_url") or listing.get("product_url") or "").strip()
-    parts = []
+
+    blocks = []
     if title:
-        parts.append(title)
+        blocks.append({"type": "text", "text": title})
     if description:
-        parts.append(description[:450])
-    # Always give buyers a way to reach the product: the direct listing link
-    # when we have it, otherwise a "store in bio" pointer so the post is never
-    # a dead end even if the listing URL couldn't be resolved.
-    parts.append(f"🛍️ Shop this: {link}" if link else STORE_IN_BIO_FALLBACK)
-    return "\n\n".join(parts)
+        blocks.append({"type": "text", "text": description[:450]})
+
+    if link:
+        # Turn only the human-readable anchor into a hyperlink; NPF formatting
+        # ranges are UTF-16 code-unit offsets, so compute them accordingly.
+        idx = SHOP_LINK_LABEL.index(SHOP_LINK_ANCHOR)
+        start = _utf16_len(SHOP_LINK_LABEL[:idx])
+        end = start + _utf16_len(SHOP_LINK_ANCHOR)
+        blocks.append({
+            "type": "text",
+            "text": SHOP_LINK_LABEL,
+            "formatting": [{"start": start, "end": end, "type": "link", "url": link}],
+        })
+    else:
+        blocks.append({"type": "text", "text": STORE_IN_BIO_FALLBACK})
+    return blocks
 
 
 def _build_tags(listing: dict) -> str:
@@ -129,7 +160,7 @@ class TumblrChannel(MarketingChannel):
         except Exception as e:
             return {"success": False, "external_id": None, "url": None, "error": f"image resolution failed: {e}"}
 
-        caption = _build_caption(listing)
+        caption_blocks = _build_caption_blocks(listing)
         tags = _build_tags(listing)
 
         content = []
@@ -137,8 +168,9 @@ class TumblrChannel(MarketingChannel):
         if image_bytes:
             identifier = "file0"
             image_block = {"type": "image", "media": [{"type": mime, "identifier": identifier}]}
-            if caption:
-                image_block["alt_text"] = (listing.get("title") or "")[:200]
+            title = (listing.get("title") or "").strip()
+            if title:
+                image_block["alt_text"] = title[:200]
             content.append(image_block)
             # Determine dimensions where possible (optional but nice for NPF).
             try:
@@ -151,8 +183,7 @@ class TumblrChannel(MarketingChannel):
                 pass
             files = {identifier: (f"{identifier}.{mime.split('/')[-1]}", image_bytes, mime)}
 
-        if caption:
-            content.append({"type": "text", "text": caption})
+        content.extend(caption_blocks)
 
         if not content:
             return {"success": False, "external_id": None, "url": None, "error": "nothing to post (no image and no caption)"}

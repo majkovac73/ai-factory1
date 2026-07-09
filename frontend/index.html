@@ -276,6 +276,226 @@
       font-size: 0.82em; letter-spacing: 0.12em; color: #2a4a68;
     }
     .fscreen.err { color: #ff5533; }
+
+    /* ── Pixel-art robot (pure CSS, box-shadow pixel grid) ───────────── */
+    /* Each robot is two 3px "pixel" elements whose huge box-shadow lists
+       paint the whole sprite: .robot__body draws the chassis, .robot__eyes
+       draws only the cyan eyes so they can blink independently. The blue
+       accent pixels use var(--robot-accent) so each room tints its own robot
+       to that room's accent colour — one shared grid, no per-room sprite. */
+    .robot {
+      position: relative;
+      width: 33px;   /* 11 cells × 3px */
+      height: 48px;  /* 16 cells × 3px */
+      margin: 0 auto 3px;
+      transform-origin: 50% 92%;
+      image-rendering: pixelated;
+      --robot-accent: #5aa0e8;
+    }
+    .robot__body, .robot__eyes {
+      position: absolute;
+      top: 0; left: 0;
+      width: 3px; height: 3px;   /* one pixel cell; rest drawn via box-shadow */
+      background: transparent;
+    }
+    .robot__eyes { filter: drop-shadow(0 0 1.5px #4ff7ff); }
+
+    /* idle: calm "breathing" bob — clearly waiting, not dead */
+    .robot--idle { animation: robot-breathe 2.6s ease-in-out infinite; }
+    @keyframes robot-breathe {
+      0%, 100% { transform: translateY(0)     scaleY(1);    }
+      50%      { transform: translateY(-1px)  scaleY(1.035); }
+    }
+
+    /* working: faster side-to-side shuffle/waddle + blinking eyes */
+    .robot--working { animation: robot-work 0.42s ease-in-out infinite; }
+    @keyframes robot-work {
+      0%   { transform: translateX(-1.5px) rotate(-3deg); }
+      50%  { transform: translateX(1.5px)  rotate(3deg);  }
+      100% { transform: translateX(-1.5px) rotate(-3deg); }
+    }
+    .robot--working .robot__eyes { animation: robot-blink 1.5s steps(1, end) infinite; }
+    @keyframes robot-blink {
+      0%, 88%, 100% { opacity: 1; }
+      91%, 96%      { opacity: 0.08; }
+    }
+
+    /* stale: worker offline — dimmed, greyed, very slow drift */
+    .robot--stale {
+      animation: robot-breathe 5s ease-in-out infinite;
+      opacity: 0.45;
+      filter: grayscale(0.7);
+    }
+    .robot--stale .robot__eyes { opacity: 0.3; }
+
+    /* error: agitated shudder */
+    .robot--error { animation: robot-shudder 0.28s ease-in-out infinite; }
+    @keyframes robot-shudder {
+      0%, 100% { transform: translateX(-1px); }
+      50%      { transform: translateX(1px);  }
+    }
+
+    /* queued-work badge (real backlog count, not a fake extra robot) */
+    .qbadge {
+      margin-top: 2px;
+      font-size: 0.5em;
+      letter-spacing: 0.04em;
+      color: #6f8dab;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid #1b3350;
+      border-radius: 3px;
+      padding: 1px 4px;
+      white-space: nowrap;
+    }
+
+    /* ── Themed room scenes (pure CSS backdrops) ─────────────────────── */
+    .scene {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      overflow: hidden;
+    }
+    .scene::before, .scene::after { content: ''; position: absolute; }
+    /* keep room text/robot above the scene */
+    .room-hdr, .rsummary, .chars { position: relative; z-index: 2; }
+
+    /* research — star map + tilted telescope tube */
+    .scene--research {
+      opacity: 0.4;
+      background-image:
+        radial-gradient(1.5px 1.5px at 18% 28%, var(--rc) 45%, transparent 50%),
+        radial-gradient(1.5px 1.5px at 68% 18%, var(--rc) 45%, transparent 50%),
+        radial-gradient(2px 2px   at 44% 52%, var(--rc) 45%, transparent 50%),
+        radial-gradient(1px 1px   at 84% 58%, var(--rc) 45%, transparent 50%),
+        radial-gradient(1.5px 1.5px at 28% 74%, var(--rc) 45%, transparent 50%),
+        radial-gradient(1px 1px   at 58% 82%, var(--rc) 45%, transparent 50%),
+        radial-gradient(2px 2px   at 14% 54%, var(--rc) 45%, transparent 50%),
+        radial-gradient(1px 1px   at 78% 78%, var(--rc) 45%, transparent 50%);
+    }
+    .scene--research::after {
+      right: 15%; top: 22%; width: 34px; height: 7px;
+      background: var(--rc); opacity: 0.14;
+      border-radius: 2px; transform: rotate(-35deg);
+    }
+
+    /* planning — clipboard + checklist lines */
+    .scene--planning::before {
+      left: 50%; top: 52%; width: 46px; height: 56px;
+      transform: translate(-50%, -50%);
+      border: 2px solid var(--rc); border-radius: 4px; opacity: 0.18;
+    }
+    .scene--planning::after {
+      left: 50%; top: 52%; width: 30px; height: 44px;
+      transform: translate(-50%, -50%);
+      opacity: 0.16;
+      background:
+        linear-gradient(var(--rc), var(--rc)) left 4px /100% 2px no-repeat,
+        linear-gradient(var(--rc), var(--rc)) left 16px/100% 2px no-repeat,
+        linear-gradient(var(--rc), var(--rc)) left 28px/100% 2px no-repeat,
+        linear-gradient(var(--rc), var(--rc)) left 40px/70%  2px no-repeat;
+    }
+
+    /* content — document with text lines + a pencil */
+    .scene--content::before {
+      left: 44%; top: 50%; width: 40px; height: 52px;
+      transform: translate(-50%, -50%);
+      border: 2px solid var(--rc); border-radius: 3px; opacity: 0.16;
+      background:
+        linear-gradient(var(--rc), var(--rc)) center 14px/68% 2px no-repeat,
+        linear-gradient(var(--rc), var(--rc)) center 24px/68% 2px no-repeat,
+        linear-gradient(var(--rc), var(--rc)) center 34px/48% 2px no-repeat;
+    }
+    .scene--content::after {
+      right: 14%; top: 28%; width: 8px; height: 40px;
+      background: var(--rc); opacity: 0.18;
+      transform: rotate(34deg);
+      clip-path: polygon(0 0, 100% 0, 100% 82%, 50% 100%, 0 82%);
+    }
+
+    /* image studio — canvas + easel tripod */
+    .scene--image_studio::before {
+      left: 48%; top: 42%; width: 40px; height: 32px;
+      transform: translate(-50%, -50%);
+      border: 2px solid var(--rc); border-radius: 2px; opacity: 0.16;
+    }
+    .scene--image_studio::after {
+      left: 50%; bottom: 10%; width: 44px; height: 34px;
+      transform: translateX(-50%);
+      background: var(--rc); opacity: 0.14;
+      clip-path: polygon(45% 0, 55% 0, 100% 100%, 82% 100%, 50% 30%, 18% 100%, 0 100%);
+    }
+
+    /* QA — magnifying glass */
+    .scene--qa::before {
+      left: 43%; top: 42%; width: 32px; height: 32px;
+      transform: translate(-50%, -50%);
+      border: 3px solid var(--rc); border-radius: 50%; opacity: 0.18;
+    }
+    .scene--qa::after {
+      left: 60%; top: 62%; width: 5px; height: 26px;
+      background: var(--rc); opacity: 0.18;
+      transform: rotate(-45deg); border-radius: 3px;
+    }
+
+    /* storefront — striped awning + counter */
+    .scene--storefront::before {
+      left: 50%; top: 26%; width: 58px; height: 16px;
+      transform: translateX(-50%);
+      background: repeating-linear-gradient(90deg, var(--rc) 0 6px, transparent 6px 12px);
+      opacity: 0.2; border-radius: 3px 3px 0 0;
+    }
+    .scene--storefront::after {
+      left: 50%; top: 52%; width: 54px; height: 26px;
+      transform: translateX(-50%);
+      border: 2px solid var(--rc); border-radius: 2px; opacity: 0.15;
+    }
+
+    /* marketing — megaphone + radiating broadcast rings */
+    .scene--marketing {
+      opacity: 0.16;
+      background:
+        radial-gradient(circle at 44% 52%,
+          transparent 0 9px, var(--rc) 9px 11px, transparent 11px 19px,
+          var(--rc) 19px 21px, transparent 21px 31px,
+          var(--rc) 31px 33px, transparent 33px);
+    }
+    .scene--marketing::before {
+      left: 24%; top: 50%; width: 16px; height: 14px;
+      transform: translate(-50%, -50%);
+      background: var(--rc); opacity: 1;
+      clip-path: polygon(0 30%, 60% 0, 100% 0, 100% 100%, 60% 100%, 0 70%);
+    }
+
+    /* fulfillment — stacked boxes + dashed conveyor belt */
+    .scene--fulfillment::before {
+      left: 36%; top: 40%; width: 20px; height: 16px;
+      border: 2px solid var(--rc); border-radius: 2px; opacity: 0.18;
+      box-shadow:
+        24px 6px 0 0 var(--rc),
+        11px -15px 0 0 var(--rc);
+    }
+    .scene--fulfillment::after {
+      left: 8%; right: 8%; bottom: 24%; height: 0;
+      border-top: 2px dashed var(--rc); opacity: 0.22;
+    }
+
+    /* ledger — stacked coins + ledger book */
+    .scene--ledger::before {
+      left: 40%; top: 40%; width: 30px; height: 8px;
+      transform: translateX(-50%);
+      background: var(--rc); opacity: 0.16; border-radius: 50%;
+      box-shadow:
+        0 -8px 0 0 var(--rc),
+        0 -16px 0 0 var(--rc),
+        0 8px 0 0 var(--rc);
+    }
+    .scene--ledger::after {
+      left: 52%; top: 62%; width: 42px; height: 22px;
+      transform: translateX(-50%);
+      border: 2px solid var(--rc); border-radius: 2px; opacity: 0.14;
+      background: linear-gradient(var(--rc), var(--rc)) center/2px 100% no-repeat;
+    }
   </style>
 </head>
 <body>
@@ -304,6 +524,100 @@
       'image_studio', 'qa', 'storefront',
       'marketing', 'fulfillment', 'ledger',
     ];
+
+    /* ── Pixel-art robot ───────────────────────────────────────────────
+       The robot is defined as a readable 2D grid (one char per pixel), and
+       the box-shadow CSS is generated from it at load time — no hand-written
+       coordinates, no image files, no image-generation calls. Reference look:
+       chunky white/grey body, blue accent panels, dark visor, two cyan eyes,
+       black outline, antenna. 'B' pixels resolve to var(--robot-accent) so a
+       room can tint its robot to its own accent colour. */
+    const PX = 3;
+    const ROBOT_COLORS = {
+      K: '#0a0a12',                      // black outline
+      W: '#eef3f8',                      // white body
+      V: '#14263e',                      // dark head visor
+      C: '#4ff7ff',                      // cyan eyes (separate layer, can blink)
+      B: 'var(--robot-accent, #5aa0e8)', // blue accent panels — per-room tint
+    };
+    const ROBOT_GRID = [
+      ".....K.....",  // antenna tip
+      ".....K.....",  // antenna stem
+      ".KKKKKKKKK.",  // head top
+      ".KWWWWWWWK.",  // forehead
+      ".KVVVVVVVK.",  // visor top
+      ".KVCCVCCVK.",  // eyes
+      ".KVVVVVVVK.",  // visor bottom
+      ".KWWWWWWWK.",  // chin
+      "KKKKKKKKKKK",  // shoulders (outline)
+      "KBBWWWWWBBK",  // shoulders (blue) + white neck
+      "KBWWWWWWWBK",  // arms (blue) + chest
+      "KBWWBBBWWBK",  // chest panel (blue)
+      "KBWWBBBWWBK",  // chest panel
+      "KBWWWWWWWBK",  // lower chest
+      "KKWWWWWWWKK",  // waist
+      "..KKK.KKK..",  // legs / feet
+    ];
+
+    function buildShadows(grid, opts) {
+      opts = opts || {};
+      const parts = [];
+      for (let r = 0; r < grid.length; r++) {
+        for (let c = 0; c < grid[r].length; c++) {
+          const ch = grid[r][c];
+          if (ch === '.') continue;
+          if (opts.only && opts.only.indexOf(ch) === -1) continue;
+          if (opts.exclude && opts.exclude.indexOf(ch) !== -1) continue;
+          const color = ROBOT_COLORS[ch];
+          if (!color) continue;
+          parts.push(`${c * PX}px ${r * PX}px 0 0 ${color}`);
+        }
+      }
+      return parts.join(', ');
+    }
+
+    // Computed once: identical for every robot (accent is a CSS var, so a
+    // single shadow string serves all rooms — no per-room recompute).
+    const BODY_SHADOW = buildShadows(ROBOT_GRID, { exclude: ['C'] });
+    const EYES_SHADOW = buildShadows(ROBOT_GRID, { only: ['C'] });
+
+    function Robot({ state, accent }) {
+      const cls =
+        state === 'working' ? 'robot--working' :
+        state === 'stale'   ? 'robot--stale'   :
+        state === 'error'   ? 'robot--error'   : 'robot--idle';
+      return (
+        <div className={`robot ${cls}`} style={{ '--robot-accent': accent }}>
+          <div className="robot__body" style={{ boxShadow: BODY_SHADOW }} />
+          <div className="robot__eyes" style={{ boxShadow: EYES_SHADOW }} />
+        </div>
+      );
+    }
+
+    // Robot activity is driven ENTIRELY by the server's real per-room status
+    // (already computed in /dashboard/rooms/status from heartbeats / real task
+    // counts / recent-activity). 'active' → working, everything else → idle
+    // (stale = worker offline, error = failing).
+    function robotState(room) {
+      switch (room.status) {
+        case 'active': return 'working';
+        case 'stale':  return 'stale';
+        case 'error':  return 'error';
+        default:       return 'idle';
+      }
+    }
+
+    // Real queued/backlog work that is NOT currently being processed (workers
+    // are single-threaded/sequential in this codebase, so surplus work is a
+    // text badge — never a fake second "working" robot). Uses only counts the
+    // status endpoint already returns.
+    function backlog(rkey, room) {
+      const c = room.counts || {};
+      if (rkey === 'planning')  return c.queue || 0;                  // TaskQueue depth
+      if (rkey === 'qa')        return Math.max(0, (c.QA || 0) - 1);  // 1 validated at a time
+      if (rkey === 'marketing') return c.pending || 0;               // posts awaiting send
+      return 0;
+    }
 
     function Badge({ status }) {
       return <span className={`badge badge-${status}`}>{status}</span>;
@@ -426,12 +740,20 @@
       if (!room) return <div className="room" />;
       const cfg = ROOM_CFG[rkey] || {};
 
+      // One robot per room: workers here are single-threaded/sequential, so
+      // even with N queued tasks there is at most one genuinely-working unit.
+      const c = (room.characters || [])[0];
+      const state = robotState(room);
+      const queued = backlog(rkey, room);
+
       return (
         <div
           className={`room ${room.status || 'idle'}`}
           style={{ '--rc': cfg.color, '--rg': cfg.glow }}
           onClick={() => onRoomClick(rkey)}
         >
+          <div className={`scene scene--${rkey}`} />
+
           <div className="room-hdr">
             <span className="rdot" />
             <span className="rlabel">{cfg.icon} {room.label}</span>
@@ -439,19 +761,17 @@
           <div className="rsummary">{room.summary}</div>
 
           <div className="chars">
-            {(room.characters || []).map((c, i) => (
+            {c && (
               <div
-                key={i}
-                className={`char ${c.status || 'idle'}`}
-                onClick={e => { e.stopPropagation(); onCharClick(rkey, i); }}
+                className="char"
+                onClick={e => { e.stopPropagation(); onCharClick(rkey, 0); }}
                 title={c.name}
               >
-                <div className="cicon" style={{ borderColor: cfg.color }}>
-                  {cfg.icon}
-                </div>
+                <Robot state={state} accent={cfg.color} />
                 <div className="clabel">{c.name}</div>
+                {queued > 0 && <div className="qbadge">⏳ {queued} queued</div>}
               </div>
-            ))}
+            )}
           </div>
         </div>
       );
