@@ -39,8 +39,15 @@ def build_authorization_url(scopes: str = TUMBLR_SCOPES) -> str:
         "response_type": "code",
         "scope": scopes,
         "state": state,
-        "redirect_uri": settings.TUMBLR_REDIRECT_URI,
     }
+    # redirect_uri is OPTIONAL per Tumblr's docs when exactly one callback URL
+    # is registered on the app — Tumblr then falls back to that registered
+    # default. We omit it deliberately: sending it triggered a persistent
+    # redirect_uri_mismatch even with an exactly-matching registration, and
+    # omitting sidesteps any exact-string comparison quirk. Only include it if
+    # explicitly opted in (needed only if multiple callback URLs are registered).
+    if getattr(settings, "TUMBLR_SEND_REDIRECT_URI", False):
+        params["redirect_uri"] = settings.TUMBLR_REDIRECT_URI
     # httpx encodes spaces in scope, etc.
     query = str(httpx.QueryParams(params))
     return f"{TUMBLR_AUTH_URL}?{query}"
@@ -51,17 +58,22 @@ async def exchange_code_for_token(code: str, state: str) -> dict:
         raise ValueError("Unknown or expired OAuth state")
     _pending_states.discard(state)
 
+    token_body = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "client_id": settings.TUMBLR_CONSUMER_KEY,
+        "client_secret": settings.TUMBLR_CONSUMER_SECRET,
+    }
+    # Must match the authorize request: only send redirect_uri in the token
+    # exchange if we sent it in the authorize step (see build_authorization_url).
+    if getattr(settings, "TUMBLR_SEND_REDIRECT_URI", False):
+        token_body["redirect_uri"] = settings.TUMBLR_REDIRECT_URI
+
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(
             TUMBLR_TOKEN_URL,
             headers={"Content-Type": "application/x-www-form-urlencoded"},
-            data={
-                "grant_type": "authorization_code",
-                "code": code,
-                "client_id": settings.TUMBLR_CONSUMER_KEY,
-                "client_secret": settings.TUMBLR_CONSUMER_SECRET,
-                "redirect_uri": settings.TUMBLR_REDIRECT_URI,
-            },
+            data=token_body,
         )
         response.raise_for_status()
         token_data = response.json()

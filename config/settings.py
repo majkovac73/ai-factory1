@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     TUMBLR_CONSUMER_SECRET: str | None = None
     TUMBLR_BLOG_NAME: str | None = None
     TUMBLR_REDIRECT_URI: str = "https://kind-liberation-production.up.railway.app/tumblr/oauth/callback"
+    # Whether to send redirect_uri in the OAuth authorize/token requests. Tumblr
+    # makes it optional when exactly one callback URL is registered, and sending
+    # it produced a persistent redirect_uri_mismatch — so default OFF (omit) and
+    # rely on the app's registered default callback. Set True only if multiple
+    # callback URLs are registered on the Tumblr app.
+    TUMBLR_SEND_REDIRECT_URI: bool = False
 
     SECRET_KEY: str = "change_me"
 
