@@ -114,7 +114,7 @@ class PipelineOrchestrator:
         is_autonomy = bool((task.metadata_ or {}).get("source") == "autonomy_worker")
 
         # 1 — listing images
-        image_paths = self._stage_listing_images(task_id, product_name, visual_brief, is_autonomy, report)
+        image_paths = self._stage_listing_images(task_id, product_name, visual_brief, is_autonomy, report, task_type=task_type)
 
         # 2 — delivery asset (single image or multi-page PDF)
         if is_pdf:
@@ -152,7 +152,7 @@ class PipelineOrchestrator:
         # delivery asset, blocking a buyer-misrepresentation before listing.
         if design_path and image_paths:
             image_paths = self._stage_marketing_consistency(
-                task_id, design_path, image_paths, product_name, visual_brief, is_autonomy, report
+                task_id, design_path, image_paths, product_name, visual_brief, is_autonomy, report, task_type=task_type
             )
             if report.get("blocked"):
                 return report
@@ -293,7 +293,7 @@ class PipelineOrchestrator:
         self._block_task(task_id, reason, report, pre_listing=True)
         return None
 
-    def _stage_marketing_consistency(self, task_id, design_path, image_paths, product_name, visual_brief, is_autonomy, report):
+    def _stage_marketing_consistency(self, task_id, design_path, image_paths, product_name, visual_brief, is_autonomy, report, task_type=None):
         """
         Vision-model check that the listing/marketing photos plausibly depict
         the SAME product as the delivery asset.
@@ -363,6 +363,7 @@ class PipelineOrchestrator:
                 new_path = self._regenerate_marketing_image(
                     task_id, product_name, visual_brief, current_paths[idx],
                     role=role, corrective_issue=issue, ground_truth=ground_truth, report=report,
+                    task_type=task_type,
                 )
                 if new_path:
                     current_paths[idx] = new_path
@@ -481,7 +482,7 @@ class PipelineOrchestrator:
         logger.error(f"PipelineOrchestrator: UNMAPPABLE consistency mismatch index — {msg}")
         self._alert("Consistency remake: unmappable mismatch index", msg)
 
-    def _regenerate_marketing_image(self, task_id, product_name, visual_brief, target_path, role, corrective_issue, ground_truth, report):
+    def _regenerate_marketing_image(self, task_id, product_name, visual_brief, target_path, role, corrective_issue, ground_truth, report, task_type=None):
         """
         Regenerate ONE mismatched marketing image in place (overwriting its
         file, so its path/catalog entry stay stable), steering it with the
@@ -512,6 +513,7 @@ class PipelineOrchestrator:
                 role=role,
                 corrective_guidance=corrective_guidance,
                 filename=target_path.name,
+                product_format=task_type,
             )
         except Exception as e:
             logger.error(f"PipelineOrchestrator: targeted remake of {target_path.name} failed for {task_id}: {e}")
@@ -554,7 +556,7 @@ class PipelineOrchestrator:
 
     # ── Stages ────────────────────────────────────────────────────────────────
 
-    def _stage_listing_images(self, task_id: str, product_name: str, visual_brief: str, is_autonomy: bool, report: dict, record_spend: bool = True) -> list:
+    def _stage_listing_images(self, task_id: str, product_name: str, visual_brief: str, is_autonomy: bool, report: dict, record_spend: bool = True, task_type: str = None) -> list:
         from config import settings
 
         saved_paths = []
@@ -564,6 +566,7 @@ class PipelineOrchestrator:
                 task_id=task_id,
                 product_name=product_name,
                 visual_brief=visual_brief,
+                product_format=task_type,
             )
 
             validator = ImageValidationService()

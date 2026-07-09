@@ -36,7 +36,52 @@ class ProductImageAgent(BaseAgent):
         self.image_provider = image_provider or ImageProviderManager.get_provider()
         self.file_service = ImageFileService()
 
-    def _build_hero_prompt(self, product_name: str, visual_brief: str) -> str:
+    def _format_override(self, product_format, role: str, product_name: str, visual_brief: str):
+        """Return a format-specific listing-image prompt for (product_format, role),
+        or None to fall back to the generic photography prompt.
+
+        This is where a format whose HONEST marketing imagery differs from generic
+        product photography is special-cased. The first case is coloring_page: its
+        deliverable is intentionally blank line-art, so a generic "professional
+        product photography" / "lifestyle" prompt produces a colored, finished-
+        looking render that can NEVER match the delivered blank line-art — the
+        marketing/deliverable consistency gate then (correctly) rejects it forever.
+        Here the marketing images are steered to depict realistic CONTEXT around
+        the real, still-uncolored product instead.
+
+        Structured as a simple dispatch so adding another format later is a small,
+        localized addition — not a rewrite of the generic path.
+        """
+        if product_format == "coloring_page":
+            if role == "hero":
+                return (
+                    f"The ACTUAL blank line-art coloring page for '{product_name}', shown "
+                    "clearly and flat on a plain white background exactly as it will look "
+                    "when printed: crisp solid black outline line art on white paper, "
+                    "completely UNCOLORED. "
+                    f"Design of the line art: {visual_brief}. "
+                    "It is a COLORING PAGE — do NOT color it in, do NOT show a finished, "
+                    "painted, shaded or colored-in version; outlines only, white interior. "
+                    "No watermarks."
+                )
+            if role == "lifestyle":
+                return (
+                    f"A realistic context photo of the printed blank line-art coloring page "
+                    f"'{product_name}' lying on a table next to colored pencils and crayons, "
+                    "with the page itself still clearly UNCOLORED crisp black-outline line "
+                    "art (optionally a child's hand just beginning to color one small corner, "
+                    "while the rest of the page remains blank line art). "
+                    f"Design of the line art: {visual_brief}. "
+                    "The coloring page must stay recognisable as the blank line-art product "
+                    "the buyer actually receives — NOT a fully colored-in picture. "
+                    "No watermarks."
+                )
+        return None
+
+    def _build_hero_prompt(self, product_name: str, visual_brief: str, product_format=None) -> str:
+        override = self._format_override(product_format, "hero", product_name, visual_brief)
+        if override:
+            return override
         return (
             f"Professional product photography style. Hero shot of: {product_name}. "
             f"Visual brief: {visual_brief}. "
@@ -44,7 +89,10 @@ class ProductImageAgent(BaseAgent):
             "No text, no watermarks, no borders."
         )
 
-    def _build_lifestyle_prompt(self, product_name: str, visual_brief: str) -> str:
+    def _build_lifestyle_prompt(self, product_name: str, visual_brief: str, product_format=None) -> str:
+        override = self._format_override(product_format, "lifestyle", product_name, visual_brief)
+        if override:
+            return override
         return (
             f"Lifestyle photography style. Context/in-use shot of: {product_name}. "
             f"Visual brief: {visual_brief}. "
@@ -59,6 +107,7 @@ class ProductImageAgent(BaseAgent):
         size: str = None,
         aspect_ratio: str = "1:1",
         resolution: str = "2K",
+        product_format=None,
     ) -> dict:
         """
         Generate hero + lifestyle images and save both as 'listing' variants.
@@ -70,13 +119,16 @@ class ProductImageAgent(BaseAgent):
             size: Ignored; kept for API compatibility. OpenRouter uses aspect_ratio+resolution.
             aspect_ratio: OpenRouter aspect ratio string (default '1:1' for Etsy square).
             resolution: OpenRouter resolution tier (default '2K' — Seedream 4.5 minimum).
+            product_format: Product format key (e.g. 'coloring_page') so the hero/
+                lifestyle prompts can be made honest about the actual deliverable.
+                None uses the generic photography prompts.
 
         Returns:
             Dict with paths to saved images:
               {'hero': Path, 'lifestyle': Path}
         """
-        hero_prompt = self._build_hero_prompt(product_name, visual_brief)
-        lifestyle_prompt = self._build_lifestyle_prompt(product_name, visual_brief)
+        hero_prompt = self._build_hero_prompt(product_name, visual_brief, product_format)
+        lifestyle_prompt = self._build_lifestyle_prompt(product_name, visual_brief, product_format)
 
         hero_result = asyncio.run(
             self.image_provider.generate_image(
@@ -124,11 +176,11 @@ class ProductImageAgent(BaseAgent):
 
     # Role -> prompt-builder. Any role not listed falls back to the generic
     # marketing prompt above, so regeneration is not hardcoded to two roles.
-    def _prompt_for_role(self, role: str, product_name: str, visual_brief: str) -> str:
+    def _prompt_for_role(self, role: str, product_name: str, visual_brief: str, product_format=None) -> str:
         if role == "hero":
-            return self._build_hero_prompt(product_name, visual_brief)
+            return self._build_hero_prompt(product_name, visual_brief, product_format)
         if role == "lifestyle":
-            return self._build_lifestyle_prompt(product_name, visual_brief)
+            return self._build_lifestyle_prompt(product_name, visual_brief, product_format)
         return self._build_marketing_prompt(role, product_name, visual_brief)
 
     def regenerate_listing_image(
@@ -141,6 +193,7 @@ class ProductImageAgent(BaseAgent):
         filename: str,
         aspect_ratio: str = "1:1",
         resolution: str = "2K",
+        product_format=None,
     ) -> Path:
         """
         Regenerate ONE listing/marketing image by ROLE (hero, lifestyle, or any
@@ -153,8 +206,10 @@ class ProductImageAgent(BaseAgent):
         back into the prompt) instead of regenerating everything. `role` is no
         longer restricted to hero/lifestyle — an unknown role gets a generic
         marketing prompt so ANY image in the listing set is regenerable.
+        `product_format` steers the per-format honest framing (e.g. coloring_page
+        line-art) so a remake converges instead of fighting the consistency gate.
         """
-        base = self._prompt_for_role(role, product_name, visual_brief)
+        base = self._prompt_for_role(role, product_name, visual_brief, product_format)
         # The corrective guidance carries the ground-truth design description and
         # the vision model's rejection reason — it MUST reach the generation
         # prompt for the remake to actually steer away from the wrong design.
@@ -192,4 +247,5 @@ class ProductImageAgent(BaseAgent):
             visual_brief=task.get("visual_brief", ""),
             aspect_ratio=task.get("aspect_ratio", "1:1"),
             resolution=task.get("resolution", "2K"),
+            product_format=task.get("product_format"),
         )
