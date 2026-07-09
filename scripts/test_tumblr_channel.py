@@ -149,12 +149,12 @@ with tempfile.TemporaryDirectory() as tmp:
         return next((f for f in (b.get("formatting") or []) if f.get("type") == "link"), None) if b else None
 
     lf = _link_fmt(link_block)
-    # The linked substring, sliced by the block's UTF-16 formatting offsets,
-    # must be the human-readable anchor (not a raw URL) and carry the real URL.
+    # The linked substring, sliced by the block's CODEPOINT formatting offsets
+    # (NPF uses Unicode codepoints, confirmed live — a surrogate-pair emoji is 1,
+    # not 2), must be the human-readable anchor (not a raw URL).
     linked_text = None
     if lf and link_block:
-        u16 = link_block["text"].encode("utf-16-le")
-        linked_text = u16[lf["start"] * 2:lf["end"] * 2].decode("utf-16-le")
+        linked_text = link_block["text"][lf["start"]:lf["end"]]
 
     checks = [
         ("url", "/blog/myblog.tumblr.com/posts" in cap["url"]),

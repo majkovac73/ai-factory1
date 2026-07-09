@@ -86,14 +86,17 @@ SHOP_LINK_LABEL = "🛍️ Shop this listing"
 SHOP_LINK_ANCHOR = "Shop this listing"
 
 
-def _utf16_len(s: str) -> int:
-    """Length of s in UTF-16 code units — the unit NPF formatting ranges use.
+def _codepoint_len(s: str) -> int:
+    """Length of s in Unicode CODEPOINTS — the unit Tumblr's NPF formatting
+    ranges actually use.
 
-    Tumblr's NPF `start`/`end` inline-formatting offsets are counted in UTF-16
-    code units (like JavaScript string indices), so a leading emoji shifts the
-    anchor's real offset past its visible character count.
+    Confirmed live against Tumblr's API: an emoji-prefixed label with UTF-16
+    code-unit offsets (a surrogate pair counted as 2) is REJECTED with a 400
+    ("Bad Request"), while the same label with codepoint offsets (the surrogate
+    pair counted as 1) posts fine. Python's `len()` already counts codepoints,
+    so a leading emoji like 🛍️ (2 codepoints) offsets the anchor by 2, not 3.
     """
-    return len(s.encode("utf-16-le")) // 2
+    return len(s)
 
 
 def _build_caption_blocks(listing: dict) -> list:
@@ -117,10 +120,10 @@ def _build_caption_blocks(listing: dict) -> list:
 
     if link:
         # Turn only the human-readable anchor into a hyperlink; NPF formatting
-        # ranges are UTF-16 code-unit offsets, so compute them accordingly.
+        # ranges are Unicode-codepoint offsets, so compute them accordingly.
         idx = SHOP_LINK_LABEL.index(SHOP_LINK_ANCHOR)
-        start = _utf16_len(SHOP_LINK_LABEL[:idx])
-        end = start + _utf16_len(SHOP_LINK_ANCHOR)
+        start = _codepoint_len(SHOP_LINK_LABEL[:idx])
+        end = start + _codepoint_len(SHOP_LINK_ANCHOR)
         blocks.append({
             "type": "text",
             "text": SHOP_LINK_LABEL,
