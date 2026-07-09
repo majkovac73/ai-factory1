@@ -175,12 +175,26 @@ class PDFGenerationService:
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _build_page_prompt(self, product_name: str, visual_brief: str, page_brief: str, page_num: int, total_pages: int) -> str:
+        # Steer HARD toward a clean functional layout: this is the single biggest
+        # lever against the two real failure modes seen in production — Seedream
+        # dropping a decorative PHOTO (e.g. a pineapple) onto a planner page, and
+        # rendering GARBLED meta-text ("Print-Iready", "page 4 of 6"). Ask for
+        # only the usable layout, minimal correctly-spelled labels, no imagery,
+        # no meta-text.
         return (
-            f"High-quality printable page {page_num} of {total_pages} for: {product_name}. "
-            f"Overall visual direction: {visual_brief}. "
-            f"This specific page's content: {page_brief}. "
-            "Clean print-ready layout, portrait orientation, consistent visual "
-            "style with the rest of the set. No watermarks."
+            f"A clean, minimal, PRINT-READY planner/guide page: {page_brief}. "
+            f"Part of the product '{product_name}'. Visual style: {visual_brief}. "
+            "Design it as a FUNCTIONAL layout a person prints and writes on: clear "
+            "section headings, tables/grids, lists, ruled lines, checkboxes and empty "
+            "boxes, with generous white space, on a solid WHITE background with "
+            "high-contrast black line-work, portrait orientation, consistent with the "
+            "rest of the set. "
+            "Use ONLY short, real, correctly-spelled English headings/labels that fit "
+            "this page's purpose. "
+            "Do NOT include any photographs, decorative illustrations, clip-art, or "
+            "food/object/scenery/people imagery; do NOT print paragraphs of body text, "
+            "page numbers, 'page X of Y', 'print-ready', the shop or product name, or "
+            "any watermark. Just the clean, usable page layout."
         )
 
     def _review_page(self, img: PILImage.Image, product_name: str, brief: str, page_num: int, total: int):
@@ -191,7 +205,18 @@ class PDFGenerationService:
         try:
             buf = BytesIO()
             img.save(buf, format="PNG")
-            return self._qa_service().review_asset_bytes(
+            svc = self._qa_service()
+            # Prefer the STRICT per-page reviewer (rejects photos / garbled text on
+            # a functional page); fall back to the generic asset review for older
+            # doubles that don't implement it.
+            strict = getattr(svc, "review_pdf_page_bytes", None)
+            if callable(strict):
+                return strict(
+                    buf.getvalue(),
+                    product_name=product_name,
+                    page_desc=f"Page {page_num} of {total}: {brief}",
+                )
+            return svc.review_asset_bytes(
                 buf.getvalue(),
                 product_name=product_name,
                 product_format="pdf_planner_or_guide",

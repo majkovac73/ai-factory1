@@ -179,6 +179,64 @@ class ContentQualityService:
             )
         return self.review_asset_bytes(p.read_bytes(), product_name, product_format, description)
 
+    # ── Strict per-page review for PDF planners/guides ────────────────────────
+
+    def review_pdf_page_bytes(
+        self,
+        image_bytes: bytes,
+        product_name: str,
+        page_desc: str = "",
+    ) -> ContentQualityResult:
+        """Stricter review for one page of a printable planner/guide PDF: it must
+        be a clean, functional, print-ready LAYOUT with real, correctly-spelled
+        text — NOT a photograph/decorative render, and no garbled text or stray
+        meta-text. Uses settings.PDF_QA_MODEL (defaults to the single-image QA
+        model)."""
+        prompt = self._build_pdf_page_review_prompt(product_name, page_desc)
+        data_url = _image_to_data_url(image_bytes)
+        model = getattr(settings, "PDF_QA_MODEL", None) or self.model
+        try:
+            raw = _run_async(
+                self.provider.generate_with_images(
+                    model=model,
+                    prompt=prompt,
+                    image_data_urls=[data_url],
+                    temperature=0.0,
+                )
+            )
+        except Exception as e:
+            logger.error(f"ContentQualityService: pdf-page vision call failed: {e}")
+            return ContentQualityResult(
+                passed=False, text_legible=False, text_coherent=False,
+                matches_intended_content=False,
+                specific_issues=[f"pdf-page content-quality vision call failed: {e}"],
+                error=str(e),
+            )
+        return self._parse_review(raw)
+
+    def _build_pdf_page_review_prompt(self, product_name: str, page_desc: str) -> str:
+        return f"""
+You are a STRICT quality-control reviewer for a printable PLANNER/GUIDE PDF a
+paying customer downloads and PRINTS. You are shown ONE page of it.
+
+  Product: {product_name}
+  What this page is supposed to be: {page_desc}
+
+A page a customer will happily print and use is a CLEAN, FUNCTIONAL LAYOUT:
+headings, tables/grids, lists, ruled lines, checkboxes, labelled boxes, generous
+white space, high-contrast text on a white background.
+
+Judge harshly — the customer paid real money for a usable, professional page.
+
+Return ONLY valid JSON, no markdown:
+{{
+  "text_legible": true/false,          // every word is sharp and readable
+  "text_coherent": true/false,         // ALL text is real, correctly-spelled, sensible English — set FALSE if ANY word is garbled, misspelled, duplicated, cut off, or nonsensical (e.g. "Print-Iready" instead of "Print-ready"), OR if stray meta-text like "page 4 of 6" / "print-ready" / a watermark is printed onto the page
+  "matches_intended_content": true/false,  // set FALSE if the page is a PHOTOGRAPH or has decorative/clip-art imagery (food, objects, scenery, people) instead of a clean functional layout, if the content is unrelated to this page's stated purpose, or if the layout is broken, cluttered, or not something a person could actually fill in / use
+  "specific_issues": ["concrete, quotable problems (e.g. 'photo of a pineapple on a meal-planner page', 'garbled word: Print-Iready')"]
+}}
+"""
+
     # ── Marketing/deliverable consistency ─────────────────────────────────────
 
     def check_marketing_consistency(

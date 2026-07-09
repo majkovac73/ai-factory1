@@ -101,6 +101,14 @@ class Settings(BaseSettings):
     CONTENT_QA_MODEL: str = "openai/gpt-4o-mini"
     CONTENT_QA_MAX_ATTEMPTS: int = 2  # regenerate-and-recheck attempts before blocking
 
+    # Per-page QA for multi-page PDF planners/guides (step 100l). PDF pages are
+    # text-and-layout heavy, so their content review is STRICTER than a generic
+    # asset review (rejects photographs/decorative imagery on a functional page,
+    # garbled/misspelled text, and stray meta-text). Uses its own model knob so a
+    # stronger reader can be swapped in without changing the single-image gate;
+    # defaults to the same cheap vision model.
+    PDF_QA_MODEL: str = "openai/gpt-4o-mini"
+
     # Marketing/deliverable consistency remakes (step 100b): when the
     # consistency vision check finds a marketing image depicting a DIFFERENT
     # design than the delivery asset, regenerate ONLY the mismatched image(s)
