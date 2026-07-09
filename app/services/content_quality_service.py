@@ -266,19 +266,41 @@ You are checking a shop listing for buyer-misrepresentation. You are shown
   listing, numbered 1 to {n_marketing} in the order shown (marketing image 1 is
   the 2nd image overall, marketing image 2 is the 3rd, and so on).
 
-For EACH marketing image, decide whether it plausibly depicts the SAME
-product/design as the delivery file. Presentation may differ (a flat design vs
-the same design shown framed, in a room, cropped, or on a different background)
-— that is fine. But if a marketing image shows a clearly DIFFERENT, unrelated
-design/content (different artwork, a different pattern or border, different
-text, a generic stock mockup unrelated to the real file), THAT specific image
-is a mismatch and must be reported individually.
+IMPORTANT: these images come from SEPARATE, independent image generations. They
+are NOT expected to be pixel-identical to the delivery file. Judge ONLY whether
+each marketing image depicts the SAME core subject, design, and content as the
+delivered product — not whether it looks stylistically identical.
+
+REPORT A MISMATCH only if the marketing image shows a genuinely DIFFERENT
+design/theme/subject than the delivered product — something a buyer would
+reasonably feel MISLED by. For example:
+  - different text/wording than the delivered design,
+  - a different illustrated scene, character, object, or motif,
+  - a different pattern, or a clearly different core design,
+  - a generic stock mockup unrelated to the actual delivered file,
+  - the wrong product entirely.
+
+DO NOT report a mismatch for INCIDENTAL variation that any two independent
+generations of the same underlying design naturally produce, including:
+  - a different background color, texture, or backdrop,
+  - a different font style/rendering of the SAME words,
+  - different lighting, color grading, or saturation,
+  - decorative embellishment style, framing, cropping, or overall artistic
+    treatment,
+  - showing the design flat vs. in a room / on a surface / held in a hand.
+These are acceptable and MUST NOT be flagged.
+
+When you DO flag a mismatch, the "issue" field MUST describe what is different
+about the CORE SUBJECT / DESIGN / CONTENT specifically (e.g. "shows a different
+illustrated animal", "the title text reads differently"). Do NOT flag something
+whose only difference is the background, font, color, lighting, or styling — if
+that is all that differs, it is a MATCH, not a mismatch.
 
 Return ONLY valid JSON, no markdown, with EXACTLY this shape:
 {{
-  "consistent": true/false,   // true only if EVERY marketing image matches the delivered design
+  "consistent": true/false,   // true unless a marketing image shows a genuinely different core subject/design
   "mismatches": [             // one entry per mismatched marketing image; [] if all match
-    {{"image_index": 1, "issue": "concrete description of how THIS marketing image differs from the delivered design"}}
+    {{"image_index": 1, "issue": "how THIS image's CORE subject/design/content differs from the delivered design"}}
   ]
 }}
 """

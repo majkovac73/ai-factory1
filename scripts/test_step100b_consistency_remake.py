@@ -40,6 +40,8 @@ regression-proofed with a genuine multi-image / out-of-range test):
        while the mappable images in the same response still get remade.
   [6]  The remake cap is PER-TASK across however many images need fixing:
        2 mismatched images × 2 rounds = 4 regenerations, then hard block.
+  [7]  (step 100e recalibration) incidental-only style variance now returns
+       CONSISTENT on the first check -> ZERO remakes, no wasted regeneration cost.
 
 Usage:
   python scripts/test_step100b_consistency_remake.py
@@ -435,6 +437,22 @@ if four_regens and capped:
     ok("[6] cap is per-task: 2 images × 2 rounds = 4 regens, then hard block; no listing")
 else:
     fail("[6] per-task cap", f"four_regens={four_regens}, capped={capped}, mc={mc6}, calls={len(calls6)}")
+
+
+# ── [7] recalibration cost win: incidental-only variance passes first check ──
+print("[7] incidental style variance -> consistency passes on FIRST check, ZERO remakes (cost saved)...")
+
+with tempfile.TemporaryDirectory() as tmp:
+    # After step-100e recalibration, a same-subject/different-background+font case
+    # returns CONSISTENT on the first check -> no remake attempts are spent.
+    report7, etsy7, prov7 = _run(tmp, [CLEAN_REVIEW, CONSISTENT])
+
+calls7 = RecordingImageAgent.regen_calls
+mc7 = report7["stages"].get("marketing_consistency", {})
+if not calls7 and mc7.get("ok") is True and mc7.get("remakes") == 0 and bool(etsy7.created) and not report7.get("blocked"):
+    ok("[7] first-check pass -> 0 remakes, 0 wasted regeneration cost, task proceeds")
+else:
+    fail("[7] incidental first-pass", f"calls={len(calls7)}, mc={mc7}, created={etsy7.created}, blocked={report7.get('blocked')}")
 
 
 # ── Summary ──────────────────────────────────────────────────────────────────

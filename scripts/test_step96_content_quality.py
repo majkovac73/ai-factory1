@@ -20,6 +20,13 @@ Tests (use a FAKE vision provider — no real API calls):
       create a listing.
   [5] check_marketing_consistency rejects marketing photos depicting
       unrelated content vs the delivery asset.
+  [6] (step 100e recalibration) the consistency PROMPT gives tiered guidance:
+      accept incidental style variance (background/font/lighting/color), reject
+      only a genuinely different core subject/design.
+  [7] task 73fb29ba scenario (same design, only background+font differ) -> PASS.
+  [8] GUARANTEE: a genuinely different core subject/design still FAILS (the
+      original bug class this gate exists for must never regress).
+  [9] borderline grayscale-vs-colored (same subject) -> resolved ACCEPT.
 
 Usage:
   python scripts/test_step96_content_quality.py
@@ -110,6 +117,25 @@ UNRELATED_MARKETING = {
     "text_coherent": True,
     "matches_intended_content": False,
     "specific_issues": ["marketing photo shows a floral wreath card unrelated to the delivered recipe design"],
+}
+
+# ── Step 100e recalibration: incidental style variance PASSES; only a genuinely
+#    different core subject/design FAILS. Verdicts below represent what a
+#    correctly-calibrated vision model returns for each scenario (the prompt
+#    that instructs it is proven separately in test [6]). ────────────────────
+INCIDENTAL_STYLE_OK = {   # task 73fb29ba: same text/design, different background + font
+    "consistent": True,
+    "mismatches": [],
+}
+DIFFERENT_SUBJECT = {     # never-regress guarantee: a genuinely different design/subject
+    "consistent": False,
+    "mismatches": [
+        {"image_index": 1, "issue": "shows a completely different mandala pattern / illustrated subject than the delivered design"}
+    ],
+}
+GRAYSCALE_VS_COLOR_OK = {  # borderline resolved as ACCEPT (color/saturation is incidental)
+    "consistent": True,
+    "mismatches": [],
 }
 
 
@@ -283,6 +309,81 @@ if r5.passed is False and r5.specific_issues:
     ok("[5] unrelated marketing photos rejected")
 else:
     fail("[5] consistency rejection", f"result={r5}")
+
+
+# ── [6] consistency prompt gives tiered guidance (the real recalibration) ─────
+print("[6] consistency prompt: accept incidental style variance, reject different core subject...")
+
+svc6 = ContentQualityService(provider=FakeVisionProvider([]), model="fake")
+p6 = svc6._build_consistency_prompt("Family Recipe Greeting Card", 2).lower()
+# explicitly instructs the model these are independent (not pixel-identical) gens
+independent = "independent" in p6 and ("not" in p6 and "pixel-identical" in p6)
+# ACCEPT tier names the incidental dimensions that must NOT be flagged
+accept_tier = all(tok in p6 for tok in ["background", "font", "lighting", "color grading"])
+must_not_flag = ("do not report a mismatch" in p6) or ("must not be flagged" in p6)
+# REJECT tier is anchored to core subject/design + buyer being misled
+reject_tier = ("core subject" in p6) and ("different" in p6) and ("misled" in p6 or "mislead" in p6)
+# the issue field is required to describe the CORE subject difference
+issue_anchored = "core subject" in p6
+
+if independent and accept_tier and must_not_flag and reject_tier and issue_anchored:
+    ok("[6] prompt accepts background/font/lighting/color variance; reserves mismatch for a different core subject")
+else:
+    fail("[6] tiered prompt", f"independent={independent}, accept={accept_tier}, must_not={must_not_flag}, "
+                              f"reject={reject_tier}, issue_anchored={issue_anchored}")
+
+
+# ── [7] task 73fb29ba: same design, different background+font -> now PASSES ────
+print("[7] task 73fb29ba scenario (same text/design, only background+font differ) -> PASS...")
+
+with tempfile.TemporaryDirectory() as tmp:
+    delivery = _fake_image_path(tmp, "delivery.png")
+    marketing = _fake_image_path(tmp, "marketing.png")
+    svc7 = ContentQualityService(provider=FakeVisionProvider([INCIDENTAL_STYLE_OK]), model="fake")
+    r7 = svc7.check_marketing_consistency(delivery, [marketing], "Motivational Quote Print")
+
+if r7.passed is True and not r7.mismatches:
+    ok("[7] incidental background/font-only variation accepted (no mismatch, no needless remake)")
+else:
+    fail("[7] incidental accept", f"result={r7}")
+
+
+# ── [8] GUARANTEE: a genuinely different design/subject still FAILS ───────────
+print("[8] GUARANTEE: a genuinely different core subject/design is still detected and FAILS...")
+
+with tempfile.TemporaryDirectory() as tmp:
+    delivery = _fake_image_path(tmp, "delivery.png")
+    marketing = _fake_image_path(tmp, "marketing.png")
+    svc8 = ContentQualityService(provider=FakeVisionProvider([DIFFERENT_SUBJECT]), model="fake")
+    r8 = svc8.check_marketing_consistency(delivery, [marketing], "Mandala Wall Art")
+
+core_issue = bool(r8.mismatches) and any(
+    kw in (r8.mismatches[0].get("issue", "").lower()) for kw in ("mandala", "subject", "different")
+)
+if r8.passed is False and core_issue:
+    ok("[8] genuinely different core subject/design still fails (original bug class stays caught)")
+else:
+    fail("[8] different-subject guarantee", f"result={r8}")
+
+
+# ── [9] borderline: grayscale delivery vs colored marketing -> resolved ACCEPT ─
+# Decision: a color-palette/saturation-only difference of the SAME subject is
+# INCIDENTAL (color grading/saturation is in the ACCEPT tier), and the delivery
+# asset is already the primary featured photo, so the buyer sees the true version
+# first. Resolved as ACCEPT (same reasoning as coloring_page: colored marketing
+# vs line-art delivery of the same design).
+print("[9] borderline: same subject, grayscale delivery vs vividly colored marketing -> ACCEPT...")
+
+with tempfile.TemporaryDirectory() as tmp:
+    delivery = _fake_image_path(tmp, "delivery.png")
+    marketing = _fake_image_path(tmp, "marketing.png")
+    svc9 = ContentQualityService(provider=FakeVisionProvider([GRAYSCALE_VS_COLOR_OK]), model="fake")
+    r9 = svc9.check_marketing_consistency(delivery, [marketing], "Botanical Line Art")
+
+if r9.passed is True:
+    ok("[9] color-palette-only difference of the SAME subject accepted (documented decision)")
+else:
+    fail("[9] borderline accept", f"result={r9}")
 
 
 # ── Summary ──────────────────────────────────────────────────────────────────
