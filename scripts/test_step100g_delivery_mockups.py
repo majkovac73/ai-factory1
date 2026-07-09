@@ -40,6 +40,9 @@ os.environ["DATABASE_URL"] = f"sqlite:///{_tmp.name}"
 os.environ.setdefault("OPENROUTER_API_KEY", "test")
 os.environ.setdefault("ANTHROPIC_API_KEY", "test")
 os.environ.setdefault("IMAGE_STORAGE_ROOT", os.path.join(tempfile.mkdtemp(), "images"))
+# Deterministic scenes (no network): use the PIL studio/desk fallback background
+# so the composite is reproducible in tests.
+os.environ["MOCKUP_USE_GENERATED_SCENES"] = "false"
 
 import logging
 logging.basicConfig(level=logging.ERROR)
@@ -51,9 +54,16 @@ from app.db.database import Base, engine
 import app.models.task, app.models.log, app.models.image_asset
 Base.metadata.create_all(bind=engine)
 
+from unittest.mock import patch, MagicMock
+from types import SimpleNamespace
+
 from PIL import Image as PILImage
 
 from app.services.pipeline_orchestrator import PipelineOrchestrator
+from app.services.task_service import TaskService
+from app.schemas.task import TaskCreate
+from app.schemas.enums import TaskStatus
+from app.services.content_quality_service import ContentQualityService
 
 _passed = _failed = 0
 
@@ -102,29 +112,48 @@ with tempfile.TemporaryDirectory() as tmp:
     # [1] two valid 1024x1024 PNG listing images named hero/lifestyle
     names = sorted(Path(p).name for p in paths)
     dims_ok = True
-    center_ok = corner_ok = True
+    design_ok = bg_ok = wm_ok = True
     for p in paths:
         with PILImage.open(p) as im:
             im = im.convert("RGB")
             if im.size != (1024, 1024):
                 dims_ok = False
-            # [2] centre pixel = the delivery colour; a corner = the mockup bg
-            cx = im.getpixel((512, 512))
-            corner = im.getpixel((5, 5))
-            if not (abs(cx[0] - DELIVERY_COLOR[0]) < 25 and abs(cx[1] - DELIVERY_COLOR[1]) < 25 and abs(cx[2] - DELIVERY_COLOR[2]) < 25):
-                center_ok = False
-            if corner == DELIVERY_COLOR:   # corner must be background, not the design
-                corner_ok = False
+            # [2] the composite CONTAINS the real design: sample the central area
+            #     (where the framed/flat print sits) — the delivery red must be the
+            #     dominant colour there. [5] it must also be WATERMARKED: light
+            #     text pixels blended over the red design.
+            red = light = total = 0
+            for yy in range(300, 724, 8):
+                for xx in range(300, 724, 8):
+                    px = im.getpixel((xx, yy)); total += 1
+                    if px[0] > 150 and px[1] < 90 and px[2] < 90:
+                        red += 1
+                    # watermark text blended over the red design -> red stays high
+                    # but green/blue lift toward white
+                    if px[0] > 150 and px[1] > 105 and px[2] > 105:
+                        light += 1
+            if red < total * 0.25:
+                design_ok = False
+            if light < 20:  # a meaningful amount of watermark coverage over the design
+                wm_ok = False
+            # a corner is the scene background, not the raw design
+            if im.getpixel((5, 5)) == DELIVERY_COLOR:
+                bg_ok = False
 
     if len(paths) == 2 and names == ["hero.png", "lifestyle.png"] and dims_ok:
         ok("[1] two valid 1024x1024 listing mockups (hero.png, lifestyle.png)")
     else:
         fail("[1] mockup files", f"paths={paths}, dims_ok={dims_ok}")
 
-    if center_ok and corner_ok:
-        ok("[2] mockups contain the real delivered design (centre matches delivery, corners are background)")
+    if design_ok and bg_ok:
+        ok("[2] mockups depict the real delivered design composited into a scene (design dominant centre, scene at edges)")
     else:
-        fail("[2] mockup content", f"center_ok={center_ok}, corner_ok={corner_ok}")
+        fail("[2] mockup content", f"design_ok={design_ok}, bg_ok={bg_ok}")
+
+    if wm_ok:
+        ok("[5] mockups are WATERMARKED (light watermark text over the design — unusable as the clean product)")
+    else:
+        fail("[5] watermark", "no watermark pixels detected over the design")
 
     # [3] registered as listing assets by DeliveryMockup, and stage reported
     listing_regs = [c for c in catalog_calls if c.get("variant") == "listing" and c.get("agent") == "DeliveryMockup"]
@@ -149,6 +178,93 @@ with tempfile.TemporaryDirectory() as tmp:
         ok("[4] unreadable delivery handled gracefully (no crash, empty result, failure recorded)")
     else:
         fail("[4] robustness", f"paths={paths2}, stage={st2}")
+
+
+# ── [6] SECURITY: the raw clean deliverable is NOT a public listing photo ─────
+print("[6] the raw clean deliverable is NEVER uploaded as a public listing photo (only watermarked mockups)...")
+
+import app.models.task, app.models.log, app.models.image_asset, app.models.marketing_post  # noqa
+from app.db.database import Base as _Base, engine as _engine
+_Base.metadata.create_all(bind=_engine)
+
+
+def _make_done_single_print(tmp):
+    ts = TaskService()
+    t = ts.create_task(TaskCreate(prompt="Botanical Line Art Print", type="single_print"))
+    ts.update_status(t.id, TaskStatus.PLANNED.value)
+    ts.update_status(t.id, TaskStatus.RUNNING.value)
+    ts.update_status(t.id, TaskStatus.QA.value)
+    ts.save_qa_result(t.id, output_data={"title": "Botanical Line Art Print",
+                                         "description": "a botanical line art print", "keywords": ["art"], "sections": []},
+                      error_message=None)
+    ts.update_status(t.id, TaskStatus.DONE.value)
+    return ts.get_task(t.id)
+
+
+class _OkPOD:
+    def __init__(self, design): self._d = design
+    def build_product_record(self, task_id, product_name, visual_brief, product_type):
+        return {"task_id": task_id, "design_path": str(self._d), "ready_for_pod": True}
+
+
+class _CleanCQ:
+    def __init__(self, *a, **k): pass
+    def review_asset_file(self, *a, **k): return SimpleNamespace(passed=True, specific_issues=[])
+    def review_asset_bytes(self, *a, **k): return SimpleNamespace(passed=True, specific_issues=[])
+    def check_marketing_consistency(self, *a, **k): return SimpleNamespace(passed=True, specific_issues=[], mismatches=[])
+
+
+class _FakeEtsy:
+    def __init__(self): self._sent = {}
+    async def create_draft_listing(self, listing): self._sent["L1"] = listing; return {"listing_id": "L1"}
+    async def get_listing(self, lid): s = self._sent.get(lid, {}); return {"listing_id": lid, "taxonomy_id": s.get("taxonomy_id"), "when_made": s.get("when_made")}
+    async def delete_listing(self, lid): return True
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    design = _delivery_png(tmp, "design.png", size=(1024, 1024))  # real deliverable (square, as delivery validation requires)
+    task = _make_done_single_print(tmp)
+
+    captured = {}
+    eis = MagicMock()
+    async def _attach(listing_id, listing_image_paths, digital_file_path=None):
+        captured["listing_photos"] = list(listing_image_paths)
+        captured["digital_file"] = digital_file_path
+        return {"listing_id": listing_id,
+                "uploaded_images": [{"path": p, "result": {"ok": True}} for p in listing_image_paths],
+                "digital_upload": {"ok": True} if digital_file_path else None,
+                "publish_result": {"published": True, "state": "active"}}
+    async def _gi(listing_id): return [{"listing_image_id": i} for i in range(len(captured.get("listing_photos", [])))]
+    async def _gf(listing_id): return [{"listing_file_id": 1, "filetype": "image/png"}]
+    eis.return_value.attach_images_and_publish.side_effect = _attach
+    eis.return_value.get_listing_images.side_effect = _gi
+    eis.return_value.get_listing_files.side_effect = _gf
+
+    lga = MagicMock(); lga.return_value.generate_listing.return_value = {"title": "t"}
+    pis = MagicMock(); pis.return_value.enrich_listing_with_image.return_value = {"image_base64": "x", "pin_image_path": str(design)}
+    ms = MagicMock(); ms.return_value.get_posts_for_task.return_value = []; ms.return_value.post_to_channel.return_value = {"success": True}
+
+    orch = PipelineOrchestrator()
+    with patch("app.services.pipeline_orchestrator.PODPipelineService", lambda: _OkPOD(design)), \
+         patch("app.services.pipeline_orchestrator.ListingGeneratorAgent", lga), \
+         patch("app.services.pipeline_orchestrator.EtsyClient", return_value=_FakeEtsy()), \
+         patch("app.services.pipeline_orchestrator.EtsyImageService", eis), \
+         patch("app.services.pipeline_orchestrator.PinterestImageService", pis), \
+         patch("app.services.pipeline_orchestrator.MarketingService", ms), \
+         patch("app.services.content_quality_service.ContentQualityService", _CleanCQ):
+        report6 = orch.run_post_completion(task.id)
+
+    photos = [Path(p).name for p in captured.get("listing_photos", [])]
+    design_str = str(design)
+    raw_not_public = design_str not in [str(p) for p in captured.get("listing_photos", [])]
+    only_mockups = set(photos) == {"hero.png", "lifestyle.png"}
+    clean_is_digital_file = str(captured.get("digital_file")) == design_str
+
+    if raw_not_public and only_mockups and clean_is_digital_file:
+        ok("[6] listing photos are ONLY the watermarked mockups; the raw clean file is the buyer-gated digital file, never a public photo")
+    else:
+        fail("[6] product exposure", f"photos={photos}, raw_not_public={raw_not_public}, "
+                                     f"clean_is_digital_file={clean_is_digital_file}")
 
 
 # ── Summary ──────────────────────────────────────────────────────────────────

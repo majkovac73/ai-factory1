@@ -155,18 +155,16 @@ class PipelineOrchestrator:
                 return report
 
         # 2.6 — For DIGITAL single-image products, build the listing photos FROM
-        # the now-content-verified delivery design: the delivery file itself as
-        # the featured photo, plus tasteful mockups (the real design on clean
-        # backgrounds). Every listing photo therefore honestly depicts the exact
-        # delivered design — the consistency gate then passes truthfully instead
-        # of fighting an independent generation that can never match.
+        # the now-content-verified delivery design as WATERMARKED previews. Every
+        # listing photo honestly depicts the exact delivered design, but is
+        # unusable as the product (watermarked), so buyers must purchase to get
+        # the clean file. CRUCIALLY the raw deliverable is NOT added as a public
+        # listing photo — it is uploaded only as the buyer-gated digital FILE in
+        # _stage_attach_publish (digital_file_path=design_path). Uploading the
+        # clean file as a listing photo would let anyone download the product for
+        # free from the preview.
         if design_path and derive_listing_from_delivery:
-            # The delivery file is prepended as the primary photo; do NOT
-            # re-register it under a "listing" variant (register is
-            # idempotent-on-path and would clobber the "delivery" record the hard
-            # gate relies on via get_delivery_asset).
-            mockups = self._build_listing_mockups(task_id, design_path, report)
-            image_paths = [design_path] + mockups
+            image_paths = self._build_listing_mockups(task_id, design_path, report)
 
         # 2.7 — MARKETING/DELIVERABLE CONSISTENCY GATE (step 96): backstop that
         # every INDEPENDENTLY-GENERATED listing photo plausibly depicts the same
@@ -608,45 +606,36 @@ class PipelineOrchestrator:
         return "; ".join(briefs[:8])
 
     def _build_listing_mockups(self, task_id: str, delivery_path, report: dict) -> list:
-        """Build listing photos FROM the real delivery design (digital single-image
-        formats), so every marketing photo honestly depicts the delivered product.
-
-        Two tasteful mockups: the delivered design centered on clean neutral/warm
-        backgrounds (a standard, professional way to present a digital print).
-        Because these ARE the delivered design, the marketing/deliverable
-        consistency gate passes truthfully — unlike an independent generation,
-        which produces a genuinely different illustration. Also cheaper: no
-        Seedream calls. Returns validated + catalog-registered Paths (empty on
-        failure — the prepended delivery still stands as the listing photo).
+        """Build attractive listing/ad PREVIEW photos from the real delivery design
+        (digital single-image formats): the actual delivered design composited into
+        realistic scenes (a framed print on a wall, a print in a desk flat-lay) via
+        MockupService, then WATERMARKED. So each photo is a professional-looking ad
+        that honestly depicts the delivered product but can't be used as it (the
+        clean, unwatermarked file is delivered only after purchase, never as a
+        public listing photo). These same assets are reused by the Tumblr/Pinterest
+        marketing refresh. Returns validated + catalog-registered Paths (empty on
+        failure).
         """
-        from io import BytesIO
         from config import settings
         from app.services.image_file_service import ImageFileService
+        from app.services.mockup_service import MockupService
 
-        try:
-            from PIL import Image
-            src = Image.open(delivery_path).convert("RGB")
-        except Exception as e:
-            logger.warning(f"PipelineOrchestrator: could not open delivery for mockups {task_id}: {e}")
-            report["stages"]["listing_images"] = {"ok": False, "error": f"mockup source open failed: {e}", "source": "delivery_mockup"}
+        if not Path(delivery_path).exists():
+            logger.warning(f"PipelineOrchestrator: delivery missing for mockups {task_id}: {delivery_path}")
+            report["stages"]["listing_images"] = {"ok": False, "error": "delivery missing", "source": "delivery_mockup"}
             return []
 
+        wm_text = (getattr(settings, "LISTING_WATERMARK_TEXT", "") or "PREVIEW").strip()
+        mockups = MockupService()
         fs = ImageFileService()
         validator = ImageValidationService()
         out = []
-        # (filename, background color) — a clean studio grey and a warm paper tone.
-        # The design is placed near-full-bleed (a thin matte border) so each photo
-        # clearly reads as the delivered design, just tastefully presented.
-        variants = [("hero.png", (248, 248, 250)), ("lifestyle.png", (241, 234, 225))]
-        for fname, bg in variants:
+        # (filename, scene role) — a framed print on a wall + a desk flat-lay.
+        variants = [("hero.png", "framed"), ("lifestyle.png", "flatlay")]
+        for fname, role in variants:
             try:
-                canvas = Image.new("RGB", (1024, 1024), bg)
-                fitted = src.copy()
-                fitted.thumbnail((960, 960), Image.LANCZOS)  # ~94% — thin matte border
-                canvas.paste(fitted, ((1024 - fitted.width) // 2, (1024 - fitted.height) // 2))
-                buf = BytesIO()
-                canvas.save(buf, format="PNG")
-                p = Path(fs.save_bytes(buf.getvalue(), task_id, "listing", fname))
+                png = mockups.build_mockup_bytes(delivery_path, role=role, size=1024, watermark_text=wm_text)
+                p = Path(fs.save_bytes(png, task_id, "listing", fname))
                 validator.validate(p, use_case="listing")
                 self.catalog.register(
                     task_id=task_id,
@@ -655,11 +644,11 @@ class PipelineOrchestrator:
                     use_case="listing",
                     agent="DeliveryMockup",
                     provider="pil",
-                    model="composite",
+                    model=f"scene_composite:{role}",
                 )
                 out.append(p)
             except Exception as e:
-                logger.warning(f"PipelineOrchestrator: listing mockup {fname} failed for {task_id}: {e}")
+                logger.warning(f"PipelineOrchestrator: listing mockup {fname} ({role}) failed for {task_id}: {e}")
 
         report["stages"]["listing_images"] = {"ok": bool(out), "count": len(out), "source": "delivery_mockup"}
         return out
