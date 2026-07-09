@@ -119,15 +119,16 @@ class PipelineOrchestrator:
         content_context = self._marketing_content_context(is_pdf, output_data)
 
         # 1 — listing images.
-        # For DIGITAL single-image products the listing photos are DERIVED from
-        # the real delivery design further below (step 2.6), NOT independently
-        # generated: an independent text-to-image hero/lifestyle depicts a
-        # genuinely DIFFERENT illustration (a different dinosaur, mandala, etc.)
-        # than the delivered file — which the consistency gate correctly rejects
-        # and no prompt/remake can fix (confirmed live on task e881c422). POD and
-        # PDF formats keep the independent generation path (their listing photos
-        # legitimately differ from the flat delivery asset).
-        derive_listing_from_delivery = digital_required and not is_pdf
+        # For all DIGITAL products (single-image AND multi-page PDF) the listing
+        # photos are DERIVED from the real delivery further below (step 2.6), NOT
+        # independently generated: an independent text-to-image hero/lifestyle
+        # depicts genuinely DIFFERENT content (a different dinosaur; different
+        # planner pages) than the delivered file — which the consistency gate
+        # correctly rejects and no prompt/remake can fix (confirmed live on tasks
+        # e881c422 and the pdf blocks). POD keeps the independent-generation path
+        # (its listing photos are real product mockups from Printify, not the flat
+        # design).
+        derive_listing_from_delivery = digital_required
         if derive_listing_from_delivery:
             image_paths = []
         else:
@@ -630,11 +631,29 @@ class PipelineOrchestrator:
         fs = ImageFileService()
         validator = ImageValidationService()
         out = []
-        # (filename, scene role) — a framed print on a wall + a desk flat-lay.
-        variants = [("hero.png", "framed"), ("lifestyle.png", "flatlay")]
-        for fname, role in variants:
+
+        # (filename, builder) — for a PDF deliverable the mockups are built from
+        # the REAL extracted pages (a page on a desk + a fan of several pages);
+        # for a single-image deliverable, a framed print + a desk flat-lay.
+        if Path(delivery_path).suffix.lower() == ".pdf":
+            page_pngs = self._extract_pdf_pages(delivery_path, max_pages=4)
+            if not page_pngs:
+                logger.warning(f"PipelineOrchestrator: no extractable PDF pages for mockups {task_id}")
+                report["stages"]["listing_images"] = {"ok": False, "error": "no extractable pdf pages", "source": "delivery_mockup"}
+                return []
+            builders = [
+                ("hero.png", "pdf_page", lambda: mockups.build_mockup_bytes(str(page_pngs[0]), role="flatlay", size=1024)),
+                ("lifestyle.png", "pdf_fan", lambda: mockups.build_flatlay_bytes([str(p) for p in page_pngs], size=1024)),
+            ]
+        else:
+            builders = [
+                ("hero.png", "framed", lambda: mockups.build_mockup_bytes(str(delivery_path), role="framed", size=1024)),
+                ("lifestyle.png", "flatlay", lambda: mockups.build_mockup_bytes(str(delivery_path), role="flatlay", size=1024)),
+            ]
+
+        for fname, role, build in builders:
             try:
-                png = mockups.build_mockup_bytes(delivery_path, role=role, size=1024)
+                png = build()
                 p = Path(fs.save_bytes(png, task_id, "listing", fname))
                 validator.validate(p, use_case="listing")
                 self.catalog.register(
@@ -652,6 +671,31 @@ class PipelineOrchestrator:
 
         report["stages"]["listing_images"] = {"ok": bool(out), "count": len(out), "source": "delivery_mockup"}
         return out
+
+    def _extract_pdf_pages(self, pdf_path, max_pages: int = 4) -> list:
+        """Extract up to `max_pages` real page images from a Pillow-assembled PDF
+        (one full-page image per page — same structure content_quality's
+        _delivery_image_bytes relies on) to temporary PNGs, for building listing
+        mockups from the ACTUAL delivered pages. Returns a list of Paths."""
+        import tempfile
+        from io import BytesIO  # noqa: F401 (kept for parity/readability)
+        from PIL import Image as _PILImage
+        from pypdf import PdfReader
+
+        pages = []
+        try:
+            reader = PdfReader(str(pdf_path))
+            for page in reader.pages[:max_pages]:
+                imgs = page.images
+                if not imgs:
+                    continue
+                tf = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+                tf.close()
+                imgs[0].image.convert("RGB").save(tf.name, format="PNG")
+                pages.append(Path(tf.name))
+        except Exception as e:
+            logger.warning(f"PipelineOrchestrator: failed to extract PDF pages from {pdf_path}: {e}")
+        return pages
 
     def _stage_listing_images(self, task_id: str, product_name: str, visual_brief: str, is_autonomy: bool, report: dict, record_spend: bool = True, task_type: str = None, content_context: str = "") -> list:
         from config import settings

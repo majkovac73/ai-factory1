@@ -111,6 +111,37 @@ class MockupService:
         out.save(buf, format="PNG")
         return buf.getvalue()
 
+    def build_flatlay_bytes(self, page_paths, size: int = 1024) -> bytes:
+        """Return PNG bytes of several REAL pages (e.g. a multi-page PDF planner)
+        fanned out on a desk scene, each foreshortened + rotated so the preview
+        shows the actual pages the buyer gets but isn't a usable flat copy. A
+        single page falls back to the normal flat-lay."""
+        pages = [p for p in (page_paths or []) if p][:4]
+        if not pages:
+            raise ValueError("no pages to compose a flat-lay")
+        if len(pages) == 1:
+            return self.build_mockup_bytes(pages[0], role="flatlay", size=size)
+
+        base = self._scene("flatlay", size).convert("RGBA")
+        angles = [-9, 6, -3, 8]
+        offx = [-0.13, 0.12, -0.05, 0.15]
+        offy = [-0.11, 0.10, 0.03, 0.13]
+        target_w = int(size * 0.50)
+        for i, pp in enumerate(pages):
+            design = Image.open(pp).convert("RGB")
+            card = self._flat_print(design, rotate=0)            # paper + shadow, no baked tilt
+            card = self._perspective(card, squeeze=0.12, axis="y")
+            scale = target_w / card.width
+            card = card.resize((max(1, int(card.width * scale)), max(1, int(card.height * scale))), Image.LANCZOS)
+            card = card.rotate(angles[i % 4], resample=Image.BICUBIC, expand=True)
+            x = (size - card.width) // 2 + int(offx[i % 4] * size)
+            y = (size - card.height) // 2 + int(offy[i % 4] * size)
+            base.alpha_composite(card, (x, y))
+        out = base.convert("RGB")
+        buf = BytesIO()
+        out.save(buf, format="PNG")
+        return buf.getvalue()
+
     # ── Perspective tilt (pure-Python, no numpy — not available in prod) ───────
 
     def _perspective(self, img: Image.Image, squeeze: float = 0.15, axis: str = "x") -> Image.Image:
@@ -222,16 +253,17 @@ class MockupService:
         art.paste(matte_img, (frame, frame))
         return self._with_shadow(art, offset=(0, 18), blur=20, alpha=120)
 
-    def _flat_print(self, design: Image.Image) -> Image.Image:
+    def _flat_print(self, design: Image.Image, rotate: int = -3) -> Image.Image:
         """The real design as a printed sheet lying on a surface: thin white paper
-        border, slight rotation, soft shadow. Returns RGBA."""
+        border, soft shadow, and an optional slight `rotate` (0 = none, used by the
+        multi-page fan which applies its own per-page angle). Returns RGBA."""
         base_w = 680
         d = ImageOps.contain(design, (base_w, base_w), Image.LANCZOS)
         pad = 16
         sheet = Image.new("RGB", (d.width + 2 * pad, d.height + 2 * pad), (252, 252, 250))
         sheet.paste(d, (pad, pad))
         card = self._with_shadow(sheet, offset=(0, 14), blur=16, alpha=105)
-        return card.rotate(-3, resample=Image.BICUBIC, expand=True)
+        return card.rotate(rotate, resample=Image.BICUBIC, expand=True) if rotate else card
 
     def _with_shadow(self, img_rgb: Image.Image, offset=(0, 16), blur=18, alpha=120) -> Image.Image:
         pad = blur * 3
