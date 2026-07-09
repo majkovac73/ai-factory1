@@ -3,12 +3,13 @@ Step 89 test — PipelineOrchestrator post-completion hook
 
 Tests:
   [1] run_post_completion() is called when TaskProcessor marks a task DONE
-  [2] listing_images stage: calls ProductImageAgent, registers in catalog
+  [2] listing_images stage: digital single-image formats derive listing photos from
+      the delivery design (mockups), not independent ProductImageAgent generations
   [3] pod_design stage: called only for pod/digital_download task types
   [4] pinterest stage: calls PinterestImageService + MarketingService
   [5] pinterest stage: skipped if task already posted successfully
   [6] create_listing stage: failure is isolated (attach_publish skipped, not raised)
-  [7] listing_images stage: failure is isolated (other stages still run)
+  [7] listing_images stage: mockup failure is isolated (delivery still the photo, other stages run)
 
 Uses test doubles throughout — no real image generation, no Etsy/Pinterest API calls.
 
@@ -192,8 +193,9 @@ else:
     fail("[1] TaskProcessor pipeline hook", f"called2={called2}, expected [{new_task.id}]")
 
 
-# ── [2] listing_images stage runs ProductImageAgent, registers catalog ─────────
-print("[2] listing_images stage: ProductImageAgent + catalog registration...")
+# ── [2] listing images for a digital single-image format are DERIVED from the ──
+#      delivery design (mockups), NOT independently generated (step 100g).
+print("[2] listing_images stage: digital single-image -> delivery mockups, not ProductImageAgent...")
 
 with tempfile.TemporaryDirectory() as tmp:
     hero_path = _fake_image_path(tmp, "hero.png")
@@ -233,10 +235,19 @@ with tempfile.TemporaryDirectory() as tmp:
         report = orch.run_post_completion(done_task2.id)
 
     img_stage = report["stages"].get("listing_images", {})
-    if img_stage.get("ok") and agent_calls and len(catalog_calls) >= 1:
-        ok("[2] listing_images: ProductImageAgent called, images registered in catalog")
+    listing_regs = [c for c in catalog_calls if c.get("variant") == "listing"]
+    # digital single-image: listing photos come from delivery mockups (source
+    # 'delivery_mockup'), ProductImageAgent is NOT called, and the mockups are
+    # registered as listing assets.
+    if (
+        img_stage.get("ok")
+        and img_stage.get("source") == "delivery_mockup"
+        and not agent_calls
+        and len(listing_regs) >= 2
+    ):
+        ok("[2] listing images derived from delivery (mockups), registered; ProductImageAgent not called")
     else:
-        fail("[2] listing_images", f"stage={img_stage}, agent_calls={agent_calls}, catalog_calls={catalog_calls}")
+        fail("[2] listing_images", f"stage={img_stage}, agent_calls={agent_calls}, listing_regs={len(listing_regs)}")
 
 
 # ── [3] delivery_asset fires for any recognized format; printify_precheck ──────
@@ -423,19 +434,24 @@ with tempfile.TemporaryDirectory() as tmp:
         fail("[6] isolated failure", f"create={cl6}, attach={ap6}, pinterest={pin6_stage}")
 
 
-# ── [7] listing_images failure: isolated, subsequent stages still run ──────────
-print("[7] listing_images failure: isolated, subsequent stages still run...")
+# ── [7] listing-image (mockup) failure is isolated: the delivery design still ──
+#      stands as the listing photo and downstream stages still run (step 100g).
+print("[7] listing mockup failure isolated: delivery still the photo, downstream stages run...")
 
 with tempfile.TemporaryDirectory() as tmp:
     pin7 = _fake_image_path(tmp, "pin7.png")
     design7 = _fake_image_path(tmp, "design7.png")
-    done7 = _make_done_task()
+    done7 = _make_done_task()  # single_print (digital single-image)
     orch7 = PipelineOrchestrator()
     pin_calls7 = []
 
-    class FakeProductImageAgent7:
-        def generate_listing_images(self, **kw):
-            raise RuntimeError("Image provider quota exceeded")
+    # Simulate mockup generation failing entirely (returns none). The prepended
+    # delivery design must still stand as the listing photo and the pipeline
+    # must continue.
+    def _failing_mockups(task_id, delivery_path, report):
+        report["stages"]["listing_images"] = {"ok": False, "count": 0, "source": "delivery_mockup"}
+        return []
+    orch7._build_listing_mockups = _failing_mockups
 
     class FakePinterestImageService7:
         def enrich_listing_with_image(self, listing, task_id, visual_brief):
@@ -446,7 +462,7 @@ with tempfile.TemporaryDirectory() as tmp:
         def post_to_channel(self, task_id, listing, channel):
             pin_calls7.append(True); return {"success": True}
 
-    with patch("app.services.pipeline_orchestrator.ProductImageAgent", FakeProductImageAgent7), \
+    with patch("app.services.pipeline_orchestrator.ProductImageAgent"), \
          patch("app.services.pipeline_orchestrator.PODPipelineService", lambda: _FakePODPipelineServiceDefault(design7)), \
          patch("app.services.pipeline_orchestrator.ListingGeneratorAgent") as m_lga7, \
          patch("app.services.pipeline_orchestrator.EtsyClient", return_value=_FakeEtsyClientHappy("L77")), \
@@ -461,9 +477,9 @@ with tempfile.TemporaryDirectory() as tmp:
     listing7 = report7["stages"].get("create_listing", {})
 
     if img7.get("ok") is False and listing7.get("ok") and pin_calls7:
-        ok("[7] listing_images failure isolated: listing creation and pinterest still ran")
+        ok("[7] mockup failure isolated: listing still created from the delivery design, pinterest ran")
     else:
-        fail("[7] isolated listing_images failure", f"img={img7}, listing={listing7}, pin={pin_calls7}")
+        fail("[7] isolated mockup failure", f"img={img7}, listing={listing7}, pin={pin_calls7}")
 
 
 # ── Summary ────────────────────────────────────────────────────────────────────

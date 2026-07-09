@@ -118,11 +118,23 @@ class PipelineOrchestrator:
         # lifestyle depict real interior pages instead of a generic book cover).
         content_context = self._marketing_content_context(is_pdf, output_data)
 
-        # 1 — listing images
-        image_paths = self._stage_listing_images(
-            task_id, product_name, visual_brief, is_autonomy, report,
-            task_type=task_type, content_context=content_context,
-        )
+        # 1 — listing images.
+        # For DIGITAL single-image products the listing photos are DERIVED from
+        # the real delivery design further below (step 2.6), NOT independently
+        # generated: an independent text-to-image hero/lifestyle depicts a
+        # genuinely DIFFERENT illustration (a different dinosaur, mandala, etc.)
+        # than the delivered file — which the consistency gate correctly rejects
+        # and no prompt/remake can fix (confirmed live on task e881c422). POD and
+        # PDF formats keep the independent generation path (their listing photos
+        # legitimately differ from the flat delivery asset).
+        derive_listing_from_delivery = digital_required and not is_pdf
+        if derive_listing_from_delivery:
+            image_paths = []
+        else:
+            image_paths = self._stage_listing_images(
+                task_id, product_name, visual_brief, is_autonomy, report,
+                task_type=task_type, content_context=content_context,
+            )
 
         # 2 — delivery asset (single image or multi-page PDF)
         if is_pdf:
@@ -142,18 +154,19 @@ class PipelineOrchestrator:
             if report.get("blocked"):
                 return report
 
-        # 2.6 — For DIGITAL single-image products, the honest primary listing
-        # photo IS the (now content-verified) delivered design — not an
-        # independently-generated generic mockup that can depict something
-        # completely different (the misrepresentation Maj found). Prepend it so
-        # Etsy's featured photo shows exactly what the buyer receives.
-        if design_path and digital_required and not is_pdf:
-            if design_path not in image_paths:
-                # Just prepend for upload ordering — do NOT re-register it in
-                # the catalog under a "listing" variant: register is
-                # idempotent-on-path and would clobber the "delivery" record
-                # the hard gate relies on (get_delivery_asset).
-                image_paths = [design_path] + list(image_paths)
+        # 2.6 — For DIGITAL single-image products, build the listing photos FROM
+        # the now-content-verified delivery design: the delivery file itself as
+        # the featured photo, plus tasteful mockups (the real design on clean
+        # backgrounds). Every listing photo therefore honestly depicts the exact
+        # delivered design — the consistency gate then passes truthfully instead
+        # of fighting an independent generation that can never match.
+        if design_path and derive_listing_from_delivery:
+            # The delivery file is prepended as the primary photo; do NOT
+            # re-register it under a "listing" variant (register is
+            # idempotent-on-path and would clobber the "delivery" record the hard
+            # gate relies on via get_delivery_asset).
+            mockups = self._build_listing_mockups(task_id, design_path, report)
+            image_paths = [design_path] + mockups
 
         # 2.7 — MARKETING/DELIVERABLE CONSISTENCY GATE (step 96): backstop that
         # every listing photo plausibly depicts the same product as the
@@ -579,6 +592,61 @@ class PipelineOrchestrator:
         sections = (output_data or {}).get("sections") or []
         briefs = [str(s).strip() for s in sections if str(s).strip()]
         return "; ".join(briefs[:8])
+
+    def _build_listing_mockups(self, task_id: str, delivery_path, report: dict) -> list:
+        """Build listing photos FROM the real delivery design (digital single-image
+        formats), so every marketing photo honestly depicts the delivered product.
+
+        Two tasteful mockups: the delivered design centered on clean neutral/warm
+        backgrounds (a standard, professional way to present a digital print).
+        Because these ARE the delivered design, the marketing/deliverable
+        consistency gate passes truthfully — unlike an independent generation,
+        which produces a genuinely different illustration. Also cheaper: no
+        Seedream calls. Returns validated + catalog-registered Paths (empty on
+        failure — the prepended delivery still stands as the listing photo).
+        """
+        from io import BytesIO
+        from config import settings
+        from app.services.image_file_service import ImageFileService
+
+        try:
+            from PIL import Image
+            src = Image.open(delivery_path).convert("RGB")
+        except Exception as e:
+            logger.warning(f"PipelineOrchestrator: could not open delivery for mockups {task_id}: {e}")
+            report["stages"]["listing_images"] = {"ok": False, "error": f"mockup source open failed: {e}", "source": "delivery_mockup"}
+            return []
+
+        fs = ImageFileService()
+        validator = ImageValidationService()
+        out = []
+        # (filename, background color) — a clean studio grey and a warm paper tone.
+        variants = [("hero.png", (246, 246, 248)), ("lifestyle.png", (240, 233, 224))]
+        for fname, bg in variants:
+            try:
+                canvas = Image.new("RGB", (1024, 1024), bg)
+                fitted = src.copy()
+                fitted.thumbnail((800, 800), Image.LANCZOS)
+                canvas.paste(fitted, ((1024 - fitted.width) // 2, (1024 - fitted.height) // 2))
+                buf = BytesIO()
+                canvas.save(buf, format="PNG")
+                p = Path(fs.save_bytes(buf.getvalue(), task_id, "listing", fname))
+                validator.validate(p, use_case="listing")
+                self.catalog.register(
+                    task_id=task_id,
+                    local_path=str(p),
+                    variant="listing",
+                    use_case="listing",
+                    agent="DeliveryMockup",
+                    provider="pil",
+                    model="composite",
+                )
+                out.append(p)
+            except Exception as e:
+                logger.warning(f"PipelineOrchestrator: listing mockup {fname} failed for {task_id}: {e}")
+
+        report["stages"]["listing_images"] = {"ok": bool(out), "count": len(out), "source": "delivery_mockup"}
+        return out
 
     def _stage_listing_images(self, task_id: str, product_name: str, visual_brief: str, is_autonomy: bool, report: dict, record_spend: bool = True, task_type: str = None, content_context: str = "") -> list:
         from config import settings
