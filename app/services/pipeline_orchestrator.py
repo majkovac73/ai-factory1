@@ -330,12 +330,22 @@ class PipelineOrchestrator:
         result = _check()
         last_issues = self._consistency_issues(result)
         remakes_used = 0
+        anomalies_seen: list = []
 
         for remake in range(1, max_remakes + 1):
             if result and result.passed:
                 break
 
-            targets = self._resolve_mismatch_targets(current_paths, design_path, result)
+            targets, anomalies = self._resolve_mismatch_targets(current_paths, design_path, result)
+
+            # Loud, DISTINCT signal for genuinely unmappable indices (malformed /
+            # out-of-range vision response) so this can never again look like
+            # "the remake feature doesn't work" when it's actually "an edge case
+            # wasn't handled". Different failure mode -> different, alerted log.
+            if anomalies:
+                anomalies_seen.extend(anomalies)
+                self._alert_unmappable_mismatch(task_id, anomalies, len(current_paths))
+
             if not targets:
                 # No marketing image we can safely regenerate (e.g. the only
                 # flagged image IS the delivery asset, or no structured
@@ -344,15 +354,15 @@ class PipelineOrchestrator:
 
             logger.warning(
                 f"PipelineOrchestrator: marketing/deliverable mismatch for {task_id} "
-                f"(remake {remake}/{max_remakes}); regenerating marketing image indices "
-                f"{sorted(targets)} with corrective feedback"
+                f"(remake {remake}/{max_remakes}); regenerating marketing images "
+                f"{[(i, r) for i, (r, _) in sorted(targets.items())]} with corrective feedback"
             )
 
             regenerated_any = False
-            for idx, issue in targets.items():
+            for idx, (role, issue) in targets.items():
                 new_path = self._regenerate_marketing_image(
                     task_id, product_name, visual_brief, current_paths[idx],
-                    corrective_issue=issue, ground_truth=ground_truth, report=report,
+                    role=role, corrective_issue=issue, ground_truth=ground_truth, report=report,
                 )
                 if new_path:
                     current_paths[idx] = new_path
@@ -365,13 +375,17 @@ class PipelineOrchestrator:
             last_issues = self._consistency_issues(result)
 
         if result and result.passed:
-            report["stages"]["marketing_consistency"] = {"ok": True, "remakes": remakes_used}
+            stage = {"ok": True, "remakes": remakes_used}
+            if anomalies_seen:
+                stage["unmappable_indices"] = [a.get("image_index") for a in anomalies_seen]
+            report["stages"]["marketing_consistency"] = stage
             return current_paths
 
         reason = f"marketing/deliverable mismatch: {'; '.join(last_issues)[:300]}"
-        report["stages"]["marketing_consistency"] = {
-            "ok": False, "error": reason, "issues": last_issues, "remakes": remakes_used,
-        }
+        stage = {"ok": False, "error": reason, "issues": last_issues, "remakes": remakes_used}
+        if anomalies_seen:
+            stage["unmappable_indices"] = [a.get("image_index") for a in anomalies_seen]
+        report["stages"]["marketing_consistency"] = stage
         self._block_task(task_id, reason, report, pre_listing=True)
         return None
 
@@ -381,40 +395,93 @@ class PipelineOrchestrator:
             return ["marketing consistency check failed (vision call error)"]
         return result.specific_issues or ["marketing images do not match the delivered product"]
 
+    def _marketing_role_for(self, path, design_str: str) -> str:
+        """Best-effort role for a marketing image, so regeneration steers with the
+        right prompt for ANY image in the set — not just hero/lifestyle. Roles are
+        derived from the stable filenames ProductImageAgent writes (hero.png /
+        lifestyle.png); any other listing image keeps a role from its filename
+        stem so a future multi-image format is handled without code changes."""
+        if str(path) == design_str:
+            return "delivery"
+        name = Path(path).name.lower()
+        if "lifestyle" in name:
+            return "lifestyle"
+        if "hero" in name:
+            return "hero"
+        return Path(path).stem.lower() or "listing"
+
     def _resolve_mismatch_targets(self, current_paths, design_path, result):
         """
-        Map the vision model's per-image mismatch reports to indices into
-        current_paths, returning {index: issue_text}. The delivery asset is
-        NEVER a target — it's confirmed correct. When the model returned no
-        structured per-image breakdown (older schema / unparseable), fall back
-        to every non-delivery marketing image so a remake can still be attempted.
+        Map the vision model's per-image mismatch reports onto the REAL, full
+        marketing-image list — `current_paths` is exactly the set of images that
+        were sent to and numbered by check_marketing_consistency, however many
+        the product_format produced (2, 3, 4, …). This is format-agnostic: there
+        is NO hardcoded assumption of "hero + lifestyle only".
+
+        Returns (targets, anomalies):
+          targets   : {index_in_current_paths: (role, issue_text)} for mappable,
+                      non-delivery images to regenerate.
+          anomalies : [{"image_index": j, "issue": str}] for indices that cannot
+                      map to any real marketing image (non-int / out of range) —
+                      a genuine internal inconsistency the caller alerts on.
+
+        The delivery asset is never a target (confirmed correct); a mismatch
+        reported against it is a benign skip, not an anomaly. With no structured
+        per-image breakdown (older schema / unparseable), falls back to every
+        non-delivery marketing image.
         """
         design_str = str(design_path)
         # marketing images are numbered 1..N over the images that actually exist,
         # in list order — matching how check_marketing_consistency sends them.
         existing = [(i, p) for i, p in enumerate(current_paths) if Path(p).exists()]
         targets: dict = {}
+        anomalies: list = []
 
         mismatches = (result.mismatches if result else None) or []
         if mismatches:
             for m in mismatches:
                 j = m.get("image_index")
+                issue = m.get("issue") or "does not match the delivered design"
                 if not isinstance(j, int) or not (1 <= j <= len(existing)):
+                    anomalies.append({"image_index": j, "issue": issue})
                     continue
                 orig_idx, p = existing[j - 1]
                 if str(p) == design_str:
-                    continue  # never regenerate the delivery asset
-                targets[orig_idx] = m.get("issue") or "does not match the delivered design"
-            return targets
+                    # Benign: the flagged image is the delivery asset itself
+                    # (prepended as the primary listing photo) — never regenerated.
+                    logger.debug(
+                        f"PipelineOrchestrator: consistency flagged the delivery asset "
+                        f"(marketing image {j}); skipping — it is confirmed correct"
+                    )
+                    continue
+                targets[orig_idx] = (self._marketing_role_for(p, design_str), issue)
+            return targets, anomalies
 
         generic = "; ".join(result.specific_issues) if (result and result.specific_issues) else "does not match the delivered design"
         for orig_idx, p in existing:
             if str(p) == design_str:
                 continue
-            targets[orig_idx] = generic
-        return targets
+            targets[orig_idx] = (self._marketing_role_for(p, design_str), generic)
+        return targets, anomalies
 
-    def _regenerate_marketing_image(self, task_id, product_name, visual_brief, target_path, corrective_issue, ground_truth, report):
+    def _alert_unmappable_mismatch(self, task_id: str, anomalies: list, n_images: int):
+        """A mismatch was reported at an image_index that maps to no real
+        regenerable asset. This is an internal inconsistency (malformed / out of
+        range vision response), NOT the normal "images don't match" case — so it
+        gets its own loud error log + alert with the exact index and task_id,
+        keeping the two failure modes distinguishable."""
+        idxs = [a.get("image_index") for a in anomalies]
+        msg = (
+            f"task_id={task_id}: consistency check reported mismatch at image_index "
+            f"{idxs}, but only {n_images} marketing image(s) exist and none map to a "
+            f"regenerable asset (malformed / out-of-range vision response). These "
+            f"indices were skipped; the task will hard-block if the mappable images "
+            f"don't resolve. This is an internal inconsistency, not a normal mismatch."
+        )
+        logger.error(f"PipelineOrchestrator: UNMAPPABLE consistency mismatch index — {msg}")
+        self._alert("Consistency remake: unmappable mismatch index", msg)
+
+    def _regenerate_marketing_image(self, task_id, product_name, visual_brief, target_path, role, corrective_issue, ground_truth, report):
         """
         Regenerate ONE mismatched marketing image in place (overwriting its
         file, so its path/catalog entry stay stable), steering it with the
@@ -429,8 +496,6 @@ class PipelineOrchestrator:
         from app.services.content_quality_service import ContentQualityService
 
         target_path = Path(target_path)
-        name = target_path.name.lower()
-        slot = "lifestyle" if "lifestyle" in name else "hero"
         corrective_guidance = (
             "IMPORTANT: this marketing image MUST depict the SAME design as the "
             f"actual delivered product. The delivered product's real design is: "
@@ -444,7 +509,7 @@ class PipelineOrchestrator:
                 task_id=task_id,
                 product_name=product_name,
                 visual_brief=visual_brief,
-                slot=slot,
+                role=role,
                 corrective_guidance=corrective_guidance,
                 filename=target_path.name,
             )
