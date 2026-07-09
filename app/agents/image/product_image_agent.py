@@ -36,18 +36,21 @@ class ProductImageAgent(BaseAgent):
         self.image_provider = image_provider or ImageProviderManager.get_provider()
         self.file_service = ImageFileService()
 
-    def _format_override(self, product_format, role: str, product_name: str, visual_brief: str):
+    def _format_override(self, product_format, role: str, product_name: str, visual_brief: str, content_context: str = ""):
         """Return a format-specific listing-image prompt for (product_format, role),
         or None to fall back to the generic photography prompt.
 
         This is where a format whose HONEST marketing imagery differs from generic
-        product photography is special-cased. The first case is coloring_page: its
-        deliverable is intentionally blank line-art, so a generic "professional
-        product photography" / "lifestyle" prompt produces a colored, finished-
-        looking render that can NEVER match the delivered blank line-art — the
-        marketing/deliverable consistency gate then (correctly) rejects it forever.
-        Here the marketing images are steered to depict realistic CONTEXT around
-        the real, still-uncolored product instead.
+        product photography is special-cased, because a generic "professional
+        product photography" / "lifestyle" prompt produces imagery that can NEVER
+        structurally match that format's real deliverable — the marketing/
+        deliverable consistency gate then (correctly) rejects it forever, no matter
+        how many remakes run. Cases handled so far:
+          - coloring_page: deliverable is intentionally blank line-art, not a
+            colored render.
+          - pdf_planner_or_guide: deliverable is real interior planner/guide PAGES,
+            not a decorative book cover. `content_context` carries the actual
+            generated page topics so the flatlay/in-use shots depict real content.
 
         Structured as a simple dispatch so adding another format later is a small,
         localized addition — not a rewrite of the generic path.
@@ -76,10 +79,41 @@ class ProductImageAgent(BaseAgent):
                     "the buyer actually receives — NOT a fully colored-in picture. "
                     "No watermarks."
                 )
+
+        if product_format == "pdf_planner_or_guide":
+            # Ground the imagery in the REAL generated page content, not an invented
+            # cover. `content_context` is the actual page topics from the PDF.
+            pages_clause = (
+                f" The real interior pages cover: {content_context}."
+                if content_context else ""
+            )
+            if role == "hero":
+                return (
+                    f"An overhead flatlay of the ACTUAL printed interior pages of the "
+                    f"multi-page '{product_name}' planner/guide PDF, arranged on a desk — "
+                    "show one or two real INTERIOR pages with their actual layout visible "
+                    "(headings, lists, tables, and writing/fill-in lines), exactly as the "
+                    "pages look when printed. "
+                    "This is NOT a closed book and NOT a decorative book cover — show the "
+                    "real page content the buyer receives inside the PDF. "
+                    f"Theme/brief: {visual_brief}.{pages_clause} "
+                    "Bright, even lighting, clean desk, no watermarks."
+                )
+            if role == "lifestyle":
+                return (
+                    f"A realistic in-use photo of a person writing on / filling in one of "
+                    f"the ACTUAL interior pages of the '{product_name}' planner/guide, pen "
+                    "in hand, with the real page layout (headings, lists, writing lines) "
+                    "clearly visible on the desk. "
+                    "It must show a real INTERIOR page being used — NOT a closed book and "
+                    "NOT a decorative cover. "
+                    f"Theme/brief: {visual_brief}.{pages_clause} "
+                    "Warm natural light, cozy desk setting, no watermarks."
+                )
         return None
 
-    def _build_hero_prompt(self, product_name: str, visual_brief: str, product_format=None) -> str:
-        override = self._format_override(product_format, "hero", product_name, visual_brief)
+    def _build_hero_prompt(self, product_name: str, visual_brief: str, product_format=None, content_context: str = "") -> str:
+        override = self._format_override(product_format, "hero", product_name, visual_brief, content_context)
         if override:
             return override
         return (
@@ -89,8 +123,8 @@ class ProductImageAgent(BaseAgent):
             "No text, no watermarks, no borders."
         )
 
-    def _build_lifestyle_prompt(self, product_name: str, visual_brief: str, product_format=None) -> str:
-        override = self._format_override(product_format, "lifestyle", product_name, visual_brief)
+    def _build_lifestyle_prompt(self, product_name: str, visual_brief: str, product_format=None, content_context: str = "") -> str:
+        override = self._format_override(product_format, "lifestyle", product_name, visual_brief, content_context)
         if override:
             return override
         return (
@@ -108,6 +142,7 @@ class ProductImageAgent(BaseAgent):
         aspect_ratio: str = "1:1",
         resolution: str = "2K",
         product_format=None,
+        content_context: str = "",
     ) -> dict:
         """
         Generate hero + lifestyle images and save both as 'listing' variants.
@@ -122,13 +157,17 @@ class ProductImageAgent(BaseAgent):
             product_format: Product format key (e.g. 'coloring_page') so the hero/
                 lifestyle prompts can be made honest about the actual deliverable.
                 None uses the generic photography prompts.
+            content_context: Real content of the deliverable used to ground the
+                prompt (e.g. the actual generated PDF page topics for
+                pdf_planner_or_guide), so marketing images depict real content
+                rather than an invented cover. Ignored by formats that don't use it.
 
         Returns:
             Dict with paths to saved images:
               {'hero': Path, 'lifestyle': Path}
         """
-        hero_prompt = self._build_hero_prompt(product_name, visual_brief, product_format)
-        lifestyle_prompt = self._build_lifestyle_prompt(product_name, visual_brief, product_format)
+        hero_prompt = self._build_hero_prompt(product_name, visual_brief, product_format, content_context)
+        lifestyle_prompt = self._build_lifestyle_prompt(product_name, visual_brief, product_format, content_context)
 
         hero_result = asyncio.run(
             self.image_provider.generate_image(
@@ -176,11 +215,11 @@ class ProductImageAgent(BaseAgent):
 
     # Role -> prompt-builder. Any role not listed falls back to the generic
     # marketing prompt above, so regeneration is not hardcoded to two roles.
-    def _prompt_for_role(self, role: str, product_name: str, visual_brief: str, product_format=None) -> str:
+    def _prompt_for_role(self, role: str, product_name: str, visual_brief: str, product_format=None, content_context: str = "") -> str:
         if role == "hero":
-            return self._build_hero_prompt(product_name, visual_brief, product_format)
+            return self._build_hero_prompt(product_name, visual_brief, product_format, content_context)
         if role == "lifestyle":
-            return self._build_lifestyle_prompt(product_name, visual_brief, product_format)
+            return self._build_lifestyle_prompt(product_name, visual_brief, product_format, content_context)
         return self._build_marketing_prompt(role, product_name, visual_brief)
 
     def regenerate_listing_image(
@@ -194,6 +233,7 @@ class ProductImageAgent(BaseAgent):
         aspect_ratio: str = "1:1",
         resolution: str = "2K",
         product_format=None,
+        content_context: str = "",
     ) -> Path:
         """
         Regenerate ONE listing/marketing image by ROLE (hero, lifestyle, or any
@@ -206,10 +246,11 @@ class ProductImageAgent(BaseAgent):
         back into the prompt) instead of regenerating everything. `role` is no
         longer restricted to hero/lifestyle — an unknown role gets a generic
         marketing prompt so ANY image in the listing set is regenerable.
-        `product_format` steers the per-format honest framing (e.g. coloring_page
-        line-art) so a remake converges instead of fighting the consistency gate.
+        `product_format` (+ `content_context`, e.g. real PDF page topics) steer the
+        per-format honest framing so a remake converges instead of fighting the
+        consistency gate.
         """
-        base = self._prompt_for_role(role, product_name, visual_brief, product_format)
+        base = self._prompt_for_role(role, product_name, visual_brief, product_format, content_context)
         # The corrective guidance carries the ground-truth design description and
         # the vision model's rejection reason — it MUST reach the generation
         # prompt for the remake to actually steer away from the wrong design.
@@ -248,4 +289,5 @@ class ProductImageAgent(BaseAgent):
             aspect_ratio=task.get("aspect_ratio", "1:1"),
             resolution=task.get("resolution", "2K"),
             product_format=task.get("product_format"),
+            content_context=task.get("content_context", ""),
         )

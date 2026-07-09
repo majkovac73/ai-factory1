@@ -113,8 +113,16 @@ class PipelineOrchestrator:
 
         is_autonomy = bool((task.metadata_ or {}).get("source") == "autonomy_worker")
 
+        # Real deliverable content used to GROUND format-aware marketing prompts
+        # (e.g. pdf_planner_or_guide: the actual generated page topics, so hero/
+        # lifestyle depict real interior pages instead of a generic book cover).
+        content_context = self._marketing_content_context(is_pdf, output_data)
+
         # 1 — listing images
-        image_paths = self._stage_listing_images(task_id, product_name, visual_brief, is_autonomy, report, task_type=task_type)
+        image_paths = self._stage_listing_images(
+            task_id, product_name, visual_brief, is_autonomy, report,
+            task_type=task_type, content_context=content_context,
+        )
 
         # 2 — delivery asset (single image or multi-page PDF)
         if is_pdf:
@@ -152,7 +160,8 @@ class PipelineOrchestrator:
         # delivery asset, blocking a buyer-misrepresentation before listing.
         if design_path and image_paths:
             image_paths = self._stage_marketing_consistency(
-                task_id, design_path, image_paths, product_name, visual_brief, is_autonomy, report, task_type=task_type
+                task_id, design_path, image_paths, product_name, visual_brief, is_autonomy, report,
+                task_type=task_type, content_context=content_context,
             )
             if report.get("blocked"):
                 return report
@@ -293,7 +302,7 @@ class PipelineOrchestrator:
         self._block_task(task_id, reason, report, pre_listing=True)
         return None
 
-    def _stage_marketing_consistency(self, task_id, design_path, image_paths, product_name, visual_brief, is_autonomy, report, task_type=None):
+    def _stage_marketing_consistency(self, task_id, design_path, image_paths, product_name, visual_brief, is_autonomy, report, task_type=None, content_context=""):
         """
         Vision-model check that the listing/marketing photos plausibly depict
         the SAME product as the delivery asset.
@@ -363,7 +372,7 @@ class PipelineOrchestrator:
                 new_path = self._regenerate_marketing_image(
                     task_id, product_name, visual_brief, current_paths[idx],
                     role=role, corrective_issue=issue, ground_truth=ground_truth, report=report,
-                    task_type=task_type,
+                    task_type=task_type, content_context=content_context,
                 )
                 if new_path:
                     current_paths[idx] = new_path
@@ -482,7 +491,7 @@ class PipelineOrchestrator:
         logger.error(f"PipelineOrchestrator: UNMAPPABLE consistency mismatch index — {msg}")
         self._alert("Consistency remake: unmappable mismatch index", msg)
 
-    def _regenerate_marketing_image(self, task_id, product_name, visual_brief, target_path, role, corrective_issue, ground_truth, report, task_type=None):
+    def _regenerate_marketing_image(self, task_id, product_name, visual_brief, target_path, role, corrective_issue, ground_truth, report, task_type=None, content_context=""):
         """
         Regenerate ONE mismatched marketing image in place (overwriting its
         file, so its path/catalog entry stay stable), steering it with the
@@ -514,6 +523,7 @@ class PipelineOrchestrator:
                 corrective_guidance=corrective_guidance,
                 filename=target_path.name,
                 product_format=task_type,
+                content_context=content_context,
             )
         except Exception as e:
             logger.error(f"PipelineOrchestrator: targeted remake of {target_path.name} failed for {task_id}: {e}")
@@ -556,7 +566,21 @@ class PipelineOrchestrator:
 
     # ── Stages ────────────────────────────────────────────────────────────────
 
-    def _stage_listing_images(self, task_id: str, product_name: str, visual_brief: str, is_autonomy: bool, report: dict, record_spend: bool = True, task_type: str = None) -> list:
+    def _marketing_content_context(self, is_pdf: bool, output_data: dict) -> str:
+        """Real deliverable content used to ground format-aware marketing prompts.
+
+        For a PDF planner/guide this is the actual generated page topics
+        (output_data['sections']) so the hero/lifestyle images depict real interior
+        pages rather than an invented decorative cover. Empty for formats that
+        don't need grounding (they ignore it).
+        """
+        if not is_pdf:
+            return ""
+        sections = (output_data or {}).get("sections") or []
+        briefs = [str(s).strip() for s in sections if str(s).strip()]
+        return "; ".join(briefs[:8])
+
+    def _stage_listing_images(self, task_id: str, product_name: str, visual_brief: str, is_autonomy: bool, report: dict, record_spend: bool = True, task_type: str = None, content_context: str = "") -> list:
         from config import settings
 
         saved_paths = []
@@ -567,6 +591,7 @@ class PipelineOrchestrator:
                 product_name=product_name,
                 visual_brief=visual_brief,
                 product_format=task_type,
+                content_context=content_context,
             )
 
             validator = ImageValidationService()
