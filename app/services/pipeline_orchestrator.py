@@ -296,52 +296,196 @@ class PipelineOrchestrator:
     def _stage_marketing_consistency(self, task_id, design_path, image_paths, product_name, visual_brief, is_autonomy, report):
         """
         Vision-model check that the listing/marketing photos plausibly depict
-        the SAME product as the delivery asset. On failure, regenerate the
-        (generated) listing images and re-check up to CONTENT_QA_MAX_ATTEMPTS
-        times, then block. Returns the (possibly regenerated) image path list,
-        or None if blocked. The delivery asset — when it was prepended as the
-        primary photo — is kept across regenerations.
+        the SAME product as the delivery asset.
+
+        On a mismatch the delivery asset is NOT the problem (it already passed
+        the content-quality gate) — only the independently-generated marketing
+        photos are wrong. So instead of blocking the whole task, regenerate ONLY
+        the specific mismatched image(s), feeding the vision model's own issue
+        text back into the generation prompt as corrective guidance, then
+        re-check — up to settings.MARKETING_CONSISTENCY_MAX_REMAKES total remake
+        attempts PER TASK. If still failing after the cap, fall back to today's
+        hard block. Returns the (possibly repaired) image path list, or None if
+        blocked. The delivery asset is never regenerated and its position in the
+        list is preserved.
         """
         from config import settings
         from app.services.content_quality_service import ContentQualityService
 
         svc = ContentQualityService()
-        attempts = max(1, settings.CONTENT_QA_MAX_ATTEMPTS)
+        max_remakes = max(0, int(getattr(settings, "MARKETING_CONSISTENCY_MAX_REMAKES", 2)))
         current_paths = list(image_paths)
-        primary_is_delivery = current_paths and str(current_paths[0]) == str(design_path)
-        last_issues = ["marketing images do not match the delivered product"]
+        # Ground truth for corrective feedback: the delivery asset was generated
+        # from this same brief, so it describes the design the marketing images
+        # must match.
+        ground_truth = (visual_brief or product_name or "the delivered product design").strip()
 
-        for attempt in range(1, attempts + 1):
+        def _check():
             try:
-                result = svc.check_marketing_consistency(design_path, current_paths, product_name)
+                return svc.check_marketing_consistency(design_path, current_paths, product_name)
             except Exception as e:
                 logger.error(f"PipelineOrchestrator: marketing_consistency raised for {task_id}: {e}")
-                result = None
-                last_issues = [f"marketing consistency check raised: {e}"]
+                return None
 
+        result = _check()
+        last_issues = self._consistency_issues(result)
+        remakes_used = 0
+
+        for remake in range(1, max_remakes + 1):
             if result and result.passed:
-                report["stages"]["marketing_consistency"] = {"ok": True, "attempt": attempt}
-                return current_paths
+                break
 
-            if result:
-                last_issues = result.specific_issues or last_issues
+            targets = self._resolve_mismatch_targets(current_paths, design_path, result)
+            if not targets:
+                # No marketing image we can safely regenerate (e.g. the only
+                # flagged image IS the delivery asset, or no structured
+                # breakdown and nothing but the delivery asset present).
+                break
+
             logger.warning(
                 f"PipelineOrchestrator: marketing/deliverable mismatch for {task_id} "
-                f"(attempt {attempt}/{attempts}): {last_issues}"
+                f"(remake {remake}/{max_remakes}); regenerating marketing image indices "
+                f"{sorted(targets)} with corrective feedback"
             )
 
-            if attempt < attempts:
-                regenerated = self._stage_listing_images(
-                    task_id, product_name, visual_brief, is_autonomy, report, record_spend=False
+            regenerated_any = False
+            for idx, issue in targets.items():
+                new_path = self._regenerate_marketing_image(
+                    task_id, product_name, visual_brief, current_paths[idx],
+                    corrective_issue=issue, ground_truth=ground_truth, report=report,
                 )
-                current_paths = ([design_path] + list(regenerated)) if primary_is_delivery else list(regenerated)
-                if not regenerated:
-                    break
+                if new_path:
+                    current_paths[idx] = new_path
+                    regenerated_any = True
+            if not regenerated_any:
+                break
+
+            remakes_used = remake
+            result = _check()
+            last_issues = self._consistency_issues(result)
+
+        if result and result.passed:
+            report["stages"]["marketing_consistency"] = {"ok": True, "remakes": remakes_used}
+            return current_paths
 
         reason = f"marketing/deliverable mismatch: {'; '.join(last_issues)[:300]}"
-        report["stages"]["marketing_consistency"] = {"ok": False, "error": reason, "issues": last_issues}
+        report["stages"]["marketing_consistency"] = {
+            "ok": False, "error": reason, "issues": last_issues, "remakes": remakes_used,
+        }
         self._block_task(task_id, reason, report, pre_listing=True)
         return None
+
+    def _consistency_issues(self, result):
+        """Human-readable issue list from a consistency result (or a vision error)."""
+        if result is None:
+            return ["marketing consistency check failed (vision call error)"]
+        return result.specific_issues or ["marketing images do not match the delivered product"]
+
+    def _resolve_mismatch_targets(self, current_paths, design_path, result):
+        """
+        Map the vision model's per-image mismatch reports to indices into
+        current_paths, returning {index: issue_text}. The delivery asset is
+        NEVER a target — it's confirmed correct. When the model returned no
+        structured per-image breakdown (older schema / unparseable), fall back
+        to every non-delivery marketing image so a remake can still be attempted.
+        """
+        design_str = str(design_path)
+        # marketing images are numbered 1..N over the images that actually exist,
+        # in list order — matching how check_marketing_consistency sends them.
+        existing = [(i, p) for i, p in enumerate(current_paths) if Path(p).exists()]
+        targets: dict = {}
+
+        mismatches = (result.mismatches if result else None) or []
+        if mismatches:
+            for m in mismatches:
+                j = m.get("image_index")
+                if not isinstance(j, int) or not (1 <= j <= len(existing)):
+                    continue
+                orig_idx, p = existing[j - 1]
+                if str(p) == design_str:
+                    continue  # never regenerate the delivery asset
+                targets[orig_idx] = m.get("issue") or "does not match the delivered design"
+            return targets
+
+        generic = "; ".join(result.specific_issues) if (result and result.specific_issues) else "does not match the delivered design"
+        for orig_idx, p in existing:
+            if str(p) == design_str:
+                continue
+            targets[orig_idx] = generic
+        return targets
+
+    def _regenerate_marketing_image(self, task_id, product_name, visual_brief, target_path, corrective_issue, ground_truth, report):
+        """
+        Regenerate ONE mismatched marketing image in place (overwriting its
+        file, so its path/catalog entry stay stable), steering it with the
+        vision model's own issue text plus the delivery asset's ground-truth
+        design description. Runs the SAME gates any freshly-generated image
+        goes through (ImageValidationService + ContentQualityService) — a
+        targeted retry does not get to skip them. Returns the new Path, or None
+        if generation/validation/content-review failed (leaving the old image
+        in place so the re-check still sees a mismatch and can eventually block).
+        """
+        from config import settings
+        from app.services.content_quality_service import ContentQualityService
+
+        target_path = Path(target_path)
+        name = target_path.name.lower()
+        slot = "lifestyle" if "lifestyle" in name else "hero"
+        corrective_guidance = (
+            "IMPORTANT: this marketing image MUST depict the SAME design as the "
+            f"actual delivered product. The delivered product's real design is: "
+            f"{ground_truth}. A previous version of THIS image was rejected because: "
+            f"\"{corrective_issue}\". Do NOT show a different design, pattern, border, "
+            "artwork, or text than the delivered product described above."
+        )
+
+        try:
+            new_path = ProductImageAgent().regenerate_listing_image(
+                task_id=task_id,
+                product_name=product_name,
+                visual_brief=visual_brief,
+                slot=slot,
+                corrective_guidance=corrective_guidance,
+                filename=target_path.name,
+            )
+        except Exception as e:
+            logger.error(f"PipelineOrchestrator: targeted remake of {target_path.name} failed for {task_id}: {e}")
+            return None
+
+        new_path = Path(new_path)
+        try:
+            ImageValidationService().validate(new_path, use_case="listing")
+        except ImageValidationError as ve:
+            logger.warning(f"PipelineOrchestrator: regenerated {target_path.name} failed validation: {ve}")
+            return None
+
+        try:
+            review = ContentQualityService().review_asset_file(
+                new_path, product_name, "marketing_image", visual_brief
+            )
+        except Exception as e:
+            logger.warning(f"PipelineOrchestrator: content review of regenerated {target_path.name} raised: {e}")
+            return None
+        if not review.passed:
+            logger.warning(
+                f"PipelineOrchestrator: regenerated {target_path.name} failed content review: {review.specific_issues}"
+            )
+            return None
+
+        try:
+            self.catalog.register(
+                task_id=task_id,
+                local_path=str(new_path),
+                variant="listing",
+                use_case="listing",
+                agent="ProductImageAgent",
+                provider=settings.IMAGE_PROVIDER,
+                model=settings.OPENROUTER_IMAGE_MODEL,
+            )
+        except Exception as e:
+            logger.warning(f"PipelineOrchestrator: failed to re-register regenerated {target_path.name}: {e}")
+
+        return new_path
 
     # ── Stages ────────────────────────────────────────────────────────────────
 

@@ -101,6 +101,16 @@ class Settings(BaseSettings):
     CONTENT_QA_MODEL: str = "openai/gpt-4o-mini"
     CONTENT_QA_MAX_ATTEMPTS: int = 2  # regenerate-and-recheck attempts before blocking
 
+    # Marketing/deliverable consistency remakes (step 100b): when the
+    # consistency vision check finds a marketing image depicting a DIFFERENT
+    # design than the delivery asset, regenerate ONLY the mismatched image(s)
+    # with the vision model's own issue text as corrective feedback, then
+    # re-check — up to this many total remake attempts PER TASK before falling
+    # back to the hard BLOCKED_NO_PRODUCT behavior. Capped at 2 so a stubborn
+    # mismatch can't spiral into unbounded regeneration cost (see cost note in
+    # CHANGELOG_STEP100b): worst case ≈ 2 × (remake images + re-check).
+    MARKETING_CONSISTENCY_MAX_REMAKES: int = 2
+
     class Config:
         env_file = ".env"
         extra = "ignore"

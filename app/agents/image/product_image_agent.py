@@ -109,6 +109,55 @@ class ProductImageAgent(BaseAgent):
 
         return {"hero": hero_path, "lifestyle": lifestyle_path}
 
+    def regenerate_listing_image(
+        self,
+        task_id: str,
+        product_name: str,
+        visual_brief: str,
+        slot: str,
+        corrective_guidance: str,
+        filename: str,
+        aspect_ratio: str = "1:1",
+        resolution: str = "2K",
+    ) -> Path:
+        """
+        Regenerate ONE listing/marketing image (hero or lifestyle) with explicit
+        corrective guidance appended to the prompt, saving over `filename` so the
+        existing path/catalog entry stays stable.
+
+        Used by the marketing/deliverable consistency gate to fix only a
+        mismatched image (feeding the vision model's own mismatch description
+        back into the prompt) instead of regenerating everything.
+        """
+        base = (
+            self._build_lifestyle_prompt(product_name, visual_brief)
+            if slot == "lifestyle"
+            else self._build_hero_prompt(product_name, visual_brief)
+        )
+        # The corrective guidance carries the ground-truth design description and
+        # the vision model's rejection reason — it MUST reach the generation
+        # prompt for the remake to actually steer away from the wrong design.
+        prompt = f"{base}\n\n{corrective_guidance}".strip()
+
+        result = asyncio.run(
+            self.image_provider.generate_image(
+                prompt, aspect_ratio=aspect_ratio, resolution=resolution
+            )
+        )
+        path = self.file_service.save_from_result(result, task_id, "listing", filename)
+
+        self.log_service.info(
+            source="ProductImageAgent",
+            message="Listing image regenerated with corrective guidance",
+            payload={
+                "task_id": task_id,
+                "slot": slot,
+                "filename": filename,
+                "path": str(path),
+            },
+        )
+        return path
+
     def run(self, task: dict) -> dict:
         """
         Standardized entry point.

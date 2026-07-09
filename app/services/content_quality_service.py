@@ -52,6 +52,13 @@ class ContentQualityResult:
     text_coherent: bool
     matches_intended_content: bool
     specific_issues: List[str] = field(default_factory=list)
+    # Per-image mismatch breakdown for the marketing/deliverable consistency
+    # check ONLY: one entry per marketing image that differs from the delivery
+    # asset — {"image_index": <1-based index among the marketing photos>,
+    # "issue": <why it differs>}. Empty for single-asset reviews and for a
+    # consistent set. Lets the pipeline remake exactly the wrong image(s) with
+    # targeted feedback instead of blocking the whole task.
+    mismatches: List[dict] = field(default_factory=list)
     raw: Optional[str] = None
     error: Optional[str] = None
 
@@ -216,7 +223,7 @@ class ContentQualityService:
                 specific_issues=[f"consistency vision call failed: {e}"],
                 error=str(e),
             )
-        return self._parse_review(raw)
+        return self._parse_consistency(raw)
 
     # ── Prompts ───────────────────────────────────────────────────────────────
 
@@ -250,25 +257,29 @@ Return ONLY valid JSON, no markdown:
 
     def _build_consistency_prompt(self, product_name: str, n_marketing: int) -> str:
         return f"""
-You are checking a shop listing for buyer-misrepresentation. The FIRST image
-is the ACTUAL delivery file the buyer receives for "{product_name}". The
-next {n_marketing} image(s) are the marketing/preview photos shown on the
-listing.
+You are checking a shop listing for buyer-misrepresentation. You are shown
+{n_marketing + 1} images in total for "{product_name}":
 
-Question: do the marketing photo(s) plausibly depict the SAME product/design
-as the actual delivery file? Presentation may differ (a flat design vs the
-same design shown framed or in a room) — that is fine. But if a marketing
-photo shows a clearly DIFFERENT, unrelated design/content than what is
-actually delivered (different artwork, different text, a generic stock
-mockup unrelated to the real file), that is a misrepresentation and must
-fail.
+- The FIRST image (image 0) is the ACTUAL delivery file the buyer receives.
+  Treat it as the ground-truth design.
+- The remaining {n_marketing} image(s) are the marketing/preview photos on the
+  listing, numbered 1 to {n_marketing} in the order shown (marketing image 1 is
+  the 2nd image overall, marketing image 2 is the 3rd, and so on).
 
-Return ONLY valid JSON, no markdown:
+For EACH marketing image, decide whether it plausibly depicts the SAME
+product/design as the delivery file. Presentation may differ (a flat design vs
+the same design shown framed, in a room, cropped, or on a different background)
+— that is fine. But if a marketing image shows a clearly DIFFERENT, unrelated
+design/content (different artwork, a different pattern or border, different
+text, a generic stock mockup unrelated to the real file), THAT specific image
+is a mismatch and must be reported individually.
+
+Return ONLY valid JSON, no markdown, with EXACTLY this shape:
 {{
-  "text_legible": true,
-  "text_coherent": true,
-  "matches_intended_content": true/false,  // true only if marketing genuinely represents the delivered design
-  "specific_issues": ["which marketing image differs and how"]
+  "consistent": true/false,   // true only if EVERY marketing image matches the delivered design
+  "mismatches": [             // one entry per mismatched marketing image; [] if all match
+    {{"image_index": 1, "issue": "concrete description of how THIS marketing image differs from the delivered design"}}
+  ]
 }}
 """
 
@@ -302,5 +313,65 @@ Return ONLY valid JSON, no markdown:
             text_coherent=coherent,
             matches_intended_content=matches,
             specific_issues=[str(i) for i in issues],
+            raw=raw,
+        )
+
+    def _parse_consistency(self, raw: str) -> ContentQualityResult:
+        """Parse the marketing/deliverable consistency verdict.
+
+        Accepts the current per-image schema —
+          {"consistent": bool, "mismatches": [{"image_index": int, "issue": str}]}
+        — and stays backward-compatible with the older overall schema
+          {"matches_intended_content": bool, "specific_issues": [...]}
+        (still emitted by existing test doubles), so a schema swap can't
+        silently turn every consistency check into a pass/fail wrong answer.
+        """
+        try:
+            data = json.loads(raw)
+        except Exception:
+            try:
+                data = self.sanitizer.extract(raw)
+            except Exception as e:
+                logger.warning(f"ContentQualityService: could not parse consistency JSON: {e}")
+                return ContentQualityResult(
+                    passed=False, text_legible=False, text_coherent=False,
+                    matches_intended_content=False,
+                    specific_issues=[f"unparseable consistency response: {raw[:200]}"],
+                    raw=raw, error=str(e),
+                )
+
+        mismatches = []
+        for m in (data.get("mismatches") or []):
+            if not isinstance(m, dict):
+                continue
+            try:
+                idx = int(m.get("image_index"))
+            except (TypeError, ValueError):
+                continue
+            issue = m.get("issue") or m.get("reason") or "does not match the delivered design"
+            mismatches.append({"image_index": idx, "issue": str(issue)})
+
+        # Verdict: explicit "consistent", else old "matches_intended_content",
+        # else infer from whether any mismatch was reported.
+        if "consistent" in data:
+            consistent = bool(data.get("consistent"))
+        elif "matches_intended_content" in data:
+            consistent = bool(data.get("matches_intended_content"))
+        else:
+            consistent = len(mismatches) == 0
+
+        issues = data.get("specific_issues")
+        if not isinstance(issues, list) or not issues:
+            issues = [f"marketing image {m['image_index']}: {m['issue']}" for m in mismatches]
+        if not issues and not consistent:
+            issues = ["marketing images do not match the delivered design"]
+
+        return ContentQualityResult(
+            passed=consistent,
+            text_legible=True,
+            text_coherent=True,
+            matches_intended_content=consistent,
+            specific_issues=[str(i) for i in issues],
+            mismatches=mismatches,
             raw=raw,
         )
