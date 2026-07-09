@@ -283,17 +283,25 @@ else:
     fail("[3] content gate block", f"report={report3}, etsy_created={etsy3.created}")
 
 
-# ── [4] clean asset passes, pipeline proceeds ────────────────────────────────
-print("[4] orchestrator: clean delivery asset passes the gate, listing created...")
+# ── [4] clean asset passes, pipeline proceeds; consistency SKIPPED for digital ─
+#      (step 100g: digital single-image listing photos are composited from the
+#      content-verified delivery, so there's no independent image to verify).
+print("[4] orchestrator: clean delivery asset passes; listing created; consistency skipped for digital...")
 
 with tempfile.TemporaryDirectory() as tmp:
     report4, etsy4 = _run_orch(tmp, [CLEAN])
 
 cq4 = report4["stages"].get("content_quality", {})
-if cq4.get("ok") is True and etsy4.created and not report4.get("blocked"):
-    ok("[4] clean asset passes content gate; listing created")
+mc4 = report4["stages"].get("marketing_consistency", {})
+li4 = report4["stages"].get("listing_images", {})
+if (
+    cq4.get("ok") is True and etsy4.created and not report4.get("blocked")
+    and mc4.get("skipped")                      # consistency gate skipped for digital
+    and li4.get("source") == "delivery_mockup"  # listing photos derived from the delivery
+):
+    ok("[4] clean asset passes; listing created from delivery mockups; consistency gate skipped (no independent image)")
 else:
-    fail("[4] content gate pass", f"report={report4}, etsy_created={etsy4.created}")
+    fail("[4] content gate pass", f"cq={cq4}, mc={mc4}, li={li4}, etsy_created={etsy4.created}")
 
 
 # ── [5] marketing/deliverable consistency rejects unrelated photos ───────────

@@ -55,11 +55,35 @@ not live-tested and costs 5× the images. Flagged, not done here.)*
 - `run_post_completion`: for digital single-image formats, step 1 no longer calls
   `_stage_listing_images` (skips independent generation); step 2.6 builds the
   mockups from the verified delivery and sets `image_paths = [delivery] + mockups`.
-- The consistency check is still run (not weakened/skipped) — it now simply
-  passes because the images honestly depict the delivered design.
-
 The independent-generation path (`_stage_listing_images` / `ProductImageAgent`)
 and the remake logic remain intact for POD/PDF.
+
+### Refinement after a second live test (e881c422 → e725eb75)
+
+The first cut of 100g still ran the consistency gate on the digital mockups, and
+a second real coloring_page task (`e725eb75`) **still blocked**. Root cause: the
+vision model read the mockup's *framing* (the delivered design shown smaller with
+margins vs the full-bleed delivery) as **"a different pose/perspective"** and
+flagged it — then the remake regenerated the mockups via **independent**
+generation (`ProductImageAgent`), which genuinely differed, and it blocked. Two
+fixes:
+
+1. **The consistency gate is skipped (no-op) for digital single-image formats**
+   (`derive_listing_from_delivery`). Rationale: the gate exists to catch an
+   *independently-generated* marketing photo that misrepresents the delivery.
+   When the listing photos are composited from the already content-verified
+   delivery, there is **no independent image** to verify — so the gate has
+   nothing to check, and running it only invites a false positive. It stays
+   **fully active for POD/PDF** (which do have independent listing photos).
+   `report["stages"]["marketing_consistency"] = {"ok": True, "skipped": ...}`
+   records this explicitly.
+2. **Mockups are near-full-bleed** (the delivered design at ~94% of the square
+   frame with a thin matte border) — a cleaner presentation that unmistakably
+   reads as the delivered design.
+
+This is not "weakening the check" (step 100e's constraint): the check is
+unchanged and still runs wherever an independent marketing image exists. It is
+simply not applicable when the marketing image *is* the verified delivery.
 
 ## Tests
 
@@ -73,6 +97,13 @@ and the remake logic remain intact for POD/PDF.
   `delivery_mockup`) with ProductImageAgent **not** called; [7] asserts a mockup
   failure is isolated (the delivery design still stands as the photo, downstream
   stages still run).
+- **`test_step96`** [4] now also asserts the consistency gate is **skipped** for
+  digital (stage has `skipped`, listing photos `source=delivery_mockup`).
+- **`test_step100b`** re-homed from single_print to **pod_apparel_design**: the
+  consistency + remake gate now applies to POD/PDF (independent listing photos),
+  not to digital single-image. All 8 remake scenarios pass with the POD layout
+  (`[hero(1), lifestyle(2)]`, no delivery prepend). This keeps full remake-gate
+  coverage where it still runs.
 - Full regression green: steps **69, 89–96, 98, 100b, 100d, 100f, 100g**.
 
 ## Verify

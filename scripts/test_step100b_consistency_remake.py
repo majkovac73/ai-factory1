@@ -110,12 +110,15 @@ CLEAN_REVIEW = {  # single-asset content review verdict (delivery + regenerated 
     "matches_intended_content": True, "specific_issues": [],
 }
 CONSISTENT = {"consistent": True, "mismatches": []}
-# New per-image schema: marketing image 2 (hero) is wrong; delivery is image 0,
-# marketing image 1 is the prepended delivery photo (must NOT be regenerated).
+# Re-homed to pod_apparel_design (step 100g): POD keeps independently-generated
+# listing photos (the consistency+remake gate applies to them), whereas digital
+# single-image formats now derive their listing photos from the delivery and
+# skip the gate. POD has NO prepended delivery, so the marketing images are
+# [hero(1), lifestyle(2)].
 MISMATCH_HERO = {
     "consistent": False,
     "mismatches": [
-        {"image_index": 2, "issue": "the second marketing image shows a floral border, not the delivered mandala design"}
+        {"image_index": 1, "issue": "the hero marketing image shows a floral border, not the delivered mandala design"}
     ],
 }
 
@@ -228,13 +231,15 @@ class OkPODPipelineService:
 
 
 def _run(tmp, vision_verdicts):
-    """Run the full post-completion pipeline for a single_print task with a
-    shared ordered vision provider and the recording image agent."""
+    """Run the full post-completion pipeline for a pod_apparel_design task (POD
+    keeps independently-generated listing photos, so the consistency + remake
+    gate applies) with a shared ordered vision provider and the recording image
+    agent. Marketing images are [hero(1), lifestyle(2)] — no delivery prepend."""
     RecordingImageAgent.workdir = tmp
     RecordingImageAgent.regen_calls = []
 
     design = _real_png(Path(tmp) / "design.png", color=(60, 60, 160))
-    task = _make_done_task("Mandala Wall Art Print", "single_print")
+    task = _make_done_task("Mandala Wall Art Print", "pod_apparel_design")
 
     provider = OrderedVisionProvider(vision_verdicts)
     def _cq_factory(*a, **k):
@@ -245,9 +250,19 @@ def _run(tmp, vision_verdicts):
     ms = MagicMock(); ms.return_value.get_posts_for_task.return_value = []; ms.return_value.post_to_channel.return_value = {"success": True}
     etsy = FakeEtsyClientHappy()
 
+    # POD needs a real Printify product (precheck) + a shipping profile.
+    podfs = MagicMock()
+    podfs.return_value.create_product_for_task.return_value = SimpleNamespace(id="pod-1")
+    podfs.return_value.set_etsy_listing_id.return_value = None
+    shipping = MagicMock()
+    async def _get_or_create(): return "ship-1"
+    shipping.return_value.get_or_create.side_effect = _get_or_create
+
     orch = PipelineOrchestrator()
     with patch("app.services.pipeline_orchestrator.ProductImageAgent", RecordingImageAgent), \
          patch("app.services.pipeline_orchestrator.PODPipelineService", lambda: OkPODPipelineService(design)), \
+         patch("app.services.pipeline_orchestrator.PODFulfillmentService", podfs), \
+         patch("app.services.etsy_shipping_service.EtsyShippingService", shipping), \
          patch("app.services.pipeline_orchestrator.ListingGeneratorAgent", lga), \
          patch("app.services.pipeline_orchestrator.EtsyClient", return_value=etsy), \
          patch("app.services.pipeline_orchestrator.EtsyImageService", _fake_eis()), \
@@ -349,14 +364,14 @@ else:
 MISMATCH_2_3 = {
     "consistent": False,
     "mismatches": [
-        {"image_index": 2, "issue": "the hero image shows a floral border, not the delivered mandala"},
-        {"image_index": 3, "issue": "the lifestyle image shows an alternate mandala pattern"},
+        {"image_index": 1, "issue": "the hero image shows a floral border, not the delivered mandala"},
+        {"image_index": 2, "issue": "the lifestyle image shows an alternate mandala pattern"},
     ],
 }
 MISMATCH_2_AND_OOR = {
     "consistent": False,
     "mismatches": [
-        {"image_index": 2, "issue": "the hero image shows a floral border"},
+        {"image_index": 1, "issue": "the hero image shows a floral border"},
         {"image_index": 9, "issue": "phantom mismatch at a nonexistent index"},
     ],
 }

@@ -169,15 +169,29 @@ class PipelineOrchestrator:
             image_paths = [design_path] + mockups
 
         # 2.7 — MARKETING/DELIVERABLE CONSISTENCY GATE (step 96): backstop that
-        # every listing photo plausibly depicts the same product as the
-        # delivery asset, blocking a buyer-misrepresentation before listing.
-        if design_path and image_paths:
+        # every INDEPENDENTLY-GENERATED listing photo plausibly depicts the same
+        # product as the delivery asset, blocking a buyer-misrepresentation
+        # before listing. This only applies to POD/PDF, whose listing photos are
+        # separate generations. For digital single-image formats the listing
+        # photos are composited from the already content-verified delivery design
+        # (step 2.6) — there is NO independent image that could misrepresent, so
+        # the gate is a no-op. (Running it would false-positive: the vision model
+        # reads the mockup's smaller-with-margins framing vs the full-bleed
+        # delivery as "a different pose", then remakes into an independent
+        # generation that genuinely differs — the exact loop that blocked real
+        # tasks e881c422 / e725eb75.) The gate stays FULLY active for POD/PDF.
+        if design_path and image_paths and not derive_listing_from_delivery:
             image_paths = self._stage_marketing_consistency(
                 task_id, design_path, image_paths, product_name, visual_brief, is_autonomy, report,
                 task_type=task_type, content_context=content_context,
             )
             if report.get("blocked"):
                 return report
+        elif derive_listing_from_delivery:
+            report["stages"]["marketing_consistency"] = {
+                "ok": True,
+                "skipped": "listing photos composited from the content-verified delivery design — no independent marketing image to verify",
+            }
 
         # 3 — POD physical: a real Printify product must exist BEFORE a listing
         # is created, so its failure can block listing creation outright.
@@ -621,12 +635,14 @@ class PipelineOrchestrator:
         validator = ImageValidationService()
         out = []
         # (filename, background color) — a clean studio grey and a warm paper tone.
-        variants = [("hero.png", (246, 246, 248)), ("lifestyle.png", (240, 233, 224))]
+        # The design is placed near-full-bleed (a thin matte border) so each photo
+        # clearly reads as the delivered design, just tastefully presented.
+        variants = [("hero.png", (248, 248, 250)), ("lifestyle.png", (241, 234, 225))]
         for fname, bg in variants:
             try:
                 canvas = Image.new("RGB", (1024, 1024), bg)
                 fitted = src.copy()
-                fitted.thumbnail((800, 800), Image.LANCZOS)
+                fitted.thumbnail((960, 960), Image.LANCZOS)  # ~94% — thin matte border
                 canvas.paste(fitted, ((1024 - fitted.width) // 2, (1024 - fitted.height) // 2))
                 buf = BytesIO()
                 canvas.save(buf, format="PNG")
