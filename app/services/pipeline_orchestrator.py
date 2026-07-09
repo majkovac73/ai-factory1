@@ -707,6 +707,25 @@ class PipelineOrchestrator:
 
         return saved_paths
 
+    def _flatten_white_background(self, path) -> bool:
+        """Whiten a line-art design's faint near-white/checkerboard background to
+        pure white IN PLACE (the actual delivered file), preserving the black line
+        art exactly. Only pixels that are near-white in ALL channels (min >= 234)
+        are whitened, so real content (any pixel with a dark/coloured channel) is
+        untouched. Best-effort — never fails the pipeline."""
+        try:
+            from PIL import Image, ImageChops
+            im = Image.open(path).convert("RGB")
+            r, g, b = im.split()
+            mn = ImageChops.darker(ImageChops.darker(r, g), b)  # per-pixel min channel
+            mask = mn.point(lambda v: 255 if v >= 234 else 0)   # near-white in every channel
+            cleaned = Image.composite(Image.new("RGB", im.size, (255, 255, 255)), im, mask)
+            cleaned.save(path)
+            return True
+        except Exception as e:
+            logger.warning(f"PipelineOrchestrator: white-background flatten failed for {path}: {e}")
+            return False
+
     def _stage_pod_design(self, task_id: str, product_name: str, visual_brief: str, task_type: str, report: dict) -> Optional[Path]:
         from config import settings
 
@@ -728,6 +747,15 @@ class PipelineOrchestrator:
                 return None
 
             design_path = Path(design_str)
+
+            # Coloring pages are black line art meant to print on WHITE. Seedream
+            # bakes a faint grey "transparency" checkerboard into the background;
+            # flatten it to pure white in the ACTUAL delivered file (the buyer's
+            # download) — preserving the line art exactly — before it's validated,
+            # registered, or used to build the listing mockups.
+            if task_type == "coloring_page":
+                self._flatten_white_background(design_path)
+
             try:
                 ImageValidationService().validate(design_path, use_case="delivery")
                 self.catalog.register(
