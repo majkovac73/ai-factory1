@@ -66,6 +66,15 @@ class Settings(BaseSettings):
     PRINTIFY_API_KEY: str | None = None
     PRINTIFY_SHOP_ID: str | None = None
 
+    # P0-4: POD margin math. The Etsy price for a print-on-demand item is
+    # computed from Printify's real per-variant production cost so a sale can
+    # never lose money: price = ceil((max_variant_cost + shipping_est + $0.20
+    # listing fee + target_profit) / (1 - etsy_fee_fraction)). Rounding UP to a
+    # whole dollar protects margin further.
+    POD_TARGET_PROFIT_USD: float = 6.00
+    POD_SHIPPING_ESTIMATE_USD: float = 5.00
+    POD_ETSY_FEE_FRACTION: float = 0.10  # ~6.5% transaction + ~3% payment
+
     ETSY_SHIPPING_PROFILE_ID: str | None = None
     ETSY_SHOP_ORIGIN_COUNTRY: str = "US"  # ISO 3166-1 alpha-2; set in env if shop is not US-based
 

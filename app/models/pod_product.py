@@ -16,4 +16,8 @@ class PODProduct(Base):
     print_provider_id = Column(Integer, nullable=True)
     variant_ids = Column(JSON, nullable=True)
     etsy_listing_id = Column(String, nullable=True, index=True)
+    # P0-4/P0-5: margin auditing + the single deliberate variant actually sold.
+    cost_cents = Column(Integer, nullable=True)      # Printify production cost of the sold variant
+    price_cents = Column(Integer, nullable=True)     # margin-safe Etsy price we set
+    variant_title = Column(String, nullable=True)    # e.g. "Black / L" — stated in the listing
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

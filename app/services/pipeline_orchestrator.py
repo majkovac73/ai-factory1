@@ -196,7 +196,11 @@ class PipelineOrchestrator:
         # is created, so its failure can block listing creation outright.
         pod_product = None
         if is_pod:
-            pod_product = self._stage_printify_precheck(task_id, report)
+            # P0-12: give the blueprint selector the REAL concept, not task_id=...
+            pod_concept = product_name
+            if visual_brief:
+                pod_concept = f"{product_name}. {visual_brief}"
+            pod_product = self._stage_printify_precheck(task_id, report, concept=pod_concept)
 
         # 4 — HARD GATE: no listing without a verified real product behind it.
         gate_error = self._delivery_gate_error(task_id, is_pdf, is_pod, pod_product)
@@ -205,7 +209,7 @@ class PipelineOrchestrator:
             return report
 
         # 5 — create Etsy draft listing
-        listing_id = self._stage_create_listing(task_id, product_name, output_data, task_type, is_pod, report)
+        listing_id = self._stage_create_listing(task_id, product_name, output_data, task_type, is_pod, report, pod_product=pod_product)
 
         # 6 — attach images / digital file, then publish; readback-verify both
         if listing_id:
@@ -878,7 +882,7 @@ class PipelineOrchestrator:
         page_count = max(1, min(page_count, settings.MAX_PDF_PAGES))
         return [f"Page {i}" for i in range(1, page_count + 1)]
 
-    def _stage_printify_precheck(self, task_id: str, report: dict):
+    def _stage_printify_precheck(self, task_id: str, report: dict, concept: Optional[str] = None):
         """
         Create the real Printify product BEFORE any Etsy listing exists, so a
         failure here can block listing creation outright (per the hard gate).
@@ -888,8 +892,11 @@ class PipelineOrchestrator:
         wires it up once a real listing_id exists.
         """
         try:
-            pod = PODFulfillmentService().create_product_for_task(task_id)
-            report["stages"]["printify_product"] = {"ok": True, "pod_product_id": pod.id}
+            pod = PODFulfillmentService().create_product_for_task(task_id, concept=concept)
+            report["stages"]["printify_product"] = {
+                "ok": True, "pod_product_id": pod.id,
+                "price_cents": pod.price_cents, "cost_cents": pod.cost_cents,
+            }
             return pod
         except Exception as e:
             logger.error(f"PipelineOrchestrator: printify_product precheck failed for {task_id}: {e}")
@@ -907,7 +914,7 @@ class PipelineOrchestrator:
                 f"to listing {listing_id}: {e}"
             )
 
-    def _stage_create_listing(self, task_id: str, product_name: str, output_data: dict, task_type: str, is_pod: bool, report: dict) -> Optional[str]:
+    def _stage_create_listing(self, task_id: str, product_name: str, output_data: dict, task_type: str, is_pod: bool, report: dict, pod_product=None) -> Optional[str]:
         from app.services.etsy_shipping_service import EtsyShippingService
         from app.services.etsy_client import DIGITAL_WHEN_MADE, POD_WHEN_MADE
 
@@ -936,6 +943,18 @@ class PipelineOrchestrator:
             # P0-11: never let a None/0/out-of-band LLM price reach Etsy — clamp
             # into the format's band (midpoint if invalid). Etsy rejects <$0.20.
             listing["price"] = clamp_price(listing.get("price"), task_type)
+
+            # P0-4: for POD, the cost-based margin-safe price WINS over the band
+            # clamp (a sale must never lose money, even if it exceeds the band).
+            # Also state the exact variant sold (P0-5 honesty) in the description.
+            if is_pod and pod_product is not None:
+                pc = getattr(pod_product, "price_cents", None)
+                if pc:
+                    listing["price"] = round(pc / 100.0, 2)
+                vt = getattr(pod_product, "variant_title", None)
+                if vt:
+                    listing["description"] = (listing.get("description") or "") + \
+                        f"\n\nSold as: {vt} (made to order — printed just for you)."
 
             if is_pod:
                 listing["type"] = "physical"

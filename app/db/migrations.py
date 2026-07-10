@@ -71,6 +71,32 @@ def _migrate_fulfillment_records_add_transaction_id(engine):
     logger.info("Migration: fulfillment_records updated successfully")
 
 
+def _migrate_pod_products_add_cost_price(engine):
+    """P0-4/P0-5: add cost_cents, price_cents, variant_title to pod_products.
+    SQLite supports ADD COLUMN for nullable columns, so each is added if missing."""
+    inspector = inspect(engine)
+    if "pod_products" not in inspector.get_table_names():
+        return  # create_all will make it correctly
+
+    existing = {c["name"] for c in inspector.get_columns("pod_products")}
+    to_add = {
+        "cost_cents": "INTEGER",
+        "price_cents": "INTEGER",
+        "variant_title": "VARCHAR",
+    }
+    missing = {k: v for k, v in to_add.items() if k not in existing}
+    if not missing:
+        return
+
+    logger.info(f"Migration: adding {list(missing)} to pod_products")
+    with engine.connect() as conn:
+        for col, coltype in missing.items():
+            conn.execute(text(f"ALTER TABLE pod_products ADD COLUMN {col} {coltype}"))
+        conn.commit()
+    logger.info("Migration: pod_products cost/price columns added")
+
+
 def run_all_migrations(engine):
     """Run every migration in order. Safe to call on every startup."""
     _migrate_fulfillment_records_add_transaction_id(engine)
+    _migrate_pod_products_add_cost_price(engine)
