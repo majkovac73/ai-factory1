@@ -31,9 +31,18 @@ logger = logging.getLogger("ai-factory")
 
 class AutonomyWorker:
     def __init__(self, schedule_seconds: Optional[int] = None):
-        self._schedule_seconds = schedule_seconds or settings.AUTONOMY_SCHEDULE_SECONDS
+        self._schedule_seconds = schedule_seconds if schedule_seconds is not None else self._resolve_interval_seconds()
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
+
+    @staticmethod
+    def _resolve_interval_seconds() -> int:
+        """AUTONOMY_INTERVAL_MINUTES (friendly Railway knob) wins when set;
+        otherwise fall back to AUTONOMY_SCHEDULE_SECONDS. Floor of 60s."""
+        minutes = getattr(settings, "AUTONOMY_INTERVAL_MINUTES", None)
+        if minutes:
+            return max(60, int(minutes) * 60)
+        return settings.AUTONOMY_SCHEDULE_SECONDS
 
     def start(self):
         if self._thread and self._thread.is_alive():
@@ -46,8 +55,9 @@ class AutonomyWorker:
         self._thread.start()
         if settings.AUTONOMY_ENABLED:
             logger.info(
-                f"AutonomyWorker: started — AUTONOMY_ENABLED=True, "
-                f"schedule every {self._schedule_seconds}s"
+                f"AutonomyWorker: started — AUTONOMY_ENABLED=True, one product every "
+                f"{self._schedule_seconds}s ({self._schedule_seconds / 60:.0f} min); "
+                f"set AUTONOMY_INTERVAL_MINUTES in Railway to change"
             )
         else:
             logger.info("AutonomyWorker: started — AUTONOMY_ENABLED=False (kill switch active, no tasks will be created)")

@@ -110,6 +110,12 @@ class Settings(BaseSettings):
     VISION_QA_COST_USD: float = 0.002
     AUTONOMY_ENABLED: bool = False
     AUTONOMY_SCHEDULE_SECONDS: int = 3600
+    # Friendly Railway knob for how often the autonomy loop runs (and thus how
+    # often a product is created/posted): interval in MINUTES. When set (>0) it
+    # overrides AUTONOMY_SCHEDULE_SECONDS. e.g. 60 = one product/hour, 180 = one
+    # every 3h, 1440 = one/day. Floor of 1 minute enforced. Leave unset to use
+    # AUTONOMY_SCHEDULE_SECONDS. (MAX_TASKS_PER_DAY still caps the daily total.)
+    AUTONOMY_INTERVAL_MINUTES: int | None = None
 
     AUTO_PUBLISH_LISTINGS: bool = False
 
