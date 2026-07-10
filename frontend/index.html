@@ -125,53 +125,23 @@
       margin-bottom: 8px;
     }
 
-    /* ── Characters ──────────────────────────────────────────────── */
-    .chars {
-      display: flex;
-      gap: 6px;
-      flex-wrap: wrap;
-      margin-top: auto;
-    }
-    .char {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 4px 5px;
-      border-radius: 4px;
-      cursor: pointer;
-      transition: background 0.12s;
-    }
-    .char:hover { background: rgba(255,255,255,0.05); }
-
-    .cicon {
-      width: 30px; height: 30px;
-      border-radius: 50%;
-      border: 1.5px solid var(--rc, #4ab8e8);
-      background: rgba(0,0,0,0.45);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 15px;
-      margin-bottom: 3px;
-    }
-    .char.active .cicon { animation: bob 3.2s ease-in-out infinite; }
-    .char.stale  .cicon { border-color: #e07020; opacity: 0.65; }
-    .char.error  .cicon { border-color: #ff3030; animation: bob 0.8s ease-in-out infinite; }
-
-    @keyframes bob {
-      0%, 100% { transform: translateY(0px); }
-      50%       { transform: translateY(-4px); }
-    }
-
-    .clabel {
-      font-size: 0.52em;
-      color: #3a5a78;
-      text-align: center;
-      max-width: 58px;
+    /* ── Room floor + wandering robot actors ─────────────────────────── */
+    /* Robots wander the open floor via a shared rAF loop that writes each
+       actor's translate3d() every frame (see startWander in the script). */
+    .floor {
+      position: absolute; inset: 0; z-index: 1;
+      pointer-events: none;             /* clicks fall through to the room… */
       overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
     }
+    .robot-actor {
+      position: absolute; top: 0; left: 0;
+      width: 33px; height: 48px;
+      will-change: transform;
+      pointer-events: auto;             /* …except the robot itself */
+      cursor: pointer;
+    }
+    .robot-facing { display: block; }   /* scaleX(±1) flip set imperatively */
+    .robot-actor .robot { margin: 0; }
 
     /* ── Panel overlay ───────────────────────────────────────────── */
     .overlay {
@@ -335,174 +305,54 @@
       50%      { transform: translateX(1px);  }
     }
 
-    /* queued-work badge (real backlog count, not a fake extra robot) */
-    .qbadge {
-      margin-top: 2px;
-      font-size: 0.5em;
-      letter-spacing: 0.04em;
-      color: #6f8dab;
-      background: rgba(255,255,255,0.04);
-      border: 1px solid #1b3350;
-      border-radius: 3px;
-      padding: 1px 4px;
-      white-space: nowrap;
-    }
-
-    /* ── Themed room scenes (pure CSS backdrops) ─────────────────────── */
+    /* ── Room scenes: JS pixel-grid rendered ONCE to a crisp scaled bg ── */
+    /* Each room's scene is composed from a JS 2D colour grid (same technique
+       as the robot sprite) but rendered to a tiny <canvas> → data-URI so it
+       scales to the responsive tile crisply (image-rendering: pixelated).
+       No image files, no image-generation calls — every pixel is JS-composed. */
     .scene {
-      position: absolute;
-      inset: 0;
-      z-index: 0;
+      position: absolute; inset: 0; z-index: 0;
       pointer-events: none;
-      overflow: hidden;
+      image-rendering: pixelated;
+      background-size: 100% 100%;
+      background-repeat: no-repeat;
     }
-    .scene::before, .scene::after { content: ''; position: absolute; }
-    /* keep room text/robot above the scene */
-    .room-hdr, .rsummary, .chars { position: relative; z-index: 2; }
+    /* accent "lighting" wash over the machinery */
+    .scene-glow {
+      position: absolute; inset: 0; z-index: 0; pointer-events: none;
+      background: radial-gradient(130% 90% at 50% 24%, var(--rg) 0%, transparent 60%);
+      mix-blend-mode: screen; opacity: 0.9;
+    }
+    /* keep the room's text label above the scene + robots */
+    .room-hdr, .rsummary { position: relative; z-index: 3; }
+    .rsummary { max-width: 64%; }
 
-    /* research — star map + tilted telescope tube */
-    .scene--research {
-      opacity: 0.4;
-      background-image:
-        radial-gradient(1.5px 1.5px at 18% 28%, var(--rc) 45%, transparent 50%),
-        radial-gradient(1.5px 1.5px at 68% 18%, var(--rc) 45%, transparent 50%),
-        radial-gradient(2px 2px   at 44% 52%, var(--rc) 45%, transparent 50%),
-        radial-gradient(1px 1px   at 84% 58%, var(--rc) 45%, transparent 50%),
-        radial-gradient(1.5px 1.5px at 28% 74%, var(--rc) 45%, transparent 50%),
-        radial-gradient(1px 1px   at 58% 82%, var(--rc) 45%, transparent 50%),
-        radial-gradient(2px 2px   at 14% 54%, var(--rc) 45%, transparent 50%),
-        radial-gradient(1px 1px   at 78% 78%, var(--rc) 45%, transparent 50%);
-    }
-    .scene--research::after {
-      right: 15%; top: 22%; width: 34px; height: 7px;
-      background: var(--rc); opacity: 0.14;
-      border-radius: 2px; transform: rotate(-35deg);
+    /* room-level queued badge (real backlog count) */
+    .qbadge-room {
+      position: absolute; top: 7px; right: 8px; z-index: 3;
+      font-size: 0.5em; letter-spacing: 0.04em; color: #a9bdd4;
+      background: rgba(4,10,20,0.72); border: 1px solid #1b3350;
+      border-radius: 3px; padding: 2px 5px; white-space: nowrap;
     }
 
-    /* planning — clipboard + checklist lines */
-    .scene--planning::before {
-      left: 50%; top: 52%; width: 46px; height: 56px;
-      transform: translate(-50%, -50%);
-      border: 2px solid var(--rc); border-radius: 4px; opacity: 0.18;
+    /* animated conveyor belt overlay (fulfillment) — motion a static scene
+       image can't show; aligned to the belt drawn into the scene grid */
+    .scene-conveyor {
+      position: absolute; left: 6%; right: 6%; top: 45%; height: 5.5%;
+      z-index: 1; pointer-events: none; opacity: 0.5; border-radius: 1px;
+      background: repeating-linear-gradient(90deg,
+        rgba(150,175,205,0.6) 0 6px, rgba(26,40,56,0.55) 6px 12px);
+      background-size: 24px 100%;
+      animation: convey 0.8s linear infinite;
     }
-    .scene--planning::after {
-      left: 50%; top: 52%; width: 30px; height: 44px;
-      transform: translate(-50%, -50%);
-      opacity: 0.16;
-      background:
-        linear-gradient(var(--rc), var(--rc)) left 4px /100% 2px no-repeat,
-        linear-gradient(var(--rc), var(--rc)) left 16px/100% 2px no-repeat,
-        linear-gradient(var(--rc), var(--rc)) left 28px/100% 2px no-repeat,
-        linear-gradient(var(--rc), var(--rc)) left 40px/70%  2px no-repeat;
-    }
-
-    /* content — document with text lines + a pencil */
-    .scene--content::before {
-      left: 44%; top: 50%; width: 40px; height: 52px;
-      transform: translate(-50%, -50%);
-      border: 2px solid var(--rc); border-radius: 3px; opacity: 0.16;
-      background:
-        linear-gradient(var(--rc), var(--rc)) center 14px/68% 2px no-repeat,
-        linear-gradient(var(--rc), var(--rc)) center 24px/68% 2px no-repeat,
-        linear-gradient(var(--rc), var(--rc)) center 34px/48% 2px no-repeat;
-    }
-    .scene--content::after {
-      right: 14%; top: 28%; width: 8px; height: 40px;
-      background: var(--rc); opacity: 0.18;
-      transform: rotate(34deg);
-      clip-path: polygon(0 0, 100% 0, 100% 82%, 50% 100%, 0 82%);
-    }
-
-    /* image studio — canvas + easel tripod */
-    .scene--image_studio::before {
-      left: 48%; top: 42%; width: 40px; height: 32px;
-      transform: translate(-50%, -50%);
-      border: 2px solid var(--rc); border-radius: 2px; opacity: 0.16;
-    }
-    .scene--image_studio::after {
-      left: 50%; bottom: 10%; width: 44px; height: 34px;
-      transform: translateX(-50%);
-      background: var(--rc); opacity: 0.14;
-      clip-path: polygon(45% 0, 55% 0, 100% 100%, 82% 100%, 50% 30%, 18% 100%, 0 100%);
-    }
-
-    /* QA — magnifying glass */
-    .scene--qa::before {
-      left: 43%; top: 42%; width: 32px; height: 32px;
-      transform: translate(-50%, -50%);
-      border: 3px solid var(--rc); border-radius: 50%; opacity: 0.18;
-    }
-    .scene--qa::after {
-      left: 60%; top: 62%; width: 5px; height: 26px;
-      background: var(--rc); opacity: 0.18;
-      transform: rotate(-45deg); border-radius: 3px;
-    }
-
-    /* storefront — striped awning + counter */
-    .scene--storefront::before {
-      left: 50%; top: 26%; width: 58px; height: 16px;
-      transform: translateX(-50%);
-      background: repeating-linear-gradient(90deg, var(--rc) 0 6px, transparent 6px 12px);
-      opacity: 0.2; border-radius: 3px 3px 0 0;
-    }
-    .scene--storefront::after {
-      left: 50%; top: 52%; width: 54px; height: 26px;
-      transform: translateX(-50%);
-      border: 2px solid var(--rc); border-radius: 2px; opacity: 0.15;
-    }
-
-    /* marketing — megaphone + radiating broadcast rings */
-    .scene--marketing {
-      opacity: 0.16;
-      background:
-        radial-gradient(circle at 44% 52%,
-          transparent 0 9px, var(--rc) 9px 11px, transparent 11px 19px,
-          var(--rc) 19px 21px, transparent 21px 31px,
-          var(--rc) 31px 33px, transparent 33px);
-    }
-    .scene--marketing::before {
-      left: 24%; top: 50%; width: 16px; height: 14px;
-      transform: translate(-50%, -50%);
-      background: var(--rc); opacity: 1;
-      clip-path: polygon(0 30%, 60% 0, 100% 0, 100% 100%, 60% 100%, 0 70%);
-    }
-
-    /* fulfillment — stacked boxes + dashed conveyor belt */
-    .scene--fulfillment::before {
-      left: 36%; top: 40%; width: 20px; height: 16px;
-      border: 2px solid var(--rc); border-radius: 2px; opacity: 0.18;
-      box-shadow:
-        24px 6px 0 0 var(--rc),
-        11px -15px 0 0 var(--rc);
-    }
-    .scene--fulfillment::after {
-      left: 8%; right: 8%; bottom: 24%; height: 0;
-      border-top: 2px dashed var(--rc); opacity: 0.22;
-    }
-
-    /* ledger — stacked coins + ledger book */
-    .scene--ledger::before {
-      left: 40%; top: 40%; width: 30px; height: 8px;
-      transform: translateX(-50%);
-      background: var(--rc); opacity: 0.16; border-radius: 50%;
-      box-shadow:
-        0 -8px 0 0 var(--rc),
-        0 -16px 0 0 var(--rc),
-        0 8px 0 0 var(--rc);
-    }
-    .scene--ledger::after {
-      left: 52%; top: 62%; width: 42px; height: 22px;
-      transform: translateX(-50%);
-      border: 2px solid var(--rc); border-radius: 2px; opacity: 0.14;
-      background: linear-gradient(var(--rc), var(--rc)) center/2px 100% no-repeat;
-    }
+    @keyframes convey { from { background-position: 0 0; } to { background-position: -24px 0; } }
   </style>
 </head>
 <body>
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useCallback } = React;
+    const { useState, useEffect, useCallback, useRef, useMemo } = React;
 
     const API = window.location.origin;
     const POLL = 7000;
@@ -735,16 +585,266 @@
       );
     }
 
+    /* ══ Pixel-art room scenes ════════════════════════════════════════════
+       Same "2D grid of colour values" idea as the robot, but a room scene is
+       large and must fill a responsive tile, so its grid is rendered ONCE to a
+       tiny <canvas> and used as a crisp (image-rendering: pixelated) background
+       — an equivalent scalable approach to the robot's box-shadow list. Scenes
+       are composed from reusable element "stamps" (cabinet, monitor, crate, …)
+       so we never hand-place hundreds of cells. Nothing here is an image file
+       or an image-generation call: every pixel comes from JS-composed grids. */
+    const GW = 84, GH = 48;   // scene grid (~1.75:1, close to a room tile)
+    const HORIZON = 26;       // machinery sits above; open floor below
+
+    function lighten(hex, amt) {
+      const n = parseInt((hex || '#5aa0e8').slice(1), 16);
+      let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+      r = Math.round(r + (255 - r) * amt);
+      g = Math.round(g + (255 - g) * amt);
+      b = Math.round(b + (255 - b) * amt);
+      return `rgb(${r},${g},${b})`;
+    }
+    function scenePalette(accent) {
+      return {
+        f:'#0b1420', F:'#0e1a28', g:'#16293c',              // floor tiles + grid
+        k:'#05070c', d:'#1b2938', m:'#2b3e52', l:'#4a627e', h:'#6f8aa8', // metals dark→light
+        s:'#08161f', S:'#0d2a38',                            // screen bases
+        a:accent, A:lighten(accent, 0.55), o:'#9fc2ff',      // accent + highlight + cool
+        w:'#d3e0ef', y:'#ffd36b', r:'#ff6060', G:'#54efad',  // white, bulb, red, green
+      };
+    }
+    const mkGrid = () => Array.from({ length: GH }, () => Array(GW).fill('.'));
+    const P  = (grid, x, y, c) => { x |= 0; y |= 0; if (y >= 0 && y < GH && x >= 0 && x < GW) grid[y][x] = c; };
+    const R  = (grid, x, y, w, h, c) => { for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) P(grid, x + i, y + j, c); };
+    const FR = (grid, x, y, w, h, c) => { for (let i = 0; i < w; i++) { P(grid, x+i, y, c); P(grid, x+i, y+h-1, c); } for (let j = 0; j < h; j++) { P(grid, x, y+j, c); P(grid, x+w-1, y+j, c); } };
+    const HL = (grid, x, y, w, c) => { for (let i = 0; i < w; i++) P(grid, x + i, y, c); };
+    const VL = (grid, x, y, h, c) => { for (let j = 0; j < h; j++) P(grid, x, y + j, c); };
+    function LN(grid, x0, y0, x1, y1, c) {   // Bresenham line
+      x0|=0; y0|=0; x1|=0; y1|=0;
+      const dx = Math.abs(x1-x0), dy = -Math.abs(y1-y0);
+      const sx = x0<x1?1:-1, sy = y0<y1?1:-1; let e = dx+dy;
+      for (;;) { P(grid, x0, y0, c); if (x0===x1 && y0===y1) break; const e2 = 2*e; if (e2>=dy){e+=dy;x0+=sx;} if (e2<=dx){e+=dx;y0+=sy;} }
+    }
+
+    /* ── reusable element stamps ────────────────────────────────────── */
+    function stampFloor(grid) {
+      for (let y = HORIZON; y < GH; y++) for (let x = 0; x < GW; x++) grid[y][x] = (((x>>2)+(y>>2)) & 1) ? 'F' : 'f';
+      for (let x = 0; x < GW; x += 4) VL(grid, x, HORIZON, GH - HORIZON, 'g');
+      for (let y = HORIZON; y < GH; y += 4) HL(grid, 0, y, GW, 'g');
+      HL(grid, 0, HORIZON, GW, 'l'); HL(grid, 0, HORIZON + 1, GW, 'd');
+    }
+    function cabinet(grid, x, y, w, h) {
+      R(grid, x, y, w, h, 'd'); FR(grid, x, y, w, h, 'k');
+      HL(grid, x+1, y+1, w-2, 'l'); VL(grid, x+1, y+1, h-2, 'm');
+      P(grid, x-1, y+h, 'k'); P(grid, x+w, y+h, 'k');
+    }
+    function screen(grid, x, y, w, h) {
+      R(grid, x, y, w, h, 'm'); FR(grid, x, y, w, h, 'k'); R(grid, x+1, y+1, w-2, h-2, 'S');
+      for (let j = y+2; j < y+h-1; j += 2) HL(grid, x+2, j, w-4, 'a');
+    }
+    function monitor(grid, x, y, w, h) {
+      R(grid, x, y, w, h, 'm'); FR(grid, x, y, w, h, 'k'); R(grid, x+1, y+1, w-2, h-2, 'S');
+      R(grid, x+2, y+2, w-4, h-4, 'a'); VL(grid, x + (w>>1), y+h, 2, 'l');
+    }
+    const lights = (grid, arr) => arr.forEach(([x,y,c]) => P(grid, x, y, c));
+    function crate(grid, x, y, w, h) { R(grid, x, y, w, h, 'm'); FR(grid, x, y, w, h, 'k'); HL(grid, x+1, y+(h>>1), w-2, 'd'); VL(grid, x+(w>>1), y+1, h-2, 'd'); }
+    function shelf(grid, x, y, w) {
+      HL(grid, x, y, w, 'l'); HL(grid, x, y+8, w, 'l'); VL(grid, x, y, 9, 'd'); VL(grid, x+w-1, y, 9, 'd');
+      let ix = x+1, n = 0;
+      while (ix < x+w-2) { R(grid, ix, y+2, 2, 5, n%3===0 ? 'a' : (n%2 ? 'h' : 'm')); ix += 3; n++; }
+    }
+    function telescope(grid, x, y) {
+      LN(grid, x, y+10, x+14, y-2, 'l'); LN(grid, x+1, y+10, x+15, y-2, 'm');
+      R(grid, x+13, y-4, 4, 4, 'd'); FR(grid, x+13, y-4, 4, 4, 'k'); P(grid, x+15, y-3, 'A');
+      LN(grid, x+6, y+4, x+3, y+12, 'd'); LN(grid, x+6, y+4, x+10, y+12, 'd');
+    }
+    function antenna(grid, x, y, h) {
+      VL(grid, x, y, h, 'l'); VL(grid, x+1, y, h, 'd');
+      LN(grid, x, y, x-5, y+h, 'd'); LN(grid, x+1, y, x+6, y+h, 'd');
+      P(grid, x, y-1, 'A'); P(grid, x, y-2, 'a');
+    }
+    function rings(grid, cx, cy, c) {
+      for (const rad of [4,7,10,13]) for (let a = 0; a < 360; a += 20)
+        P(grid, cx + Math.round(Math.cos(a*Math.PI/180)*rad), cy + Math.round(Math.sin(a*Math.PI/180)*rad*0.7), c);
+    }
+    function bars(grid, x, y, w, h) {
+      const v = [0.4,0.7,0.5,0.9,0.6,0.8], bw = Math.max(1, ((w/v.length)|0) - 1);
+      v.forEach((t,i) => { const bh = Math.max(1, (t*h)|0); R(grid, x + i*(bw+1), y+h-bh, bw, bh, i%2 ? 'a' : 'A'); });
+    }
+    function coins(grid, x, y) { for (let s = 0; s < 4; s++) { R(grid, x, y - s*3, 10, 2, 'y'); FR(grid, x, y - s*3, 10, 2, 'k'); } }
+    function pinboard(grid, x, y, w, h) {
+      R(grid, x, y, w, h, 'd'); FR(grid, x, y, w, h, 'k');
+      [[2,2,'w'],[7,3,'a'],[12,2,'y'],[3,7,'A'],[9,7,'w'],[14,6,'a']].forEach(([nx,ny,cc]) => R(grid, x+nx, y+ny, 3, 3, cc));
+    }
+    function easel(grid, x, y) {
+      LN(grid, x, y, x-4, y+16, 'l'); LN(grid, x+8, y, x+12, y+16, 'l'); LN(grid, x+4, y+16, x+4, y+22, 'm');
+      R(grid, x-1, y+2, 12, 10, 'm'); FR(grid, x-1, y+2, 12, 10, 'k'); R(grid, x+1, y+4, 8, 6, 'a');
+    }
+    function paintcans(grid, x, y) { for (let i = 0; i < 3; i++) { R(grid, x+i*4, y, 3, 4, i===0?'r':i===1?'G':'a'); FR(grid, x+i*4, y, 3, 4, 'k'); } }
+    function magnifier(grid, x, y) {
+      FR(grid, x, y, 8, 8, 'l'); FR(grid, x+1, y+1, 6, 6, 'm'); R(grid, x+2, y+2, 4, 4, 'S');
+      LN(grid, x+7, y+7, x+12, y+12, 'l'); LN(grid, x+8, y+7, x+13, y+12, 'l');
+    }
+    function counter(grid, x, y, w) {
+      R(grid, x, y, w, 8, 'd'); FR(grid, x, y, w, 8, 'k'); HL(grid, x+1, y+1, w-2, 'l');
+      R(grid, x+w-8, y-4, 6, 4, 'm'); FR(grid, x+w-8, y-4, 6, 4, 'k'); R(grid, x+w-7, y-3, 4, 2, 'a');
+    }
+    function sign(grid, x, y, w) {
+      VL(grid, x+(w>>1), y-6, 6, 'd');
+      R(grid, x, y, w, 7, 'd'); FR(grid, x, y, w, 7, 'k'); HL(grid, x+2, y+3, w-4, 'a');
+    }
+
+    /* ── per-room scene composition (a few distinct stamps each) ────── */
+    const HB = HORIZON;   // things "stand" just above the horizon line
+    const SCENES = {
+      research(g) {
+        for (let i = 0; i < 64; i++) P(g, (i*47)%GW, (i*23)%HB, i%7===0 ? 'A' : 'l');  // star field
+        cabinet(g, 8, HB-14, 22, 14); screen(g, 10, HB-12, 18, 8);
+        monitor(g, 33, HB-12, 12, 10);
+        telescope(g, 60, HB-2);
+        lights(g, [[10,HB-2,'G'],[14,HB-2,'a'],[38,HB-2,'r']]);
+      },
+      planning(g) {
+        cabinet(g, 8, HB-13, 22, 13); screen(g, 10, HB-11, 18, 8);
+        pinboard(g, 40, HB-14, 18, 12);
+        cabinet(g, 64, HB-11, 12, 11); monitor(g, 66, HB-10, 8, 8);
+        lights(g, [[11,HB-2,'a'],[15,HB-2,'a'],[42,HB-2,'G']]);
+      },
+      content(g) {
+        cabinet(g, 8, HB-12, 22, 12); monitor(g, 11, HB-11, 15, 9);
+        pinboard(g, 42, HB-15, 20, 13);
+        cabinet(g, 68, HB-10, 10, 10);
+        lights(g, [[12,HB-2,'a'],[44,HB-2,'y']]);
+      },
+      image_studio(g) {
+        easel(g, 14, HB-22);
+        shelf(g, 34, HB-14, 26); paintcans(g, 36, HB-6);
+        monitor(g, 66, HB-12, 12, 10);
+      },
+      qa(g) {
+        screen(g, 8, HB-16, 30, 16);
+        magnifier(g, 46, HB-12);
+        cabinet(g, 60, HB-6, 18, 6);
+        lights(g, [[62,HB-9,'G'],[66,HB-9,'y'],[70,HB-9,'r']]);
+      },
+      storefront(g) {
+        sign(g, 30, HB-20, 24);
+        shelf(g, 6, HB-24, 24); shelf(g, 6, HB-14, 24);
+        counter(g, 54, HB-8, 24);
+      },
+      marketing(g) {
+        antenna(g, 20, HB-24, 24); rings(g, 20, HB-20, 'a');
+        cabinet(g, 48, HB-12, 28, 12); screen(g, 50, HB-10, 24, 8);
+        lights(g, [[50,HB-2,'r'],[54,HB-2,'G']]);
+      },
+      fulfillment(g) {
+        R(g, 4, 22, GW-8, 3, 'd'); HL(g, 4, 22, GW-8, 'l');   // belt (overlay animates it)
+        crate(g, 10, HB-12, 12, 12); crate(g, 24, HB-9, 9, 9); crate(g, 60, HB-11, 11, 11);
+        cabinet(g, 40, HB-13, 16, 13);
+      },
+      ledger(g) {
+        screen(g, 10, HB-16, 32, 16); bars(g, 14, HB-13, 24, 10);
+        coins(g, 54, HB-1);
+        cabinet(g, 68, HB-9, 10, 9);
+      },
+      __default(g) { cabinet(g, 30, HB-12, 24, 12); },
+    };
+
+    // Render a room scene grid ONCE to a crisp pixel-art data-URI background.
+    function renderSceneURL(rkey, accent) {
+      const pal = scenePalette(accent);
+      const grid = mkGrid();
+      stampFloor(grid);
+      (SCENES[rkey] || SCENES.__default)(grid);
+      const cv = document.createElement('canvas');
+      cv.width = GW; cv.height = GH;
+      const ctx = cv.getContext('2d');
+      ctx.fillStyle = '#080f1a'; ctx.fillRect(0, 0, GW, GH);                 // dark back wall
+      ctx.fillStyle = '#0a1420'; ctx.fillRect(0, HORIZON, GW, GH-HORIZON);   // floor base
+      for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+        const ch = grid[y][x]; if (ch === '.') continue;
+        const col = pal[ch]; if (!col) continue;
+        ctx.fillStyle = col; ctx.fillRect(x, y, 1, 1);
+      }
+      return cv.toDataURL('image/png');
+    }
+
+    /* ══ Robot wandering ══════════════════════════════════════════════════
+       A per-room requestAnimationFrame loop moves each robot toward random
+       targets on the open floor at a state-dependent speed (working = brisk/
+       frequent, idle = slow/rare), facing its travel direction. Positions are
+       written straight to each actor's transform (no React re-render per frame,
+       and the static scene image is generated separately, once). */
+    const WALK = { x0: 0.05, x1: 0.95, y0: 0.54, y1: 0.9 };   // walkable floor (fractions)
+    const RW = 33, RH = 48;
+    const WANDER = {
+      working: { sp: 0.28, pmin: 250,  pmax: 900  },  // brisk, pauses briefly
+      idle:    { sp: 0.11, pmin: 1600, pmax: 4200 },  // gentle, pauses often
+      stale:   { sp: 0.05, pmin: 3000, pmax: 7000 },  // barely moves
+      error:   { sp: 0.14, pmin: 150,  pmax: 500  },  // jittery
+    };
+    const rnd = (a, b) => a + Math.random() * (b - a);
+
+    function startWander(floorEl, actors, states) {
+      if (!floorEl || !actors || !actors.length) return () => {};
+      let W = floorEl.clientWidth, H = floorEl.clientHeight;
+      const ro = new ResizeObserver(() => { W = floorEl.clientWidth; H = floorEl.clientHeight; });
+      ro.observe(floorEl);
+      const sims = actors.filter(Boolean).map((el, i) => ({
+        el, facing: el.querySelector('.robot-facing'),
+        cc: WANDER[states[i]] || WANDER.idle,
+        x: 0, y: 0, tx: null, ty: null, until: 0, dir: 1, init: false,
+      }));
+      let raf, last = performance.now();
+      function tick(now) {
+        const dt = Math.min(0.05, (now - last) / 1000); last = now;
+        const w = W || 1, h = H || 1;
+        const bx0 = WALK.x0 * w, bx1 = Math.max(bx0, WALK.x1 * w - RW);
+        const by0 = WALK.y0 * h, by1 = Math.max(by0, WALK.y1 * h - RH);
+        for (const s of sims) {
+          if (!s.init) { s.x = rnd(bx0, bx1); s.y = rnd(by0, by1); s.init = true; }
+          if (s.tx == null) {
+            if (now >= s.until) { s.tx = rnd(bx0, bx1); s.ty = rnd(by0, by1); }   // pick a new target
+          } else {
+            const dx = s.tx - s.x, dy = s.ty - s.y, d = Math.hypot(dx, dy);
+            const step = s.cc.sp * w * dt;   // px/s ∝ floor width → consistent speed
+            if (d <= step) { s.x = s.tx; s.y = s.ty; s.tx = s.ty = null; s.until = now + rnd(s.cc.pmin, s.cc.pmax); }
+            else {
+              s.x += dx / d * step; s.y += dy / d * step;
+              const nd = dx < -0.3 ? -1 : dx > 0.3 ? 1 : s.dir;
+              if (nd !== s.dir) { s.dir = nd; if (s.facing) s.facing.style.transform = `scaleX(${nd})`; }
+            }
+          }
+          s.el.style.transform = `translate3d(${s.x}px, ${s.y}px, 0)`;
+        }
+        raf = requestAnimationFrame(tick);
+      }
+      raf = requestAnimationFrame(tick);
+      return () => { cancelAnimationFrame(raf); ro.disconnect(); };
+    }
+
     /* ── Room tile ─────────────────────────────────────────────────── */
     function Room({ rkey, room, onRoomClick, onCharClick }) {
       if (!room) return <div className="room" />;
       const cfg = ROOM_CFG[rkey] || {};
-
-      // One robot per room: workers here are single-threaded/sequential, so
-      // even with N queued tasks there is at most one genuinely-working unit.
-      const c = (room.characters || [])[0];
+      const chars = room.characters || [];
       const state = robotState(room);
       const queued = backlog(rkey, room);
+
+      // The static scene is generated ONCE per room (accent is fixed per room),
+      // never on the poll cycle.
+      const sceneURL = useMemo(() => renderSceneURL(rkey, cfg.color || '#5aa0e8'), [rkey, cfg.color]);
+
+      const floorRef = useRef(null);
+      const actorRefs = useRef([]);
+      // One independent wander controller per robot. Re-init only when the robot
+      // count or their states actually change — NOT on every 7s poll (positions
+      // stay continuous across polls; React reuses the same actor DOM nodes).
+      const states = chars.map(() => state);
+      const sig = rkey + '|' + chars.length + '|' + states.join(',');
+      useEffect(() => {
+        return startWander(floorRef.current, actorRefs.current.slice(0, chars.length), states);
+      }, [sig]);   // eslint-disable-line
 
       return (
         <div
@@ -752,27 +852,33 @@
           style={{ '--rc': cfg.color, '--rg': cfg.glow }}
           onClick={() => onRoomClick(rkey)}
         >
-          <div className={`scene scene--${rkey}`} />
+          <div className="scene" style={{ backgroundImage: `url(${sceneURL})` }} />
+          <div className="scene-glow" />
+
+          <div className="floor" ref={floorRef}>
+            {chars.map((c, i) => (
+              <div
+                key={i}
+                className="robot-actor"
+                ref={el => { actorRefs.current[i] = el; }}
+                title={c.name}
+                onClick={e => { e.stopPropagation(); onCharClick(rkey, i); }}
+              >
+                <div className="robot-facing">
+                  <Robot state={state} accent={cfg.color} />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {rkey === 'fulfillment' && <div className="scene-conveyor" />}
 
           <div className="room-hdr">
             <span className="rdot" />
             <span className="rlabel">{cfg.icon} {room.label}</span>
           </div>
           <div className="rsummary">{room.summary}</div>
-
-          <div className="chars">
-            {c && (
-              <div
-                className="char"
-                onClick={e => { e.stopPropagation(); onCharClick(rkey, 0); }}
-                title={c.name}
-              >
-                <Robot state={state} accent={cfg.color} />
-                <div className="clabel">{c.name}</div>
-                {queued > 0 && <div className="qbadge">⏳ {queued} queued</div>}
-              </div>
-            )}
-          </div>
+          {queued > 0 && <div className="qbadge-room">⏳ {queued} queued</div>}
         </div>
       );
     }
