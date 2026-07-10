@@ -7,19 +7,31 @@ class RevenueService:
     """
     Revenue tracking built on top of AnalyticsService (Step 62).
 
-    This app creates Etsy listings as DRAFTS only and does not integrate
-    with Etsy's transactions/receipts API (no transactions_r scope
-    requested, consistent with the README's "does not interact with...
-    orders" policy). Real sales data therefore isn't pulled
-    automatically — revenue is recorded manually by the shop owner
-    (e.g. after checking Etsy's own Shop Manager sales dashboard) and
-    tied back to the task/product that generated the listing, so later
-    steps (64-65: performance scoring, best-product detection) can
-    correlate revenue with specific AI-generated listings.
+    Real sales are recorded automatically by the EtsyReceiptWorker (P0-8):
+    the worker polls paid Etsy receipts (transactions_r scope IS granted
+    since step 81) and records one `sale_recorded` event per transaction —
+    for BOTH POD and digital listings — tied back to the task/product that
+    generated the listing, so performance scoring and best-product
+    detection (steps 64-65) correlate revenue with specific AI-generated
+    listings. Recording is idempotent on Etsy transaction_id. Manual
+    recording via POST /analytics/revenue still exists as a backstop.
     """
 
     def __init__(self):
         self.analytics_service = AnalyticsService()
+
+    def has_sale_for_transaction(self, transaction_id: str) -> bool:
+        """Idempotency guard: True if a sale was already recorded for this
+        Etsy transaction_id (so re-polling the same receipt never double-counts)."""
+        if not transaction_id:
+            return False
+        events = self.analytics_service.get_events(
+            event_type="sale_recorded", entity_type="task", limit=10000
+        )
+        for e in events:
+            if (e.payload or {}).get("transaction_id") == str(transaction_id):
+                return True
+        return False
 
     def record_sale(
         self,
@@ -28,6 +40,7 @@ class RevenueService:
         currency: str = "USD",
         quantity: int = 1,
         notes: Optional[str] = None,
+        transaction_id: Optional[str] = None,
     ) -> dict:
         if amount <= 0:
             raise ValueError("amount must be a positive number")
@@ -43,6 +56,7 @@ class RevenueService:
                 "currency": currency,
                 "quantity": quantity,
                 "notes": notes,
+                "transaction_id": str(transaction_id) if transaction_id else None,
             },
         )
 

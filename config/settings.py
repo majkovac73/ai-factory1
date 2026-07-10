@@ -71,6 +71,14 @@ class Settings(BaseSettings):
 
     ETSY_RECEIPT_POLL_SECONDS: int = 300
 
+    # P0-7: a fulfillment (Printify order) submit that fails is retried on each
+    # subsequent receipt poll — the poll checkpoint is held back so the receipt
+    # is re-fetched — up to this many attempts before giving up LOUDLY (a
+    # persistent alert asking for manual intervention) and letting the checkpoint
+    # advance past it. Idempotency ((receipt_id, transaction_id) unique) makes
+    # retries safe. A paying customer must never silently get nothing.
+    FULFILLMENT_MAX_RETRY_ATTEMPTS: int = 5
+
     # Persistent storage paths — override in Railway env vars:
     #   DATABASE_PATH=/data/app.db
     #   IMAGE_STORAGE_ROOT=/data/images

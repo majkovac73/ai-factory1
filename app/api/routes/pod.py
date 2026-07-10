@@ -1,16 +1,23 @@
 """
-POD fulfillment read-only routes — step 81-2j.
+POD fulfillment routes — step 81-2j, P0-7.
 
-GET /pod/fulfillments — list FulfillmentRecord rows for visibility/debugging.
+GET  /pod/fulfillments                     — list FulfillmentRecord rows.
+POST /pod/fulfillments/resubmit/{id}       — manual recovery: re-process a paid
+                                             Etsy receipt (idempotent) when its
+                                             automatic fulfillment gave up.
 
-This automation is fully automatic (EtsyReceiptWorker handles everything);
-there are no manual-trigger routes here by design.
+Fulfillment is normally fully automatic (EtsyReceiptWorker); the resubmit
+route exists only as a manual backstop for orders that exhausted their
+automatic retries.
 """
-from fastapi import APIRouter
-from typing import List
+import logging
+
+from fastapi import APIRouter, HTTPException
 
 from app.db.database import SessionLocal
 from app.models.fulfillment_record import FulfillmentRecord
+
+logger = logging.getLogger("ai-factory")
 
 router = APIRouter()
 
@@ -43,3 +50,17 @@ def list_fulfillments(limit: int = 100):
         ]
     finally:
         db.close()
+
+
+@router.post("/fulfillments/resubmit/{receipt_id}")
+def resubmit_fulfillment(receipt_id: str):
+    """Manually re-process a paid Etsy receipt (P0-7). Idempotent: transactions
+    already fulfilled/recorded are skipped. Protected by the FACTORY_API_KEY
+    middleware (POST)."""
+    from app.workers.etsy_receipt_worker import EtsyReceiptWorker
+    try:
+        result = EtsyReceiptWorker().process_receipt_by_id(receipt_id)
+    except Exception as e:
+        logger.error(f"resubmit_fulfillment: failed for receipt {receipt_id}: {e}")
+        raise HTTPException(status_code=502, detail=f"Could not process receipt: {e}")
+    return result

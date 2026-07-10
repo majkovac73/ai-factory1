@@ -121,12 +121,29 @@ class EtsyReceiptWorker:
 
     # ── New-receipt polling ───────────────────────────────────────────────────
 
+    @staticmethod
+    def _receipt_last_modified(receipt: dict) -> int:
+        """Etsy exposes the receipt's last-modified time under a couple of field
+        spellings across API eras; fall back to create/now so we always have one."""
+        for key in ("updated_timestamp", "update_timestamp", "last_modified_timestamp"):
+            v = receipt.get(key)
+            if v:
+                return int(v)
+        for key in ("created_timestamp", "create_timestamp"):
+            v = receipt.get(key)
+            if v:
+                return int(v)
+        return int(datetime.now(timezone.utc).timestamp())
+
     def _poll_new_receipts(self):
         state = self._load_state()
+        # min_last_modified (P0-7): unlike min_created, this catches receipts
+        # created before the checkpoint but PAID/updated after it.
         last_checked = state.get("last_checked_at", 0)
+        failed = dict(state.get("failed_receipts", {}))  # receipt_id -> {attempts, last_modified, first_seen}
 
         try:
-            receipts = asyncio.run(self._fetch_receipts(min_created=last_checked))
+            receipts = asyncio.run(self._fetch_receipts(min_last_modified=last_checked))
         except Exception as e:
             logger.error(f"EtsyReceiptWorker: failed to fetch receipts: {e}")
             return
@@ -134,62 +151,131 @@ class EtsyReceiptWorker:
         now_ts = int(datetime.now(timezone.utc).timestamp())
         processed = 0
         for receipt in receipts:
+            receipt_id = str(receipt.get("receipt_id", "?"))
             try:
-                self._process_receipt(receipt)
+                ok = self._process_receipt(receipt)
                 processed += 1
             except Exception as e:
-                receipt_id = receipt.get("receipt_id", "?")
+                ok = False
                 logger.error(f"EtsyReceiptWorker: error processing receipt {receipt_id}: {e}")
 
-        if processed or receipts:
+            if ok:
+                failed.pop(receipt_id, None)
+            else:
+                entry = failed.get(receipt_id) or {"attempts": 0, "first_seen": now_ts}
+                entry["attempts"] = entry.get("attempts", 0) + 1
+                entry["last_modified"] = self._receipt_last_modified(receipt)
+                failed[receipt_id] = entry
+
+        # Give up (loudly) on receipts that have exhausted their retries so the
+        # checkpoint isn't held back forever by one permanently-broken order.
+        max_attempts = getattr(settings, "FULFILLMENT_MAX_RETRY_ATTEMPTS", 5)
+        for rid, entry in list(failed.items()):
+            if entry.get("attempts", 0) >= max_attempts:
+                self._alert_giving_up(rid, entry.get("attempts", 0))
+                failed.pop(rid, None)
+
+        # Checkpoint: advance to now, but never PAST a still-retriable failed
+        # receipt — hold it back to just before that receipt's last-modified so
+        # the next poll re-fetches (and retries) it. Idempotency makes the
+        # re-processing of already-succeeded receipts safe.
+        new_checkpoint = now_ts
+        if failed:
+            oldest_failed = min(e.get("last_modified", now_ts) for e in failed.values())
+            new_checkpoint = min(new_checkpoint, max(oldest_failed - 1, 0))
+
+        if processed or receipts or failed:
             logger.info(
                 f"EtsyReceiptWorker: poll done — {len(receipts)} receipts fetched, "
-                f"{processed} processed"
+                f"{processed} processed, {len(failed)} awaiting retry"
             )
 
-        state["last_checked_at"] = now_ts
+        state["last_checked_at"] = new_checkpoint
+        state["failed_receipts"] = failed
         self._save_state(state)
 
-    async def _fetch_receipts(self, min_created: int = 0):
+    async def _fetch_receipts(self, min_last_modified: int = 0):
         if not settings.ETSY_SHOP_ID:
             logger.warning("EtsyReceiptWorker: ETSY_SHOP_ID not set, skipping poll")
             return []
 
         access_token = await get_valid_access_token()
         api_key_header = f"{settings.ETSY_API_KEY}:{settings.ETSY_SHARED_SECRET}"
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "x-api-key": api_key_header,
+        }
 
-        params = {"was_paid": "true", "limit": 100}
-        if min_created > 0:
-            params["min_created"] = str(min_created)
+        # P2-7: page through results — a viral day or a first poll after long
+        # downtime can produce >100 receipts; without paging the tail is dropped
+        # (= unfulfilled orders).
+        results = []
+        offset = 0
+        limit = 100
+        async with httpx.AsyncClient(timeout=20) as client:
+            while True:
+                params = {"was_paid": "true", "limit": limit, "offset": offset}
+                if min_last_modified > 0:
+                    params["min_last_modified"] = str(min_last_modified)
 
+                resp = await client.get(
+                    f"{ETSY_API_BASE}/shops/{settings.ETSY_SHOP_ID}/receipts",
+                    headers=headers,
+                    params=params,
+                )
+                if resp.status_code == 401:
+                    logger.error("EtsyReceiptWorker: 401 Unauthorized — re-authorize at /etsy/oauth/login")
+                    return results
+                if resp.status_code >= 400:
+                    logger.error(f"EtsyReceiptWorker: Etsy API {resp.status_code}: {resp.text[:200]}")
+                    return results
+
+                page = resp.json().get("results", [])
+                results.extend(page)
+                if len(page) < limit:
+                    break
+                offset += limit
+        return results
+
+    async def _fetch_receipt_by_id(self, receipt_id: str) -> Optional[dict]:
+        """Fetch a single receipt (used by the manual resubmit endpoint, P0-7)."""
+        access_token = await get_valid_access_token()
+        api_key_header = f"{settings.ETSY_API_KEY}:{settings.ETSY_SHARED_SECRET}"
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.get(
-                f"{ETSY_API_BASE}/shops/{settings.ETSY_SHOP_ID}/receipts",
-                headers={
-                    "Authorization": f"Bearer {access_token}",
-                    "x-api-key": api_key_header,
-                },
-                params=params,
+                f"{ETSY_API_BASE}/shops/{settings.ETSY_SHOP_ID}/receipts/{receipt_id}",
+                headers={"Authorization": f"Bearer {access_token}", "x-api-key": api_key_header},
             )
-
-        if resp.status_code == 401:
-            logger.error("EtsyReceiptWorker: 401 Unauthorized — re-authorize at /etsy/oauth/login")
-            return []
         if resp.status_code >= 400:
-            logger.error(f"EtsyReceiptWorker: Etsy API {resp.status_code}: {resp.text[:200]}")
-            return []
+            raise Exception(f"Etsy API {resp.status_code}: {resp.text[:200]}")
+        return resp.json()
 
-        data = resp.json()
-        return data.get("results", [])
+    def process_receipt_by_id(self, receipt_id: str) -> dict:
+        """Manual recovery entrypoint (POST /pod/fulfillments/resubmit/{id}).
+        Fetches the receipt and re-runs processing; idempotent for anything
+        already fulfilled/recorded. Also clears it from the failed set."""
+        receipt = asyncio.run(self._fetch_receipt_by_id(str(receipt_id)))
+        ok = self._process_receipt(receipt)
+        state = self._load_state()
+        failed = dict(state.get("failed_receipts", {}))
+        if ok:
+            failed.pop(str(receipt_id), None)
+            state["failed_receipts"] = failed
+            self._save_state(state)
+        return {"receipt_id": str(receipt_id), "ok": ok}
 
-    def _process_receipt(self, receipt: dict):
+    def _process_receipt(self, receipt: dict) -> bool:
+        """Process one receipt. Returns True only if every POD transaction was
+        fulfilled successfully (digital-only receipts are trivially True), so
+        the poller knows whether to retry. Revenue recording (P0-8) is
+        best-effort and does not affect the return value."""
         receipt_id = str(receipt.get("receipt_id", ""))
         if not receipt_id:
-            return
+            return True
 
         transactions = receipt.get("transactions", [])
         if not transactions:
-            return
+            return True
 
         # Build shipping address from Etsy ShopReceipt fields
         full_name = receipt.get("name", "")
@@ -203,10 +289,12 @@ class EtsyReceiptWorker:
             "region": receipt.get("state", ""),
             "country": receipt.get("country_iso", "US"),
             "zip": receipt.get("zip", ""),
-            "email": "",
-            "phone": "",
+            # P2-6: forward buyer contact info — some providers/carriers need it.
+            "email": receipt.get("buyer_email") or "",
+            "phone": receipt.get("buyer_phone") or receipt.get("phone") or "",
         }
 
+        all_ok = True
         # Each transaction is processed independently — a receipt with two
         # different POD listings must generate two separate Printify orders.
         # Idempotency is per (receipt_id, transaction_id), not per receipt.
@@ -225,33 +313,41 @@ class EtsyReceiptWorker:
                     .filter(PODProduct.etsy_listing_id == listing_id)
                     .first()
                 )
-                if pod is None:
-                    # Digital download or non-POD listing — skip
-                    continue
-
-                # Idempotency: per (receipt_id, transaction_id) pair
-                existing = (
-                    db.query(FulfillmentRecord)
-                    .filter(
-                        FulfillmentRecord.etsy_receipt_id == receipt_id,
-                        FulfillmentRecord.etsy_transaction_id == transaction_id,
-                    )
-                    .first()
-                )
-                if existing:
-                    continue
-
-                pod_id = pod.id
-                task_id = pod.task_id
-                variant_ids = pod.variant_ids or []
+                pod_id = pod.id if pod else None
+                pod_task_id = pod.task_id if pod else None
+                variant_ids = (pod.variant_ids or []) if pod else []
                 variant_id = variant_ids[0] if variant_ids else 0
+
+                # Idempotency for fulfillment: per (receipt_id, transaction_id)
+                already_fulfilled = False
+                if pod is not None:
+                    already_fulfilled = (
+                        db.query(FulfillmentRecord)
+                        .filter(
+                            FulfillmentRecord.etsy_receipt_id == receipt_id,
+                            FulfillmentRecord.etsy_transaction_id == transaction_id,
+                        )
+                        .first()
+                        is not None
+                    )
             finally:
                 db.close()
+
+            # P0-8: record revenue for EVERY transaction (POD + digital), tied
+            # back to the generating task, idempotent on transaction_id.
+            task_id = pod_task_id or self._resolve_digital_task_id(listing_id)
+            self._record_revenue(task_id, transaction, quantity, transaction_id)
+
+            # POD fulfillment (digital downloads need none — Etsy delivers them).
+            if pod is None:
+                continue
+            if already_fulfilled:
+                continue
 
             try:
                 self._fulfillment.submit_order(
                     receipt_id=receipt_id,
-                    task_id=task_id,
+                    task_id=pod_task_id,
                     pod_product_id=pod_id,
                     shipping_address=shipping_address,
                     variant_id=variant_id,
@@ -259,6 +355,7 @@ class EtsyReceiptWorker:
                     transaction_id=transaction_id,
                 )
             except Exception as fulfillment_err:
+                all_ok = False
                 logger.error(
                     f"EtsyReceiptWorker: fulfillment failed for "
                     f"receipt={receipt_id} transaction={transaction_id}: {fulfillment_err}"
@@ -269,11 +366,86 @@ class EtsyReceiptWorker:
                         "Fulfillment order failed",
                         f"Could not submit Printify order for Etsy receipt {receipt_id} "
                         f"transaction {transaction_id}.\nError: {fulfillment_err}\n"
-                        "Will retry on next poll. Manual review recommended if this persists.",
+                        "It will be retried automatically on the next poll "
+                        f"(up to {getattr(settings, 'FULFILLMENT_MAX_RETRY_ATTEMPTS', 5)} attempts). "
+                        "Manual resubmit: POST /pod/fulfillments/resubmit/{receipt_id}.",
                         level="error",
                     )
                 except Exception:
                     pass
+
+        return all_ok
+
+    @staticmethod
+    def _resolve_digital_task_id(listing_id: str) -> Optional[str]:
+        """Map an Etsy listing_id back to the task that generated it, for digital
+        (non-POD) sales — the image catalog persisted listing_id on publish."""
+        from app.models.image_asset import ImageAsset
+        db = SessionLocal()
+        try:
+            asset = (
+                db.query(ImageAsset)
+                .filter(ImageAsset.listing_id == str(listing_id))
+                .first()
+            )
+            return asset.task_id if asset else None
+        finally:
+            db.close()
+
+    def _record_revenue(self, task_id, transaction: dict, quantity: int, transaction_id: str):
+        """Best-effort, idempotent revenue recording for one transaction (P0-8)."""
+        if not task_id:
+            logger.info(
+                f"EtsyReceiptWorker: no task resolved for transaction {transaction_id} "
+                f"(listing {transaction.get('listing_id')}); revenue not recorded"
+            )
+            return
+        price = transaction.get("price") or {}
+        amount = price.get("amount")
+        divisor = price.get("divisor") or 100
+        if amount is None:
+            return
+        unit_price = amount / divisor
+        line_total = unit_price * max(quantity, 1)
+        if line_total <= 0:
+            return
+        currency = price.get("currency_code", "USD")
+        try:
+            from app.services.revenue_service import RevenueService
+            rev = RevenueService()
+            if rev.has_sale_for_transaction(transaction_id):
+                return
+            rev.record_sale(
+                task_id=task_id,
+                amount=line_total,
+                currency=currency,
+                quantity=max(quantity, 1),
+                notes=f"Etsy transaction {transaction_id}",
+                transaction_id=transaction_id,
+            )
+            logger.info(
+                f"EtsyReceiptWorker: recorded sale {currency} {line_total:.2f} "
+                f"for task {task_id} (transaction {transaction_id})"
+            )
+        except Exception as e:
+            logger.error(f"EtsyReceiptWorker: failed to record revenue for transaction {transaction_id}: {e}")
+
+    def _alert_giving_up(self, receipt_id: str, attempts: int):
+        logger.critical(
+            f"EtsyReceiptWorker: giving up on receipt {receipt_id} after {attempts} attempts"
+        )
+        try:
+            from app.services.alert_service import AlertService
+            AlertService().send_alert_sync(
+                "Fulfillment PERMANENTLY failed — manual action needed",
+                f"Etsy receipt {receipt_id} could not be fulfilled after {attempts} "
+                "attempts and will no longer be retried automatically. A customer has "
+                "PAID and will not receive their order unless you act. Fix the cause and "
+                "resubmit: POST /pod/fulfillments/resubmit/" + str(receipt_id),
+                level="error",
+            )
+        except Exception:
+            pass
 
     # ── Tracking sync ─────────────────────────────────────────────────────────
 
