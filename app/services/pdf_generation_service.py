@@ -13,9 +13,9 @@ Library choice: Pillow only (already a hard dependency via
 ImageValidationService) for GENERATION — pages here are image-centric (a
 generated illustration/layout per page with an optional short caption),
 not flowing body text, so Pillow's own multi-image PDF save
-(Image.save(..., format="PDF", save_all=True, append_images=[...])) plus
-ImageDraw for the caption is sufficient without pulling in a heavier
-text-layout library like reportlab/fpdf2. Pillow cannot read PDFs back,
+(Image.save(..., format="PDF", save_all=True, append_images=[...])) is
+sufficient without pulling in a heavier text-layout library like
+reportlab/fpdf2. Pillow cannot read PDFs back,
 though, so `pypdf` (pure-Python, no C extensions) is used purely for the
 readback verification step — confirming the assembled file really opens
 and really has the expected page count, not just that a file exists.
@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import List
 
 import httpx
-from PIL import Image as PILImage, ImageDraw, ImageFont
+from PIL import Image as PILImage
 
 from app.core.providers.image_manager import ImageProviderManager
 from app.services.image_file_service import ImageFileService
@@ -139,7 +139,11 @@ class PDFGenerationService:
                     raise PDFGenerationError(f"page {i}/{page_count} image generation failed: {e}") from e
 
                 img = img.convert("RGB")
-                img = self._with_caption(img, brief)
+                # P1-3: no caption stamp — the old _with_caption drew the raw
+                # page brief in a ~10px default font on the final 4K image,
+                # producing a microscopic, unprofessional caption on the paid
+                # deliverable that also violated the page prompt's "no meta-text"
+                # rule. The generated layout already contains its own headings.
 
                 qa = self._review_page(img, product_name, brief, i, page_count)
                 if qa is None or qa.passed:
@@ -234,19 +238,6 @@ class PDFGenerationService:
             resp.raise_for_status()
             return PILImage.open(BytesIO(resp.content)).copy()
         raise PDFGenerationError("image generation result has neither url nor b64_data")
-
-    def _with_caption(self, img: PILImage.Image, caption: str) -> PILImage.Image:
-        if not caption:
-            return img
-        draw = ImageDraw.Draw(img)
-        text = caption[:80]
-        margin = 20
-        try:
-            font = ImageFont.load_default()
-        except Exception:
-            font = None
-        draw.text((margin, img.height - margin - 20), text, fill=(0, 0, 0), font=font)
-        return img
 
     def _assemble_pdf_bytes(self, pages: List[PILImage.Image]) -> bytes:
         buf = BytesIO()
