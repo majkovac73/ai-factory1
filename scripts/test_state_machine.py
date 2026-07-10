@@ -1,5 +1,16 @@
+import os
 import sys
+import tempfile
 from pathlib import Path
+
+# P3-7: isolate to a throwaway DB BEFORE importing app modules (this test used
+# to create tasks in the REAL configured DB), and make ✓/✗ printable on Windows
+# consoles (cp1250 can't encode them).
+os.environ["DATABASE_PATH"] = os.path.join(tempfile.mkdtemp(), "state_machine_test.db")
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
