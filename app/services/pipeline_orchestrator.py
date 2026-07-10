@@ -125,9 +125,10 @@ class PipelineOrchestrator:
         # depicts genuinely DIFFERENT content (a different dinosaur; different
         # planner pages) than the delivered file — which the consistency gate
         # correctly rejects and no prompt/remake can fix (confirmed live on tasks
-        # e881c422 and the pdf blocks). POD keeps the independent-generation path
-        # (its listing photos are real product mockups from Printify, not the flat
-        # design).
+        # e881c422 and the pdf blocks). POD keeps the independent-generation path,
+        # guarded by the marketing/deliverable consistency gate below. (Using the
+        # real Printify product mockups as the listing photos instead is a
+        # tracked follow-up — P1-1 — deferred because it bypasses that gate.)
         derive_listing_from_delivery = digital_required
         if derive_listing_from_delivery:
             image_paths = []

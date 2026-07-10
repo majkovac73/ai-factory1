@@ -55,6 +55,10 @@ class _PassCQ96:
     def review_asset_bytes(self, *a, **k): return _mock96.Mock(passed=True, specific_issues=[])
     def check_marketing_consistency(self, *a, **k): return _mock96.Mock(passed=True, specific_issues=[])
 _mock96.patch("app.services.content_quality_service.ContentQualityService", _PassCQ96).start()
+# P0-6: the pinterest stage now skips before generating a pin image when
+# Pinterest isn't connected. These pre-P0-6 tests assert the stage runs, so
+# treat Pinterest as connected for the whole module.
+_mock96.patch("app.services.pinterest_oauth.is_connected", return_value=True).start()
 
 from app.services.task_service import TaskService
 from app.schemas.task import TaskCreate
@@ -268,7 +272,7 @@ class FakePODPipelineService:
         return {"task_id": task_id, "design_path": None, "ready_for_pod": False}
 
 class FakePODFulfillmentService3:
-    def create_product_for_task(self, task_id, etsy_listing_id=None):
+    def create_product_for_task(self, task_id, etsy_listing_id=None, concept=None):
         printify_precheck_calls.append(task_id)
         raise RuntimeError("no delivery asset in this test double")
 

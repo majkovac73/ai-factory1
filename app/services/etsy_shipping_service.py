@@ -82,10 +82,24 @@ class EtsyShippingService:
 
             data = resp.json()
             profiles = data.get("results", [])
+            # P1-7: actually skip digital/unsuitable profiles (the old code took
+            # the FIRST profile of ANY type despite the comment). Attaching a
+            # digital or wrong profile to a physical POD listing breaks checkout
+            # shipping. Require a real physical profile: not deleted, not the
+            # digital auto-profile, and carrying a processing time.
             for p in profiles:
-                # Skip digital-only profiles (they have no shipping costs)
-                if p.get("profile_id") and not p.get("is_deleted"):
-                    return str(p["profile_id"])
+                if not p.get("profile_id") or p.get("is_deleted"):
+                    continue
+                if p.get("type") == "digital":
+                    continue
+                if not p.get("min_processing_time"):
+                    continue
+                logger.info(
+                    f"EtsyShippingService: selected physical shipping profile "
+                    f"{p['profile_id']} ('{p.get('title', '')}')"
+                )
+                return str(p["profile_id"])
+            logger.info("EtsyShippingService: no suitable physical profile found; will create one")
             return None
 
     async def _create_default(self) -> Optional[str]:

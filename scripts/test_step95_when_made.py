@@ -117,11 +117,11 @@ async def _run_test_1():
     with patch("app.services.etsy_client.get_valid_access_token", return_value="tok"), \
          patch("app.services.etsy_client.httpx.AsyncClient", _Client):
         # explicit when_made honoured
-        await EtsyClient().create_draft_listing({"title": "x", "when_made": DIGITAL_WHEN_MADE, "type": "download"})
+        await EtsyClient().create_draft_listing({"title": "x", "price": 5.00, "when_made": DIGITAL_WHEN_MADE, "type": "download"})
         explicit = captured.get("when_made")
         captured.clear()
         # default when unspecified
-        await EtsyClient().create_draft_listing({"title": "x", "type": "download"})
+        await EtsyClient().create_draft_listing({"title": "x", "price": 5.00, "type": "download"})
         default = captured.get("when_made")
     return explicit, default
 
@@ -164,7 +164,7 @@ class OkPODPipelineService:
 
 
 class OkPODFulfillment:
-    def create_product_for_task(self, task_id, etsy_listing_id=None):
+    def create_product_for_task(self, task_id, etsy_listing_id=None, concept=None):
         class _P: id = "pod-1"
         return _P()
     def set_etsy_listing_id(self, pod_product_id, etsy_listing_id):

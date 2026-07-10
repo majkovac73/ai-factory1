@@ -241,7 +241,7 @@ with tempfile.TemporaryDirectory() as tmp:
             return {"task_id": task_id, "design_path": str(design3), "ready_for_pod": True}
 
     class FailingPODFulfillmentService3:
-        def create_product_for_task(self, task_id, etsy_listing_id=None):
+        def create_product_for_task(self, task_id, etsy_listing_id=None, concept=None):
             raise RuntimeError("Printify API error: no print providers available")
 
     etsy_create_calls3 = []
