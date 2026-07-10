@@ -34,6 +34,15 @@ Schema:
   "sections": ["string"]
 }}
 
+Field guidance:
+- title: an Etsy-optimized title of 120-140 characters. Front-load the main
+  keyword, then pack complementary long-tail keywords a buyer would search,
+  separated by commas or pipes. Etsy weights the title heavily in search, so
+  use most of the 140 characters (never fewer than 20).
+- description: 120+ characters, natural and compelling.
+- keywords: at least 3 specific search terms.
+- sections: at least 4 section strings.
+
 TASK:
 {step}
 

@@ -146,10 +146,19 @@ class PDFGenerationService:
                 # rule. The generated layout already contains its own headings.
 
                 qa = self._review_page(img, product_name, brief, i, page_count)
-                if qa is None or qa.passed:
+                if qa is not None and qa.passed:
                     page_img = img
                     break
-                last_issues = qa.specific_issues
+                # P1-4: fail CLOSED. A None result means the vision QA could NOT
+                # run (rate limit / key issue) — previously that silently PASSED
+                # the page, shipping an unreviewed (possibly garbled) page to a
+                # paying customer. Now it's a failed attempt like any other:
+                # retry, then block the whole PDF (consistent with the single-
+                # image gate, which already fails closed).
+                if qa is None:
+                    last_issues = ["page QA unavailable (vision review could not run)"]
+                else:
+                    last_issues = qa.specific_issues
                 logger.warning(
                     f"PDFGenerationService: page {i}/{page_count} failed content QA "
                     f"(attempt {attempt}/{qa_attempts}): {last_issues}"
@@ -202,10 +211,9 @@ class PDFGenerationService:
         )
 
     def _review_page(self, img: PILImage.Image, product_name: str, brief: str, page_num: int, total: int):
-        """Content-QA a single rendered page. Returns a ContentQualityResult or
-        None if QA is unavailable (never silently passes on infra error — a
-        None result is treated as pass only when QA genuinely cannot run, e.g.
-        a test double omitted it; a real failed judgment returns passed=False)."""
+        """Content-QA a single rendered page. Returns a ContentQualityResult, or
+        None if the vision QA could not run at all (infra error). Per P1-4 the
+        caller treats None as a FAILED attempt (fail closed), never a pass."""
         try:
             buf = BytesIO()
             img.save(buf, format="PNG")
@@ -239,10 +247,52 @@ class PDFGenerationService:
             return PILImage.open(BytesIO(resp.content)).copy()
         raise PDFGenerationError("image generation result has neither url nor b64_data")
 
+    # Etsy rejects digital files over 20MB; assemble well under that.
+    _ETSY_MAX_PDF_BYTES = 19_000_000
+    _PDF_LONG_EDGE_PX = 2200  # ~260dpi on letter — still print-quality
+
     def _assemble_pdf_bytes(self, pages: List[PILImage.Image]) -> bytes:
+        """P1-5: keep the assembled PDF under Etsy's 20MB per-file cap. Six 4K
+        (11MP) pages easily exceed it, which would 4xx the upload AFTER paying
+        for all page generations. Downscale each page to a print-quality long
+        edge, and if still over, re-encode pages as JPEG inside the PDF."""
+        scaled = [self._scale_for_pdf(p) for p in pages]
+
+        pdf_bytes = self._save_pages_pdf(scaled)
+        if len(pdf_bytes) <= self._ETSY_MAX_PDF_BYTES:
+            return pdf_bytes
+
+        # Still too big — re-encode with in-PDF JPEG compression (quality 85).
+        logger.warning(
+            f"PDFGenerationService: assembled PDF is {len(pdf_bytes)} bytes (> "
+            f"{self._ETSY_MAX_PDF_BYTES}); re-encoding pages as JPEG q85"
+        )
+        pdf_bytes = self._save_pages_pdf(
+            [p.convert("RGB") for p in scaled],
+            extra={"quality": 85, "optimize": True},
+        )
+        if len(pdf_bytes) > self._ETSY_MAX_PDF_BYTES:
+            raise PDFGenerationError(
+                f"assembled PDF is {len(pdf_bytes)} bytes, still over Etsy's "
+                f"{self._ETSY_MAX_PDF_BYTES}-byte limit after downscale + JPEG re-encode"
+            )
+        return pdf_bytes
+
+    def _scale_for_pdf(self, img: PILImage.Image) -> PILImage.Image:
+        long_edge = max(img.size)
+        if long_edge <= self._PDF_LONG_EDGE_PX:
+            return img
+        ratio = self._PDF_LONG_EDGE_PX / float(long_edge)
+        new_size = (max(1, int(img.width * ratio)), max(1, int(img.height * ratio)))
+        return img.resize(new_size, PILImage.LANCZOS)
+
+    def _save_pages_pdf(self, pages: List[PILImage.Image], extra: dict = None) -> bytes:
         buf = BytesIO()
         first, rest = pages[0], pages[1:]
-        first.save(buf, format="PDF", save_all=True, append_images=rest)
+        kwargs = {"format": "PDF", "save_all": True, "append_images": rest, "resolution": 150.0}
+        if extra:
+            kwargs.update(extra)
+        first.save(buf, **kwargs)
         return buf.getvalue()
 
     def _readback_page_count(self, pdf_path: Path) -> int:

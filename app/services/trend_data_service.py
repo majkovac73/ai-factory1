@@ -20,15 +20,19 @@ logger = logging.getLogger("ai-factory")
 # Etsy-relevant seed categories. Edit this list over time as you learn what
 # converts — this is not meant to be exhaustive, just a real anchor point.
 # Can be overridden without a code change via settings.TREND_SEED_KEYWORDS.
+# P1-10: seeds must anchor research to what the image/PDF pipeline can ACTUALLY
+# build. The old list steered toward svg files, editable templates and clipart
+# BUNDLES (bundles are explicitly banned by the multi-item validator) — none of
+# which are buildable, so cycles burned retries or produced mismatches.
 SEED_KEYWORDS = [
-    "digital planner",
     "printable wall art",
-    "svg files",
+    "digital planner",
+    "coloring pages",
+    "phone wallpaper aesthetic",
     "sticker sheet",
-    "wedding invitation template",
-    "printable planner",
-    "clipart bundle",
-    "birthday party printable",
+    "greeting card printable",
+    "funny t shirt",
+    "budget planner printable",
 ]
 
 _MAX_RETRIES = 3
