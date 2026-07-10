@@ -207,8 +207,24 @@ class TrendResearchAgent(BaseAgent):
 
         return None
 
+    @staticmethod
+    def _proposable_formats() -> list:
+        """B-1(b): formats the concept generator may propose — excludes
+        pod_apparel_design while POD is paused (POD_APPAREL_ENABLED=False)."""
+        formats = list(_FORMAT_LIST)
+        if not getattr(settings, "POD_APPAREL_ENABLED", False):
+            formats = [f for f in formats if f != "pod_apparel_design"]
+        return formats
+
     def _build_concept_prompt(self, insight: str, feedback: str) -> str:
         retry_note = f"\n\nIMPORTANT — retry feedback:\n{feedback}" if feedback else ""
+        # B-1(b): only advertise POD when it's enabled.
+        pod_line = (
+            "  Multi-image print-on-demand:\n"
+            "    - pod_apparel_design (one core design printed on apparel/merchandise;\n"
+            "      the pipeline generates additional listing photos separately)\n\n"
+            if getattr(settings, "POD_APPAREL_ENABLED", False) else ""
+        )
         # A-3: list existing shop products so the model doesn't re-propose them.
         dedup_note = ""
         if self._recent_products:
@@ -234,11 +250,7 @@ produce products in these exact formats — nothing else is buildable:
     - sticker_sheet_design (ONE image containing multiple sticker designs
       laid out on a single sheet — still one product, one image)
 
-  Multi-image print-on-demand:
-    - pod_apparel_design (one core design printed on apparel/merchandise;
-      the pipeline generates additional listing photos separately)
-
-Given this market insight, propose ONE specific, nameable, buildable product
+{pod_line}Given this market insight, propose ONE specific, nameable, buildable product
 that fits EXACTLY ONE of the formats above — NOT a market strategy, NOT a
 category, NOT a bundle/set/kit/collection of multiple items, and NOT
 anything requiring software/interactivity (no apps, no AR, no "tools" —
@@ -250,7 +262,7 @@ Market insight:
 Return ONLY valid JSON with this structure:
 {{
   "product_name": "a specific, concrete product name, e.g. 'Plant Parent Weekly Care Planner'",
-  "product_format": "one of: {', '.join(_FORMAT_LIST)}",
+  "product_format": "one of: {', '.join(self._proposable_formats())}",
   "page_count": <integer, ONLY meaningful/required if product_format is pdf_planner_or_guide, otherwise omit or set to 1>,
   "description": "1-2 sentences specific to THIS item, mentioning it by name",
   "target_audience": "who this is for",
@@ -363,6 +375,12 @@ Return ONLY valid JSON with this structure:
         product_format = data.get("product_format")
         if product_format not in PRODUCT_FORMATS:
             return f"product_format must be one of {_FORMAT_LIST}, got {product_format!r}"
+        # B-1(b): reject POD while it's paused.
+        if product_format not in self._proposable_formats():
+            return (
+                f"product_format '{product_format}' is currently paused — choose one of "
+                f"{self._proposable_formats()}"
+            )
 
         description = (data.get("description") or "").strip()
         if not description:

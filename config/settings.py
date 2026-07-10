@@ -150,6 +150,13 @@ class Settings(BaseSettings):
     # AUTONOMY_ENABLED and the daily task/spend caps. 0 disables.
     WINNER_VARIANTS_PER_DAY: int = 2
 
+    # B-1(b): a POD t-shirt listing where the buyer can't pick a size converts
+    # near zero, yet each POD task costs full pipeline money. Paused by default
+    # (the concept generator won't propose pod_apparel_design) until real Etsy
+    # variations are built (B-1(a)). Existing POD listings/fulfillment still work;
+    # this only stops NEW POD products. Set True in Railway to re-enable.
+    POD_APPAREL_ENABLED: bool = False
+
     # P0-9: crash-resume bounds. On startup, DONE tasks whose post-completion
     # pipeline never recorded an outcome (crashed mid-pipeline) are re-run — but
     # ONLY those updated within the last N hours and at most this many, so a
