@@ -2,13 +2,15 @@ import logging
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 load_dotenv()
 
 from app.api.api import api_router
+from app.api.auth import is_authorized
 from app.db.database import Base, engine
 from app.db.migrations import run_all_migrations
 from app.models import agent_execution, log, task, task_step, etsy_token, marketing_post, pinterest_token, tumblr_token, analytics_event, image_asset, pod_product, fulfillment_record  # noqa: F401
@@ -39,6 +41,29 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def factory_key_guard(request: Request, call_next):
+    """
+    P0-3: gate money-spending / shop-mutating requests behind FACTORY_API_KEY.
+
+    Enforcement is OFF when FACTORY_API_KEY is unset (deploy-safe: nothing
+    breaks). When set, any POST/PUT/PATCH/DELETE — plus the sensitive /logs
+    reads (they contain full prompts/outputs) — must carry header
+    `X-Factory-Key: <FACTORY_API_KEY>`. Read-only dashboards, /health (Railway
+    healthcheck), the /ui static frontend, and external OAuth callbacks stay
+    open so the browser dashboard and platform healthcheck keep working.
+    See app/api/auth.py for the (unit-tested) decision logic.
+    """
+    if not is_authorized(
+        request.url.path, request.method, request.headers.get("X-Factory-Key")
+    ):
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Missing or invalid X-Factory-Key"},
+        )
+    return await call_next(request)
+
 
 @app.on_event("startup")
 async def startup_event():
