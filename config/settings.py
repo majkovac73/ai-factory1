@@ -78,6 +78,16 @@ class Settings(BaseSettings):
     ETSY_SHIPPING_PROFILE_ID: str | None = None
     ETSY_SHOP_ORIGIN_COUNTRY: str = "US"  # ISO 3166-1 alpha-2; set in env if shop is not US-based
 
+    # STEP 103 C-2: Etsy Creativity Standards require POD listings to DECLARE
+    # their production partner (Printify). Maj adds Printify in Shop Manager
+    # (Settings → Production partners), then GET /shops/{id}/production-partners
+    # for the id and sets this env; POD listings then send production_partner_ids.
+    # Unset = not sent (safe, but POD listings are then non-compliant).
+    ETSY_PRODUCTION_PARTNER_ID: str | None = None
+    # Honest AI-assisted-design disclosure appended to every listing description
+    # (Etsy requires accurate "how it's made" info). Mirror it in the shop About.
+    SHOP_AI_DISCLOSURE: str = "Original design created using AI-assisted design tools and refined for print."
+
     ETSY_RECEIPT_POLL_SECONDS: int = 300
 
     # P0-7: a fulfillment (Printify order) submit that fails is retried on each

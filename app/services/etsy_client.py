@@ -71,6 +71,15 @@ class EtsyClient:
                 payload["shipping_profile_id"] = listing["shipping_profile_id"]
             if listing.get("readiness_state_id"):
                 payload["readiness_state_id"] = listing["readiness_state_id"]
+            # C-2: declare the production partner (Printify) on POD physical
+            # listings — required by Etsy's Creativity Standards. Only sent when
+            # ETSY_PRODUCTION_PARTNER_ID is configured.
+            partner_id = getattr(settings, "ETSY_PRODUCTION_PARTNER_ID", None)
+            if partner_id:
+                try:
+                    payload["production_partner_ids"] = [int(partner_id)]
+                except (TypeError, ValueError):
+                    pass
 
         async with httpx.AsyncClient() as client:
             response = await client.post(

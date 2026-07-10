@@ -1062,6 +1062,13 @@ class PipelineOrchestrator:
             if title_hit:
                 raise RuntimeError(f"listing title/name contains a trademarked term '{title_hit}' — refusing to publish")
 
+            # C-2: append the honest AI-assisted-design disclosure (Etsy requires
+            # accurate "how it's made" info).
+            from config import settings as _settings
+            disclosure = getattr(_settings, "SHOP_AI_DISCLOSURE", "")
+            if disclosure and disclosure.lower() not in (listing.get("description") or "").lower():
+                listing["description"] = (listing.get("description") or "").rstrip() + f"\n\n{disclosure}"
+
             # P1-6: make the description's page-count truthful. Rewrite any
             # "N-page"/"N pages" claim to the REAL count and append an explicit
             # line, so a buyer never receives a different number of pages than
