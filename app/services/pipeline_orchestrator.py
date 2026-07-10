@@ -209,7 +209,11 @@ class PipelineOrchestrator:
             return report
 
         # 5 — create Etsy draft listing
-        listing_id = self._stage_create_listing(task_id, product_name, output_data, task_type, is_pod, report, pod_product=pod_product)
+        # P1-6: reconcile the listing's page-count claims with the REAL number of
+        # PDF pages actually produced (sections can differ from the concept's
+        # page_count), so the description never promises a different count.
+        pdf_page_count = report["stages"].get("delivery_asset", {}).get("page_count") if is_pdf else None
+        listing_id = self._stage_create_listing(task_id, product_name, output_data, task_type, is_pod, report, pod_product=pod_product, pdf_page_count=pdf_page_count)
 
         # 6 — attach images / digital file, then publish; readback-verify both
         if listing_id:
@@ -786,12 +790,22 @@ class PipelineOrchestrator:
         # digital/pod label they already understand rather than touching them.
         mapped_type = "pod" if PRODUCT_FORMATS.get(task_type, {}).get("category") == "pod" else "digital_download"
 
+        # P1-2: deliver the file in the shape the product actually needs (a phone
+        # wallpaper is 9:16, not a 1:1 square). Non-square renders at 4K to clear
+        # Seedream's ~3.69M-pixel floor.
+        from app.core.product_formats import delivery_aspect_for, aspect_to_ratio
+        delivery_aspect = delivery_aspect_for(task_type)
+        delivery_resolution = "2K" if delivery_aspect == "1:1" else "4K"
+        expected_ratio = aspect_to_ratio(delivery_aspect)
+
         try:
             result = PODPipelineService().build_product_record(
                 task_id=task_id,
                 product_name=product_name,
                 visual_brief=visual_brief,
                 product_type=mapped_type,
+                aspect_ratio=delivery_aspect,
+                resolution=delivery_resolution,
             )
             design_str = result.get("design_path")
             if not design_str:
@@ -809,7 +823,7 @@ class PipelineOrchestrator:
                 self._flatten_white_background(design_path)
 
             try:
-                ImageValidationService().validate(design_path, use_case="delivery")
+                ImageValidationService().validate(design_path, use_case="delivery", expected_ratio=expected_ratio)
                 self.catalog.register(
                     task_id=task_id,
                     local_path=str(design_path),
@@ -925,7 +939,7 @@ class PipelineOrchestrator:
                 f"to listing {listing_id}: {e}"
             )
 
-    def _stage_create_listing(self, task_id: str, product_name: str, output_data: dict, task_type: str, is_pod: bool, report: dict, pod_product=None) -> Optional[str]:
+    def _stage_create_listing(self, task_id: str, product_name: str, output_data: dict, task_type: str, is_pod: bool, report: dict, pod_product=None, pdf_page_count: Optional[int] = None) -> Optional[str]:
         from app.services.etsy_shipping_service import EtsyShippingService
         from app.services.etsy_client import DIGITAL_WHEN_MADE, POD_WHEN_MADE
 
@@ -950,6 +964,18 @@ class PipelineOrchestrator:
             listing = ListingGeneratorAgent().generate_listing(product, output_data)
             listing["taxonomy_id"] = intended_taxonomy_id
             listing["when_made"] = intended_when_made
+
+            # P1-6: make the description's page-count truthful. Rewrite any
+            # "N-page"/"N pages" claim to the REAL count and append an explicit
+            # line, so a buyer never receives a different number of pages than
+            # the listing promised.
+            if pdf_page_count:
+                import re
+                desc = listing.get("description") or ""
+                desc = re.sub(r"\b\d+(?=[\s-]?pages?\b)", str(pdf_page_count), desc, flags=re.I)
+                if "printable page" not in desc.lower():
+                    desc = desc.rstrip() + f"\n\nIncludes {pdf_page_count} printable pages."
+                listing["description"] = desc
 
             # P0-11: never let a None/0/out-of-band LLM price reach Etsy — clamp
             # into the format's band (midpoint if invalid). Etsy rejects <$0.20.

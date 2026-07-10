@@ -62,13 +62,16 @@ class ImageValidationService:
     caller should treat this as a signal to regenerate.
     """
 
-    def validate(self, path: Path, use_case: str = "listing") -> dict:
+    def validate(self, path: Path, use_case: str = "listing", expected_ratio=None) -> dict:
         """
         Validate a saved image file.
 
         Args:
             path: Filesystem path to the image file.
             use_case: 'listing', 'delivery', or 'pinterest'.
+            expected_ratio: optional (w, h) tuple overriding the use_case's
+                default aspect (P1-2 — e.g. a 9:16 phone wallpaper delivery must
+                not be checked against the hardcoded 1:1 delivery rule).
 
         Returns:
             Dict with validation details (width, height, file_size, etc.).
@@ -110,7 +113,7 @@ class ImageValidationService:
                 f"need at least {rules['min_width']}x{rules['min_height']}."
             )
 
-        ew, eh = rules["expected_ratio"]
+        ew, eh = expected_ratio if expected_ratio else rules["expected_ratio"]
         expected_ratio = ew / eh
         actual_ratio = width / height
         tolerance = rules["ratio_tolerance"]

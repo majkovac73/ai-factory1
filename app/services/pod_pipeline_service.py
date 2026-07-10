@@ -43,6 +43,8 @@ class PODPipelineService:
         visual_brief: str,
         product_type: str = "digital_download",
         filename: str = "design.png",
+        aspect_ratio: str = "1:1",
+        resolution: str = "2K",
     ) -> Optional[Path]:
         """
         Generate and store the delivery-ready design artifact for a product.
@@ -67,6 +69,8 @@ class PODPipelineService:
             "visual_brief": visual_brief,
             "product_type": product_type,
             "filename": filename,
+            "aspect_ratio": aspect_ratio,
+            "resolution": resolution,
         })
         return result["design_path"]
 
@@ -76,6 +80,8 @@ class PODPipelineService:
         product_name: str,
         visual_brief: str,
         product_type: str = "digital_download",
+        aspect_ratio: str = "1:1",
+        resolution: str = "2K",
     ) -> dict:
         """
         High-level entry point: generate the design and return a product record
@@ -90,6 +96,8 @@ class PODPipelineService:
             product_name=product_name,
             visual_brief=visual_brief,
             product_type=product_type,
+            aspect_ratio=aspect_ratio,
+            resolution=resolution,
         )
         return {
             "task_id": task_id,

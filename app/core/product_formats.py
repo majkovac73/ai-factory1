@@ -58,15 +58,35 @@ step 93 changelog):
 # pod_apparel_design's band is only a conservative FALLBACK floor — real POD
 # pricing must be cost-based (P0-4) to guarantee margin; the band keeps it from
 # ever going stupidly low if that computation is unavailable.
+# delivery_aspect (P1-2): the shape the DELIVERED file must be. A phone
+# wallpaper delivered as a 1:1 square is a bad product (phones are 9:16); a
+# greeting card is portrait; coloring pages are usually 8.5x11 portrait. Only
+# single_print / sticker_sheet / pod design stay square. Values are OpenRouter
+# aspect strings; non-square delivery renders at 4K to clear Seedream's pixel
+# floor (see PipelineOrchestrator._stage_pod_design).
 PRODUCT_FORMATS = {
-    "single_print":         {"category": "digital", "delivery": "single_image", "taxonomy_id": 2078, "price_band": (3.50, 8.00)},
-    "coloring_page":        {"category": "digital", "delivery": "single_image", "taxonomy_id": 339,  "price_band": (2.00, 4.50)},
-    "greeting_card_design": {"category": "digital", "delivery": "single_image", "taxonomy_id": 1280, "price_band": (3.00, 6.00)},
-    "phone_wallpaper":      {"category": "digital", "delivery": "single_image", "taxonomy_id": 2078, "price_band": (2.00, 4.00)},
-    "sticker_sheet_design": {"category": "digital", "delivery": "single_image", "taxonomy_id": 1326, "price_band": (3.00, 6.00)},
-    "pdf_planner_or_guide": {"category": "digital", "delivery": "pdf",          "taxonomy_id": 354,  "price_band": (5.00, 12.00)},
-    "pod_apparel_design":   {"category": "pod",     "delivery": "single_image", "taxonomy_id": 482,  "price_band": (24.00, 40.00)},
+    "single_print":         {"category": "digital", "delivery": "single_image", "taxonomy_id": 2078, "price_band": (3.50, 8.00),  "delivery_aspect": "1:1"},
+    "coloring_page":        {"category": "digital", "delivery": "single_image", "taxonomy_id": 339,  "price_band": (2.00, 4.50),  "delivery_aspect": "3:4"},
+    "greeting_card_design": {"category": "digital", "delivery": "single_image", "taxonomy_id": 1280, "price_band": (3.00, 6.00),  "delivery_aspect": "3:4"},
+    "phone_wallpaper":      {"category": "digital", "delivery": "single_image", "taxonomy_id": 2078, "price_band": (2.00, 4.00),  "delivery_aspect": "9:16"},
+    "sticker_sheet_design": {"category": "digital", "delivery": "single_image", "taxonomy_id": 1326, "price_band": (3.00, 6.00),  "delivery_aspect": "1:1"},
+    "pdf_planner_or_guide": {"category": "digital", "delivery": "pdf",          "taxonomy_id": 354,  "price_band": (5.00, 12.00), "delivery_aspect": "3:4"},
+    "pod_apparel_design":   {"category": "pod",     "delivery": "single_image", "taxonomy_id": 482,  "price_band": (24.00, 40.00), "delivery_aspect": "1:1"},
 }
+
+
+def delivery_aspect_for(product_format: str) -> str:
+    """Return the delivered-file aspect string for a format (default '1:1')."""
+    return (PRODUCT_FORMATS.get(product_format) or {}).get("delivery_aspect", "1:1")
+
+
+def aspect_to_ratio(aspect: str):
+    """Parse an aspect string like '9:16' into an (w, h) int tuple; default (1,1)."""
+    try:
+        w, h = aspect.split(":")
+        return int(w), int(h)
+    except Exception:
+        return (1, 1)
 
 # Fallback band for any format missing one (defensive — every format above has
 # an explicit band).
