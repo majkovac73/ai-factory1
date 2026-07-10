@@ -228,6 +228,16 @@ class PipelineOrchestrator:
         self._stage_pinterest(task_id, product_name, visual_brief, output_data, report)
         self._stage_tumblr(task_id, product_name, output_data, listing_id, report)
 
+        # P0-9: stamp COMPLETED so a restart's resume scan won't re-run (and
+        # re-spend on) this task. Only when a real listing was produced and the
+        # task wasn't blocked — a create_listing failure stays unmarked so it can
+        # be resumed/retried.
+        if listing_id and not report.get("blocked"):
+            try:
+                self.task_service.mark_pipeline_completed(task_id, listing_id)
+            except Exception as e:
+                logger.warning(f"PipelineOrchestrator: failed to mark completed for {task_id}: {e}")
+
         self.log_service.info(
             source="PipelineOrchestrator",
             message=f"Post-completion pipeline finished for task {task_id}",

@@ -2,7 +2,7 @@ from typing import List
 
 from fastapi import APIRouter, HTTPException
 
-from app.schemas.task import TaskCreate, TaskResponse, TaskStatusUpdate, EtsyListingRequest
+from app.schemas.task import TaskCreate, TaskResponse, TaskStatusUpdate
 from app.services.task_service import TaskService
 from app.services.task_processor import TaskProcessor
 from app.orchestrator.core import Orchestrator
@@ -65,7 +65,21 @@ def retry_task(task_id: str):
 def retry_all_failed_tasks():
     return task_service.retry_all_failed()
 
-@router.post("/etsy/listing", response_model=TaskResponse)
-def create_etsy_listing_task(request: EtsyListingRequest):
-    task_data = TaskCreate(prompt=request.prompt, type="seo_writing", metadata=request.metadata)
-    return task_service.create_task(task_data)
+
+@router.post("/{task_id}/pipeline")
+def run_task_pipeline(task_id: str):
+    """P0-9: manually (re-)run the post-completion pipeline (image gen → listing
+    → marketing) for a DONE task — recovery for a task that crashed mid-pipeline
+    or whose listing creation failed. Idempotent stages are safe to re-run.
+    Protected by the FACTORY_API_KEY middleware (POST)."""
+    from app.services.pipeline_orchestrator import PipelineOrchestrator
+    task = task_service.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    report = PipelineOrchestrator().run_post_completion(task_id)
+    return report
+
+# P2-3: the legacy POST /tasks/etsy/listing endpoint was removed — it hardcoded
+# type="seo_writing", which the pipeline default-denies, so it could never
+# produce a listing (a trap that looked successful). Use POST /tasks with a real
+# product_format `type` instead.

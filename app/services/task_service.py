@@ -1,9 +1,13 @@
+import logging
+
 from fastapi import HTTPException
 
 from app.db.database import SessionLocal
 from app.models.task import Task
 from app.schemas.enums import TaskStatus, TASK_STATUS_TRANSITIONS
-from app.services.task_queue import TaskQueue   
+from app.services.task_queue import TaskQueue
+
+logger = logging.getLogger("ai-factory")   
 
 
 class TaskService:
@@ -190,6 +194,68 @@ class TaskService:
         except Exception as e:
             db.rollback()
             raise HTTPException(status_code=500, detail=f"Failed to record pipeline block: {e}")
+        finally:
+            db.close()
+
+    def mark_pipeline_completed(self, task_id: str, listing_id: str = None):
+        """P0-9: stamp a DONE task's output_data with pipeline_status=COMPLETED
+        (+ listing_id) once its post-completion pipeline produced a listing, so
+        the crash-resume scan knows NOT to re-run it."""
+        db = SessionLocal()
+        try:
+            task = db.query(Task).filter(Task.id == task_id).first()
+            if not task:
+                return
+            merged = dict(task.output_data or {})
+            merged["pipeline_status"] = "COMPLETED"
+            if listing_id:
+                merged["listing_id"] = str(listing_id)
+            task.output_data = merged
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            logger.warning(f"TaskService: failed to mark pipeline completed for {task_id}: {e}")
+        finally:
+            db.close()
+
+    def enqueue_new_tasks(self) -> int:
+        """P0-9: the TaskQueue is in-memory, so any task still in NEW at crash
+        time is stranded on restart. Re-enqueue every NEW task at startup."""
+        db = SessionLocal()
+        try:
+            ids = [t.id for t in db.query(Task).filter(Task.status == TaskStatus.NEW.value).all()]
+        finally:
+            db.close()
+        for tid in ids:
+            self.queue.enqueue(tid)
+        if ids:
+            logger.info(f"TaskService: re-enqueued {len(ids)} NEW task(s) at startup")
+        return len(ids)
+
+    def get_resumable_pipeline_tasks(self, window_hours: int = 6, limit: int = 5) -> list:
+        """P0-9: DONE tasks whose post-completion pipeline never recorded an
+        outcome (no pipeline_status) — i.e. it crashed mid-pipeline. Bounded to a
+        recent time window and a small cap so a first deploy can't mass-re-run
+        (and re-spend on) the entire history. Returns [(task_id, task_type)]."""
+        from datetime import datetime, timedelta
+        cutoff = datetime.utcnow() - timedelta(hours=window_hours)
+        db = SessionLocal()
+        try:
+            rows = (
+                db.query(Task)
+                .filter(Task.status == TaskStatus.DONE.value)
+                .filter(Task.updated_at >= cutoff)
+                .order_by(Task.updated_at.desc())
+                .all()
+            )
+            out = []
+            for t in rows:
+                if (t.output_data or {}).get("pipeline_status"):
+                    continue  # already COMPLETED or BLOCKED — don't re-run
+                out.append((t.id, t.type))
+                if len(out) >= limit:
+                    break
+            return out
         finally:
             db.close()
 

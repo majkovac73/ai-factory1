@@ -113,6 +113,13 @@ class Settings(BaseSettings):
 
     AUTO_PUBLISH_LISTINGS: bool = False
 
+    # P0-9: crash-resume bounds. On startup, DONE tasks whose post-completion
+    # pipeline never recorded an outcome (crashed mid-pipeline) are re-run — but
+    # ONLY those updated within the last N hours and at most this many, so a
+    # first deploy can't mass-re-run (and re-spend on) the whole task history.
+    PIPELINE_RESUME_WINDOW_HOURS: int = 6
+    PIPELINE_RESUME_MAX: int = 5
+
     # Recurring marketing-refresh automation (re-promotes EXISTING published
     # products using their ALREADY-GENERATED assets — no new image generation).
     # Same safety philosophy as AUTONOMY_ENABLED: OFF by default, Maj enables
