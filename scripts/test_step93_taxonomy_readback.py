@@ -128,9 +128,9 @@ def _make_done_task(prompt, task_type):
     return ts.get_task(t.id)
 
 
-def _fake_image_path(tmp_dir, name="asset.png"):
+def _fake_image_path(tmp_dir, name="asset.png", size=(1024, 1024)):
     p = Path(tmp_dir) / name
-    img = PILImage.new("RGB", (1024, 1024), color=(90, 140, 200))
+    img = PILImage.new("RGB", size, color=(90, 140, 200))
     img.save(p, format="PNG")
     return p
 
@@ -161,7 +161,9 @@ def _patch_common(tmp):
 print("[2] orchestrator sends the correct product_format-specific taxonomy_id...")
 
 with tempfile.TemporaryDirectory() as tmp:
-    design2 = _fake_image_path(tmp, "design2.png")
+    # greeting_card_design delivers at 3:4 (P1-2), so the fake delivery asset
+    # must be 3:4 to pass delivery validation.
+    design2 = _fake_image_path(tmp, "design2.png", size=(1536, 2048))
     task2 = _make_done_task("Just Because Family Recipe Card", "greeting_card_design")
     orch2 = PipelineOrchestrator()
     pia2, lga2, pis2, ms2 = _patch_common(tmp)

@@ -23,21 +23,61 @@ class ListingGeneratorAgent(BaseAgent):
     MAX_TAGS = 13
     MAX_TAG_LENGTH = 20
 
-    def _derive_tags(self, keywords: list) -> list:
+    def _derive_tags(self, keywords: list, product_name: str = "", extra_terms: list = None) -> list:
         """
-        Converts SEO keywords into Etsy-compliant tags: max 20 chars
-        each, deduplicated, capped at 13 tags (Etsy's actual limit).
+        Converts SEO keywords into Etsy-compliant tags: max 20 chars each,
+        deduplicated, and — A-4 — PADDED to a full 13 tags. Every unused tag
+        slot is a search you can never appear in, so we fill them from the
+        product name's 2-3 word phrases and keyword combinations when the LLM
+        returns fewer than 13. Prefers multi-word phrases (they match Etsy
+        phrase searches better than single words).
         """
         tags = []
         seen = set()
-        for kw in keywords:
-            tag = kw.strip()[: self.MAX_TAG_LENGTH]
+
+        def _add(candidate: str) -> bool:
+            if not candidate:
+                return False
+            tag = " ".join(candidate.split()).strip()[: self.MAX_TAG_LENGTH].strip()
             key = tag.lower()
-            if tag and key not in seen:
+            if tag and key not in seen and len(tag) >= 3:
                 tags.append(tag)
                 seen.add(key)
+                return True
+            return False
+
+        # 1. The LLM's keywords first (highest intent), multi-word preferred.
+        for kw in sorted([k for k in keywords if isinstance(k, str)], key=lambda k: (len(k.split()) < 2, keywords.index(k))):
+            _add(kw)
             if len(tags) >= self.MAX_TAGS:
-                break
+                return tags
+
+        # 2. Caller-provided extra phrases (e.g. real winning-title n-grams, A-2).
+        for term in (extra_terms or []):
+            if isinstance(term, str):
+                _add(term)
+                if len(tags) >= self.MAX_TAGS:
+                    return tags
+
+        # 3. Pad from 2-3 word phrases built out of the product name tokens.
+        tokens = [t for t in "".join(c if c.isalnum() or c.isspace() else " " for c in (product_name or "").lower()).split() if len(t) > 2]
+        phrases = []
+        for n in (3, 2):
+            for i in range(len(tokens) - n + 1):
+                phrases.append(" ".join(tokens[i:i + n]))
+        for phrase in phrases:
+            _add(phrase)
+            if len(tags) >= self.MAX_TAGS:
+                return tags
+
+        # 4. Last resort: combine existing keywords with common buyer modifiers.
+        modifiers = ["printable", "digital", "wall art", "gift", "decor", "download", "instant"]
+        base_words = tokens or [t for kw in keywords if isinstance(kw, str) for t in kw.split()]
+        for w in base_words:
+            for m in modifiers:
+                _add(f"{w} {m}")
+                if len(tags) >= self.MAX_TAGS:
+                    return tags
         return tags
 
     def generate_listing(self, product: dict, seo_data: dict) -> dict:
@@ -103,7 +143,11 @@ Rules:
             "product_name": product.get("product_name", ""),
             "title": seo_data.get("title", ""),
             "description": seo_data.get("description", ""),
-            "tags": self._derive_tags(seo_data.get("keywords", [])),
+            "tags": self._derive_tags(
+                seo_data.get("keywords", []),
+                product_name=product.get("product_name", "") or seo_data.get("title", ""),
+                extra_terms=product.get("tag_terms"),
+            ),
             "sections": seo_data.get("sections", []),
             "materials": product.get("materials", []),
             "target_audience": product.get("target_audience", ""),

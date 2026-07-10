@@ -39,8 +39,15 @@ Field guidance:
   keyword, then pack complementary long-tail keywords a buyer would search,
   separated by commas or pipes. Etsy weights the title heavily in search, so
   use most of the 140 characters (never fewer than 20).
-- description: 120+ characters, natural and compelling.
-- keywords: at least 3 specific search terms.
+- description: open with a compelling hook sentence (<=160 chars, keyword-rich)
+  that also reads well as a Google/Etsy snippet, then a short, specific
+  paragraph. (Standard "what you get / how it works / terms" sections are added
+  automatically — focus on the creative hook and what makes THIS item special.)
+- keywords: EXACTLY 13 Etsy tags. Each is a buyer-search PHRASE of 2-3 words,
+  <=20 characters, no punctuation, all lowercase. Mix head terms and specific
+  long-tail phrases a real buyer would type (e.g. "boho wall art", "nursery
+  print", "sage green decor"). Every one of the 13 tag slots is a search you can
+  appear in — use all 13, no single-word filler, no duplicates.
 - sections: at least 4 section strings.
 
 TASK:

@@ -1062,6 +1062,15 @@ class PipelineOrchestrator:
             if title_hit:
                 raise RuntimeError(f"listing title/name contains a trademarked term '{title_hit}' — refusing to publish")
 
+            # A-4: real per-format materials (was always empty) + deterministic
+            # buyer-question-answering description blocks (WHAT YOU GET / HOW IT
+            # WORKS / TERMS) appended to the LLM's creative hook.
+            from app.core.product_formats import materials_for, description_blocks
+            listing["materials"] = materials_for(task_type)
+            blocks = description_blocks(task_type, pdf_page_count)
+            if "WHAT YOU GET" not in (listing.get("description") or ""):
+                listing["description"] = (listing.get("description") or "").rstrip() + "\n\n" + blocks
+
             # C-2: append the honest AI-assisted-design disclosure (Etsy requires
             # accurate "how it's made" info).
             from config import settings as _settings

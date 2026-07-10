@@ -107,3 +107,60 @@ def clamp_price(price, product_format: str) -> float:
     if not isinstance(price, (int, float)) or isinstance(price, bool) or price < lo or price > hi:
         return round((lo + hi) / 2, 2)
     return round(float(price), 2)
+
+
+# A-4: Etsy materials per format (the old code always sent an empty list, wasting
+# a small search/relevance surface). Physical POD carries real materials.
+_MATERIALS = {
+    "single_print":         ["digital download", "printable wall art", "high resolution"],
+    "coloring_page":        ["digital download", "printable coloring page", "instant download"],
+    "greeting_card_design": ["digital download", "printable greeting card"],
+    "phone_wallpaper":      ["digital download", "phone wallpaper", "instant download"],
+    "sticker_sheet_design": ["digital download", "printable stickers"],
+    "pdf_planner_or_guide": ["digital download", "printable planner", "PDF"],
+    "pod_apparel_design":   ["cotton", "unisex t-shirt", "DTG print"],
+}
+
+
+def materials_for(product_format: str) -> list:
+    return list(_MATERIALS.get(product_format, ["digital download"]))
+
+
+def description_blocks(product_format: str, page_count: int = None) -> str:
+    """A-4: deterministic, buyer-question-answering description sections appended
+    to the LLM's creative hook — "WHAT YOU GET", "HOW IT WORKS", usage terms.
+    These can't be hallucinated away and answer exactly what a buyer needs to
+    decide, which a free-form blurb doesn't."""
+    spec = PRODUCT_FORMATS.get(product_format) or {}
+    is_pod = spec.get("category") == "pod"
+    is_pdf = spec.get("delivery") == "pdf"
+
+    what = {
+        "single_print": "• 1 high-resolution digital print file, ready to print at home, at a local shop, or online.",
+        "coloring_page": "• 1 printable coloring page (high-resolution PNG) — print as many copies as you like for personal use.",
+        "greeting_card_design": "• 1 printable greeting card design (high-resolution file).",
+        "phone_wallpaper": "• 1 high-resolution phone wallpaper sized for modern smartphones.",
+        "sticker_sheet_design": "• 1 printable sticker sheet (high-resolution PNG) — print onto sticker paper and cut out.",
+        "pdf_planner_or_guide": f"• 1 printable PDF{f' with {page_count} pages' if page_count else ''} — print at home or use on a tablet.",
+        "pod_apparel_design": "• 1 made-to-order apparel item, printed just for you (see the size/variant note above).",
+    }.get(product_format, "• 1 digital file.")
+
+    if is_pod:
+        how = (
+            "HOW IT WORKS\n"
+            "• Made to order and printed just for you, then shipped by our production partner.\n"
+            "• See the listing photos for the exact product and print placement."
+        )
+    else:
+        how = (
+            "HOW IT WORKS\n"
+            "• Instant digital download — no physical item is shipped.\n"
+            "• Files are available immediately after purchase in your Etsy account (Purchases → Downloads).\n"
+            + ("• Print at home, at a print shop, or online.\n" if not is_pdf else "• Open/print the PDF at home or use it on a tablet.\n")
+        ).rstrip()
+
+    terms = (
+        "TERMS\n"
+        "• For personal use only. Please do not resell, redistribute, or claim the design as your own."
+    )
+    return f"WHAT YOU GET\n{what}\n\n{how}\n\n{terms}"
