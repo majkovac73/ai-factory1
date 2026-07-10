@@ -138,7 +138,7 @@ with tempfile.TemporaryDirectory() as tmp:
             return {"listing_id": "SHOULD-NOT-HAPPEN"}
 
     class FailingPODPipelineService1:
-        def build_product_record(self, task_id, product_name, visual_brief, product_type):
+        def build_product_record(self, task_id, product_name, visual_brief, product_type, **kwargs):
             # Simulates image generation/validation failure: no design produced.
             return {"task_id": task_id, "design_path": None, "ready_for_pod": False}
 
@@ -175,7 +175,7 @@ with tempfile.TemporaryDirectory() as tmp:
     orch2 = PipelineOrchestrator()
 
     class OkPODPipelineService2:
-        def build_product_record(self, task_id, product_name, visual_brief, product_type):
+        def build_product_record(self, task_id, product_name, visual_brief, product_type, **kwargs):
             return {"task_id": task_id, "design_path": str(design2), "ready_for_pod": True}
 
     with patch("app.services.pipeline_orchestrator.ProductImageAgent") as m_pia2, \
@@ -237,7 +237,7 @@ with tempfile.TemporaryDirectory() as tmp:
     orch3 = PipelineOrchestrator()
 
     class OkPODPipelineService3:
-        def build_product_record(self, task_id, product_name, visual_brief, product_type):
+        def build_product_record(self, task_id, product_name, visual_brief, product_type, **kwargs):
             return {"task_id": task_id, "design_path": str(design3), "ready_for_pod": True}
 
     class FailingPODFulfillmentService3:
@@ -278,7 +278,7 @@ with tempfile.TemporaryDirectory() as tmp:
     orch4 = PipelineOrchestrator()
 
     class OkPODPipelineService4:
-        def build_product_record(self, task_id, product_name, visual_brief, product_type):
+        def build_product_record(self, task_id, product_name, visual_brief, product_type, **kwargs):
             return {"task_id": task_id, "design_path": str(design4), "ready_for_pod": True}
 
     delete_calls4 = []

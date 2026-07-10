@@ -123,7 +123,7 @@ print("[3] _stage_pod_design flattens the background for coloring_page, not othe
 
 class _FakePOD:
     def __init__(self, design): self._d = design
-    def build_product_record(self, task_id, product_name, visual_brief, product_type):
+    def build_product_record(self, task_id, product_name, visual_brief, product_type, **kwargs):
         return {"task_id": task_id, "design_path": str(self._d), "ready_for_pod": True}
 
 

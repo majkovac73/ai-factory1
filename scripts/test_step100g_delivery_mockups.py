@@ -218,7 +218,7 @@ def _make_done_single_print(tmp):
 
 class _OkPOD:
     def __init__(self, design): self._d = design
-    def build_product_record(self, task_id, product_name, visual_brief, product_type):
+    def build_product_record(self, task_id, product_name, visual_brief, product_type, **kwargs):
         return {"task_id": task_id, "design_path": str(self._d), "ready_for_pod": True}
 
 
