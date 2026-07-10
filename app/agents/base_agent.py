@@ -1,10 +1,5 @@
 import asyncio
 from app.core.providers.manager import ProviderManager
-from config import settings
-
-
-import asyncio
-from app.core.providers.manager import ProviderManager
 from app.services.log_service import LogService
 from config import settings
 

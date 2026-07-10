@@ -19,9 +19,15 @@ env/
 logs/
 *.log
 *.db
+*.db-wal
+*.db-shm
 *.sqlite
 *.sqlite3
 *.db-journal
+
+# Runtime artifacts — generated images, worker state, autonomy/spend ledgers.
+# These are produced at runtime (Railway uses the /data volume), never source.
+data/
 
 # IDE and OS files
 .vscode/

@@ -9,8 +9,8 @@ Request shape (confirmed from OpenRouter docs):
 Response shape:
   {"created": ..., "data": [{"b64_json": "<base64>"}], "usage": {...}}
 
-Default model: google/gemini-3.1-flash-image (configurable via
-settings.OPENROUTER_IMAGE_MODEL). Supported aspect_ratios for this model:
+Default model: settings.OPENROUTER_IMAGE_MODEL (currently
+bytedance-seed/seedream-4.5). Supported aspect_ratios:
   1:1, 2:3, 3:2, 4:3, 3:4, 16:9, 9:16, 4:5, 5:4, 1:4, 4:1, 1:8, 8:1, 21:9
 Supported resolutions: 512, 1K, 2K, 4K. Max n: 1.
 """
@@ -40,7 +40,7 @@ class OpenRouterImageProvider(BaseImageProvider):
             raise RuntimeError(
                 "OPENROUTER_API_KEY is not set — required for OpenRouter image generation."
             )
-        self._model = getattr(settings, "OPENROUTER_IMAGE_MODEL", "google/gemini-3.1-flash-image")
+        self._model = getattr(settings, "OPENROUTER_IMAGE_MODEL", "bytedance-seed/seedream-4.5")
 
     async def generate_image(
         self,

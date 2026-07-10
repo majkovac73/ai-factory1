@@ -110,7 +110,9 @@ class EtsyImageService:
             image_bytes = f.read()
 
         filename = str(image_path).split("\\")[-1].split("/")[-1]
-        files = {"image": (filename, image_bytes, "image/png")}
+        # P3-4: send the file's real MIME type (a JPEG mockup would be mislabeled
+        # as image/png) — _guess_content_type already exists in this module.
+        files = {"image": (filename, image_bytes, _guess_content_type(image_path, filename))}
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(

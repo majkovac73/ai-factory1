@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 class ImageGenerationResult:
     """
     Provider-agnostic result of an image generation call. Concrete
-    providers (e.g. DALLE3Provider in Step 67) populate whichever of
+    providers (OpenRouterImageProvider) populate whichever of
     url/b64_data their API returns, so calling code never needs to
     know which provider produced the image.
     """

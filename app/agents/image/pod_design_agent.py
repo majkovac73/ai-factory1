@@ -13,11 +13,12 @@ Generates the actual sellable design artifact. This image serves DOUBLE DUTY:
       Also stored as the 'delivery' variant so step 81 can find it without
       rework.
 
-The image is generated at the highest quality DALL-E 3 supports (1024x1024
-square, which is print-safe at reasonable output sizes). The prompt is
-constructed to produce a clean, print-ready design with transparent-bg
-intent (DALL-E 3 can't guarantee alpha channel, but the prompt guides it
-toward artwork-style output rather than a lifestyle photo).
+The image is generated via the configured OpenRouter image model
+(settings.OPENROUTER_IMAGE_MODEL, currently Seedream) at delivery quality
+(2K, or 4K for non-square delivery aspects). The prompt is constructed to
+produce a clean, print-ready design with transparent-bg intent (the model
+can't guarantee an alpha channel, but the prompt guides it toward
+artwork-style output rather than a lifestyle photo).
 """
 import asyncio
 from pathlib import Path
