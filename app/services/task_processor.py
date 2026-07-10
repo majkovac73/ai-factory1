@@ -131,7 +131,11 @@ class TaskProcessor:
         task = self.task_service.get_task(task_id)
         executor = ExecutorAgent()
 
-        plan = task.metadata_ or {}
+        # P3-8: the plan now lives under metadata_["plan"] (merged, not
+        # overwriting autonomy metadata). Fall back to the whole blob for any
+        # task planned before this change.
+        meta = task.metadata_ or {}
+        plan = meta.get("plan", meta)
         steps = plan.get("steps", [])
 
         if not steps:

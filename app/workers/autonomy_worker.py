@@ -94,11 +94,12 @@ class AutonomyWorker:
             logger.info("AutonomyWorker: daily task cap reached, skipping cycle")
             return
 
-        # Gate check uses worst-case estimate so the daily cap is never silently
-        # exceeded — but we only record the text-LLM portion ($0.05) upfront.
-        # PipelineOrchestrator records the image-gen portion ($0.20) on success,
-        # so a failed pipeline only burns $0.05 instead of the full $0.30.
-        estimated_max = 0.30
+        # P0-13: reserve against a realistic worst-case cycle cost before
+        # starting (a pdf_planner is ~$0.40-0.80 once PDF pages + QA + mockups +
+        # remakes are counted). Actual spend is recorded per-image at the
+        # provider choke point + per vision-QA call, so the ledger reflects
+        # reality instead of a flat guess.
+        estimated_max = 0.80
         if not autonomy.can_spend(estimated_max):
             logger.info(
                 f"AutonomyWorker: daily spend cap would be exceeded "
@@ -145,6 +146,7 @@ class AutonomyWorker:
         ))
 
         autonomy.record_task_created()
-        autonomy.record_spend(0.05, f"text-LLM cycle task={task.id[:8]}")
+        # P0-13: no flat text-LLM record here — real spend (images + vision-QA)
+        # is recorded as it happens downstream, so this no longer double-counts.
 
         logger.info(f"AutonomyWorker: created task {task.id} for product: {product_name[:80]}")

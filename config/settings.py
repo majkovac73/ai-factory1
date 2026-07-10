@@ -89,6 +89,16 @@ class Settings(BaseSettings):
 
     MAX_TASKS_PER_DAY: int = 10
     MAX_DAILY_SPEND_USD: float = 5.00
+
+    # P0-13: honest per-unit costs for the daily-spend ledger. Every image goes
+    # through OpenRouterImageProvider.generate_image (flat-rate Seedream), so
+    # counting each at IMAGE_COST_USD is accurate — this replaces the old flat
+    # $0.20/task guess that under-counted PDF pages, mockups, remakes, pins, etc.
+    # Vision-QA calls are cheap but counted so the ledger isn't fiction. ALL
+    # image spend is recorded (not just autonomy) so the cap protects the wallet
+    # globally.
+    IMAGE_COST_USD: float = 0.04
+    VISION_QA_COST_USD: float = 0.002
     AUTONOMY_ENABLED: bool = False
     AUTONOMY_SCHEDULE_SECONDS: int = 3600
 

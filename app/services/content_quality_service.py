@@ -130,6 +130,17 @@ class ContentQualityService:
         self.model = model or settings.CONTENT_QA_MODEL
         self.sanitizer = JSONSanitizer()
 
+    @staticmethod
+    def _charge_vision():
+        """P0-13: record each vision-QA call in the daily ledger (cheap, but keeps
+        the spend accounting honest). Best-effort; never breaks the review."""
+        try:
+            from app.services.autonomy_service import AutonomyService
+            cost = getattr(settings, "VISION_QA_COST_USD", 0.002)
+            AutonomyService().record_spend(cost, "vision QA")
+        except Exception:
+            pass
+
     # ── Single-asset content review ───────────────────────────────────────────
 
     def review_asset_bytes(
@@ -161,6 +172,7 @@ class ContentQualityService:
                 specific_issues=[f"content-quality vision call failed: {e}"],
                 error=str(e),
             )
+        self._charge_vision()
         return self._parse_review(raw)
 
     def review_asset_file(
@@ -212,6 +224,7 @@ class ContentQualityService:
                 specific_issues=[f"pdf-page content-quality vision call failed: {e}"],
                 error=str(e),
             )
+        self._charge_vision()
         return self._parse_review(raw)
 
     def _build_pdf_page_review_prompt(self, product_name: str, page_desc: str) -> str:
@@ -281,6 +294,7 @@ Return ONLY valid JSON, no markdown:
                 specific_issues=[f"consistency vision call failed: {e}"],
                 error=str(e),
             )
+        self._charge_vision()
         return self._parse_consistency(raw)
 
     # ── Prompts ───────────────────────────────────────────────────────────────

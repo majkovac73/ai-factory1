@@ -109,7 +109,11 @@ class TaskService:
             if not task:
                 raise HTTPException(status_code=404, detail="Task not found")
 
-            task.metadata_ = plan
+            # P3-8: MERGE the plan under a "plan" key instead of overwriting the
+            # whole metadata_ blob — the old assignment wiped autonomy metadata
+            # (source=autonomy_worker, page_count), so later is_autonomy detection
+            # and page_count resolution silently broke.
+            task.metadata_ = {**(task.metadata_ or {}), "plan": plan}
             db.commit()
             db.refresh(task)
             return task

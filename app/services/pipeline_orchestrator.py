@@ -733,16 +733,10 @@ class PipelineOrchestrator:
 
             report["stages"]["listing_images"] = {"ok": True, "count": len(saved_paths)}
 
-            # Record image-gen cost for autonomy tasks — worker only charged $0.05
-            # upfront for the text-LLM; record the remaining $0.20 here on success.
-            # record_spend=False on consistency-driven regeneration avoids
-            # double-charging for the same product's listing images.
-            if is_autonomy and saved_paths and record_spend:
-                try:
-                    from app.services.autonomy_service import AutonomyService
-                    AutonomyService().record_spend(0.20, f"images generated task={task_id[:8]}")
-                except Exception as spend_err:
-                    logger.warning(f"PipelineOrchestrator: failed to record autonomy image spend: {spend_err}")
+            # P0-13: image spend is now recorded per-call at the provider choke
+            # point (OpenRouterImageProvider), so the old flat $0.20-per-task
+            # record here (which under-counted PDF pages, mockups, remakes, pins)
+            # is gone — recording it again would double-count.
 
         except Exception as e:
             logger.error(f"PipelineOrchestrator: listing_images failed for {task_id}: {e}")
