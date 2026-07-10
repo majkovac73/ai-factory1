@@ -905,7 +905,8 @@ class PipelineOrchestrator:
             pod = PODFulfillmentService().create_product_for_task(task_id, concept=concept)
             report["stages"]["printify_product"] = {
                 "ok": True, "pod_product_id": pod.id,
-                "price_cents": pod.price_cents, "cost_cents": pod.cost_cents,
+                "price_cents": getattr(pod, "price_cents", None),
+                "cost_cents": getattr(pod, "cost_cents", None),
             }
             return pod
         except Exception as e:
