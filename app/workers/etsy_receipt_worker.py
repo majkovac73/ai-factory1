@@ -110,6 +110,12 @@ class EtsyReceiptWorker:
                 except Exception as e:
                     logger.error(f"EtsyReceiptWorker: backup tick failed: {e}")
 
+                # A-10: daily views/favorites poll (earliest sales signal).
+                try:
+                    self._maybe_poll_listing_stats()
+                except Exception as e:
+                    logger.error(f"EtsyReceiptWorker: listing-stats tick failed: {e}")
+
                 self._stop_event.wait(self._poll_seconds)
         finally:
             if not self._stop_event.is_set():
@@ -433,6 +439,9 @@ class EtsyReceiptWorker:
                 f"EtsyReceiptWorker: recorded sale {currency} {line_total:.2f} "
                 f"for task {task_id} (transaction {transaction_id})"
             )
+            # A-1: a real sale is the strongest signal there is — spawn a
+            # variant of the winner (capped, respects the kill switch).
+            self._maybe_spawn_winner_variant(task_id)
         except Exception as e:
             logger.error(f"EtsyReceiptWorker: failed to record revenue for transaction {transaction_id}: {e}")
 
@@ -562,6 +571,52 @@ class EtsyReceiptWorker:
                     pass
         self._save_state(state)
         logger.info(f"EtsyReceiptWorker: backup tick done — {report}")
+
+    def _maybe_spawn_winner_variant(self, task_id):
+        """A-1: create ONE follow-up variant concept task seeded from a product
+        that just sold. Capped per day, respects AUTONOMY_ENABLED."""
+        try:
+            if not settings.AUTONOMY_ENABLED or getattr(settings, "WINNER_VARIANTS_PER_DAY", 0) <= 0:
+                return
+            from app.services.autonomy_service import AutonomyService
+            auto = AutonomyService()
+            if not auto.can_create_winner_variant():
+                return
+            from app.core.product_formats import PRODUCT_FORMATS
+            from app.services.task_service import TaskService
+            from app.schemas.task import TaskCreate
+            ts = TaskService()
+            parent = ts.get_task(task_id)
+            if not parent or parent.type not in PRODUCT_FORMATS:
+                return
+            title = (parent.output_data or {}).get("title") or (parent.metadata_ or {}).get("product_name") or "a proven seller"
+            prompt = (
+                f"Create a {parent.type.replace('_', ' ')} product that is a FRESH variation on a proven "
+                f"seller ('{title}'): keep the appealing theme and style that made it sell, but make it a "
+                f"clearly different, original design (not a copy). No brand/trademark references."
+            )
+            new_task = ts.create_task(TaskCreate(
+                prompt=prompt, type=parent.type,
+                metadata={"source": "winner_variant", "parent_task_id": task_id,
+                          "product_name": f"{title} variation"},
+            ))
+            auto.record_winner_variant()
+            logger.info(f"EtsyReceiptWorker: spawned winner-variant task {new_task.id} from sold task {task_id}")
+        except Exception as e:
+            logger.error(f"EtsyReceiptWorker: winner-variant spawn failed for {task_id}: {e}")
+
+    def _maybe_poll_listing_stats(self):
+        """A-10: once per day, poll active-listing views/favorites and record
+        them as analytics events."""
+        state = self._load_state()
+        now = int(datetime.now(timezone.utc).timestamp())
+        if now - state.get("last_stats_poll_at", 0) < 24 * 3600:
+            return
+        from app.services.listing_stats_service import ListingStatsService
+        report = ListingStatsService().poll_and_record()
+        state["last_stats_poll_at"] = now
+        self._save_state(state)
+        logger.info(f"EtsyReceiptWorker: listing-stats poll done — {report}")
 
     # ── State persistence ─────────────────────────────────────────────────────
 

@@ -144,6 +144,12 @@ class Settings(BaseSettings):
 
     AUTO_PUBLISH_LISTINGS: bool = False
 
+    # A-1: when a product actually SELLS, spawn up to this many follow-up
+    # "variant" concept tasks per day seeded from the winner (a product with a
+    # real stranger's money behind it is worth many fresh guesses). Respects
+    # AUTONOMY_ENABLED and the daily task/spend caps. 0 disables.
+    WINNER_VARIANTS_PER_DAY: int = 2
+
     # P0-9: crash-resume bounds. On startup, DONE tasks whose post-completion
     # pipeline never recorded an outcome (crashed mid-pipeline) are re-run — but
     # ONLY those updated within the last N hours and at most this many, so a

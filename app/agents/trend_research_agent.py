@@ -75,6 +75,8 @@ class TrendResearchAgent(BaseAgent):
         # A-3: recent shop products, loaded per run() for dedup. Empty by default
         # so direct _propose_product() calls (tests) don't dedup against the DB.
         self._recent_products: list = []
+        # A-1: learning-loop insight block injected into the concept prompt.
+        self._insights_block: str = ""
 
     def run(self) -> dict | None:
         """
@@ -119,6 +121,10 @@ class TrendResearchAgent(BaseAgent):
         except Exception as e:
             logger.warning(f"TrendResearchAgent: could not load recent products for dedup: {e}")
             self._recent_products = []
+
+        # A-1: close the learning loop — bias new concepts toward what actually
+        # earned / got engagement, away from formats piling up unsold.
+        self._insights_block = self._load_insights_block()
 
         insight = opportunities[0]
         product = self._propose_product(insight, intel.get("confidence", "low"))
@@ -239,7 +245,7 @@ anything requiring software/interactivity (no apps, no AR, no "tools" —
 only something a static image or PDF can actually be).
 
 Market insight:
-{insight}{dedup_note}
+{insight}{self._insights_block}{dedup_note}
 
 Return ONLY valid JSON with this structure:
 {{
@@ -251,6 +257,49 @@ Return ONLY valid JSON with this structure:
   "confidence": "high/medium/low"
 }}{retry_note}
 """
+
+    def _load_insights_block(self) -> str:
+        """A-1: a short block summarizing what's working (best formats/keywords,
+        recorded revenue) and the current format mix, injected into the concept
+        prompt. Best-effort — returns '' if nothing to say."""
+        try:
+            from collections import Counter
+            from app.services.best_products_service import BestProductsService
+            from app.services.revenue_service import RevenueService
+
+            insights = BestProductsService().get_best_product_insights(limit=10)
+            revenue_by_task = RevenueService().get_revenue_by_task() or {}
+            parts = []
+
+            top_types = insights.get("top_task_types") or []
+            if top_types:
+                parts.append("Best-performing formats so far: " + ", ".join(f"{t} ({n})" for t, n in top_types))
+            top_kws = insights.get("top_keywords") or []
+            if top_kws:
+                parts.append("Themes/keywords that performed best: " + ", ".join(k for k, _ in top_kws[:8]))
+
+            total_rev = sum(v or 0 for v in revenue_by_task.values())
+            if total_rev > 0:
+                parts.append(
+                    f"Total recorded revenue so far: ${total_rev:.2f}. Bias STRONGLY toward the "
+                    "proven themes/formats above — propose a NEW product in that vein, not a copy."
+                )
+
+            # Light format budget (sub-step 3): how many of each format we already
+            # have, so the model doesn't keep piling into a saturated own-format.
+            fmt_counts = Counter(fmt for _t, fmt in (self._recent_products or []))
+            if fmt_counts:
+                parts.append(
+                    "Current shop mix (avoid over-producing a format that already has many and no sales): "
+                    + ", ".join(f"{fmt}: {n}" for fmt, n in fmt_counts.most_common())
+                )
+
+            if not parts:
+                return ""
+            return "\n\nWhat's working in the shop so far (learn from REAL performance):\n- " + "\n- ".join(parts)
+        except Exception as e:
+            logger.warning(f"TrendResearchAgent: could not load insights: {e}")
+            return ""
 
     def _attach_market(self, data: dict) -> None:
         """A-2: look up real Etsy market data for the concept and attach it to

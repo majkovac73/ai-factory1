@@ -23,7 +23,12 @@ class PerformanceService:
 
     REVENUE_WEIGHT = 50
     RELIABILITY_WEIGHT = 30
-    MARKETING_WEIGHT = 20
+    # A-10: engagement (views + 10x favorites) replaces the old marketing-post
+    # score — before the first sale, "did the pipeline post" told us nothing
+    # about whether buyers actually respond. Views/favorites are the earliest
+    # real demand signal.
+    ENGAGEMENT_WEIGHT = 20
+    ENGAGEMENT_CAP_FOR_FULL_SCORE = 100.0  # views + 10*favorites at/above this = full points
 
     def __init__(self):
         self.task_service = TaskService()
@@ -41,30 +46,23 @@ class PerformanceService:
         ratio = max(0.0, 1 - (retry_count / self.MAX_RETRIES_CONSIDERED))
         return round(ratio * self.RELIABILITY_WEIGHT, 2)
 
-    def _marketing_score(self, task_id: str) -> float:
-        success_events = self.analytics_service.get_events(
-            event_type="marketing_post_success",
-            entity_type="marketing_post",
-            limit=1000,
+    def _engagement_score(self, task_id: str) -> float:
+        """A-10: score from the latest listing_stats event (views + 10x favorites)."""
+        events = self.analytics_service.get_events(
+            event_type="listing_stats",
+            entity_type="task",
+            entity_id=task_id,
+            limit=50,
         )
-        failed_events = self.analytics_service.get_events(
-            event_type="marketing_post_failed",
-            entity_type="marketing_post",
-            limit=1000,
-        )
-
-        success_count = sum(
-            1 for e in success_events if (e.payload or {}).get("task_id") == task_id
-        )
-        failed_count = sum(
-            1 for e in failed_events if (e.payload or {}).get("task_id") == task_id
-        )
-
-        if success_count == 0 and failed_count == 0:
+        if not events:
             return 0.0
-
-        ratio = success_count / (success_count + failed_count)
-        return round(ratio * self.MARKETING_WEIGHT, 2)
+        latest = events[0]  # get_events returns newest first
+        payload = latest.payload or {}
+        views = payload.get("views", 0) or 0
+        favorites = payload.get("favorites", 0) or 0
+        engagement = views + 10 * favorites
+        ratio = min(engagement / self.ENGAGEMENT_CAP_FOR_FULL_SCORE, 1.0)
+        return round(ratio * self.ENGAGEMENT_WEIGHT, 2)
 
     def score_task(self, task_id: str) -> dict:
         task = self.task_service.get_task(task_id)
@@ -73,9 +71,9 @@ class PerformanceService:
 
         revenue_points = self._revenue_score(task_id)
         reliability_points = self._reliability_score(task)
-        marketing_points = self._marketing_score(task_id)
+        engagement_points = self._engagement_score(task_id)
 
-        total = round(revenue_points + reliability_points + marketing_points, 2)
+        total = round(revenue_points + reliability_points + engagement_points, 2)
 
         return {
             "task_id": task_id,
@@ -84,7 +82,7 @@ class PerformanceService:
             "breakdown": {
                 "revenue_points": revenue_points,
                 "reliability_points": reliability_points,
-                "marketing_points": marketing_points,
+                "engagement_points": engagement_points,
             },
         }
 

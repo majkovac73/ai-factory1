@@ -83,6 +83,21 @@ class AutonomyService:
         if state["spend_usd"] >= settings.MAX_DAILY_SPEND_USD:
             self._alert_cap_hit("spend", state["spend_usd"], settings.MAX_DAILY_SPEND_USD)
 
+    # ── Winner-variant cap (A-1) ────────────────────────────────────────────────
+
+    def can_create_winner_variant(self) -> bool:
+        state = self._load()
+        return state.get("winner_variants", 0) < settings.WINNER_VARIANTS_PER_DAY
+
+    def record_winner_variant(self):
+        state = self._load()
+        state["winner_variants"] = state.get("winner_variants", 0) + 1
+        self._save(state)
+        logger.info(
+            f"AutonomyService: winner-variant recorded "
+            f"({state['winner_variants']}/{settings.WINNER_VARIANTS_PER_DAY} today)"
+        )
+
     # ── Read-only status ───────────────────────────────────────────────────────
 
     def daily_status(self) -> dict:
