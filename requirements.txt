@@ -10,3 +10,4 @@ pydantic-settings==2.6.1
 openai
 Pillow
 pypdf==6.14.2
+pytrends==4.9.2

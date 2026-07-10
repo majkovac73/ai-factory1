@@ -77,8 +77,19 @@ class TrendResearchAgent(BaseAgent):
         Returns {'product_name', 'product_format', 'description',
         'target_audience', 'page_count', 'confidence'} or None.
         """
+        from app.services.trend_data_service import TrendDataService, TrendDataFetchError
+
         try:
-            research = self._research.research(_RESEARCH_TOPIC, _RESEARCH_SCOPE)
+            trend_data = TrendDataService().get_real_trend_signals()
+        except TrendDataFetchError as e:
+            logger.error(
+                f"TrendResearchAgent: real trend data fetch failed, aborting "
+                f"cycle rather than falling back to guessed data: {e}"
+            )
+            return None
+
+        try:
+            research = self._research.research(_RESEARCH_TOPIC, _RESEARCH_SCOPE, real_trend_data=trend_data)
         except Exception as e:
             logger.error(f"TrendResearchAgent: research step failed: {e}")
             return None

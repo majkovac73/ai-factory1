@@ -101,6 +101,12 @@ class Settings(BaseSettings):
     CONTENT_QA_MODEL: str = "openai/gpt-4o-mini"
     CONTENT_QA_MAX_ATTEMPTS: int = 2  # regenerate-and-recheck attempts before blocking
 
+    # Real trend research (Google Trends via pytrends). Seed keywords the
+    # TrendDataService pulls live search-interest data for; empty = use the
+    # service's built-in SEED_KEYWORDS default. Lets the anchor list be tuned
+    # without a redeploy-requiring code change.
+    TREND_SEED_KEYWORDS: list = []
+
     # Per-page QA for multi-page PDF planners/guides (step 100l). PDF pages are
     # text-and-layout heavy, so their content review is STRICTER than a generic
     # asset review (rejects photographs/decorative imagery on a functional page,
