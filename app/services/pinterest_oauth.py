@@ -1,5 +1,6 @@
 import base64
 import secrets
+import threading
 from datetime import datetime, timedelta
 
 import httpx
@@ -7,6 +8,10 @@ import httpx
 from app.db.database import SessionLocal
 from app.models.pinterest_token import PinterestToken
 from config import settings
+
+# P0-10: serialize concurrent refreshes across threads (single-row, rotating
+# refresh token — same rationale as etsy_oauth._refresh_lock).
+_refresh_lock = threading.Lock()
 
 PINTEREST_AUTH_URL = "https://www.pinterest.com/oauth"
 PINTEREST_TOKEN_URL = "https://api.pinterest.com/v5/oauth/token"
@@ -97,14 +102,34 @@ def save_token(token_data: dict):
         db.close()
 
 
+def _needs_refresh(token) -> bool:
+    return token.expires_at <= datetime.utcnow() + timedelta(seconds=60)
+
+
 async def get_valid_access_token() -> str:
+    # Fast path: valid token, no lock needed.
     db = SessionLocal()
     try:
         token = db.query(PinterestToken).first()
         if not token:
             raise ValueError("No Pinterest token found — complete OAuth via /pinterest/oauth/login")
+        if not _needs_refresh(token):
+            return token.access_token
+    finally:
+        db.close()
 
-        if token.expires_at <= datetime.utcnow() + timedelta(seconds=60):
+    # Slow path: serialize refresh; re-read under the lock so a token another
+    # thread just rotated is reused instead of refreshed again.
+    _refresh_lock.acquire()
+    try:
+        db = SessionLocal()
+        try:
+            token = db.query(PinterestToken).first()
+            if not token:
+                raise ValueError("No Pinterest token found — complete OAuth via /pinterest/oauth/login")
+            if not _needs_refresh(token):
+                return token.access_token
+
             credentials = base64.b64encode(
                 f"{settings.PINTEREST_APP_ID}:{settings.PINTEREST_APP_SECRET}".encode("utf-8")
             ).decode("utf-8")
@@ -128,6 +153,8 @@ async def get_valid_access_token() -> str:
             token.expires_at = datetime.utcnow() + timedelta(seconds=new_data.get("expires_in", 3600))
             db.commit()
 
-        return token.access_token
+            return token.access_token
+        finally:
+            db.close()
     finally:
-        db.close()
+        _refresh_lock.release()

@@ -2,6 +2,7 @@ import base64
 import hashlib
 import os
 import secrets
+import threading
 from datetime import datetime, timedelta
 
 import httpx
@@ -12,6 +13,16 @@ from config import settings
 
 ETSY_AUTH_URL = "https://www.etsy.com/oauth/connect"
 ETSY_TOKEN_URL = "https://api.etsy.com/v3/public/oauth/token"
+
+# P0-10: Etsy rotates the refresh token on EVERY refresh (single-use). Four
+# worker threads + API request threads all call get_valid_access_token; without
+# serialization, two threads near expiry send the SAME old refresh token
+# concurrently — the second is rejected and can invalidate the whole token
+# family, taking the entire shop integration down until a manual re-auth. This
+# module-level lock serializes the check-and-refresh across threads. Safe to
+# hold across the await: the app never runs Etsy calls concurrently within a
+# single event loop (no asyncio.gather), so contention is purely cross-thread.
+_refresh_lock = threading.Lock()
 
 # In-memory PKCE verifier storage, keyed by "state". Fine for a single-
 # operator local app; would need a real store (DB/session) for
@@ -41,8 +52,9 @@ def build_authorization_url(scopes: str = "listings_r listings_w shops_r shops_w
         "code_challenge": challenge,
         "code_challenge_method": "S256",
     }
-    query = "&".join(f"{k}={httpx.QueryParams({k: v})[k]}" for k, v in params.items())
-    return f"{ETSY_AUTH_URL}?{query}"
+    # P3-8: use httpx.QueryParams for correct URL-encoding (the old manual
+    # assembly left values like the space-separated scope unencoded).
+    return f"{ETSY_AUTH_URL}?{httpx.QueryParams(params)}"
 
 
 async def exchange_code_for_token(code: str, state: str) -> dict:
@@ -92,14 +104,39 @@ def save_token(token_data: dict):
         db.close()
 
 
+def _needs_refresh(token) -> bool:
+    return token.expires_at <= datetime.utcnow() + timedelta(seconds=60)
+
+
 async def get_valid_access_token() -> str:
+    # Fast path: if the token is comfortably valid, return it without taking
+    # the refresh lock at all (the common case — refresh only happens ~hourly).
     db = SessionLocal()
     try:
         token = db.query(EtsyToken).filter(EtsyToken.shop_id == settings.ETSY_SHOP_ID).first()
         if not token:
             raise ValueError("No Etsy token found — complete the OAuth flow first via /etsy/oauth/login")
+        if not _needs_refresh(token):
+            return token.access_token
+    finally:
+        db.close()
 
-        if token.expires_at <= datetime.utcnow() + timedelta(seconds=60):
+    # Slow path: serialize the refresh across threads. Only ONE thread performs
+    # the network refresh; the others block, then re-read and find the freshly
+    # rotated token already saved (no duplicate refresh with a stale token).
+    _refresh_lock.acquire()
+    try:
+        db = SessionLocal()
+        try:
+            token = db.query(EtsyToken).filter(EtsyToken.shop_id == settings.ETSY_SHOP_ID).first()
+            if not token:
+                raise ValueError("No Etsy token found — complete the OAuth flow first via /etsy/oauth/login")
+
+            # Re-read under the lock: another thread may have refreshed while we
+            # were waiting to acquire it. If so, use its result and skip the call.
+            if not _needs_refresh(token):
+                return token.access_token
+
             async with httpx.AsyncClient() as client:
                 response = await client.post(
                     ETSY_TOKEN_URL,
@@ -117,6 +154,19 @@ async def get_valid_access_token() -> str:
             token.expires_at = datetime.utcnow() + timedelta(seconds=new_data.get("expires_in", 3600))
             db.commit()
 
-        return token.access_token
+            _log_refresh("Etsy access token refreshed")
+            return token.access_token
+        finally:
+            db.close()
     finally:
-        db.close()
+        _refresh_lock.release()
+
+
+def _log_refresh(message: str):
+    """Best-effort diagnostic log of a token refresh (P0-10). Lazy import to
+    avoid any import-time cycle; never let logging break the refresh."""
+    try:
+        from app.services.log_service import LogService
+        LogService().info(source="EtsyOAuth", message=message, payload={})
+    except Exception:
+        pass

@@ -13,6 +13,7 @@ Token storage mirrors PinterestToken exactly (single-row table, refresh on
 expiry). Access via /tumblr/oauth/login → /tumblr/oauth/callback.
 """
 import secrets
+import threading
 from datetime import datetime, timedelta
 
 import httpx
@@ -20,6 +21,10 @@ import httpx
 from app.db.database import SessionLocal
 from app.models.tumblr_token import TumblrToken
 from config import settings
+
+# P0-10: serialize concurrent refreshes across threads (single-row, rotating
+# refresh token — same rationale as etsy_oauth._refresh_lock).
+_refresh_lock = threading.Lock()
 
 TUMBLR_AUTH_URL = "https://www.tumblr.com/oauth2/authorize"
 TUMBLR_TOKEN_URL = "https://api.tumblr.com/v2/oauth2/token"
@@ -105,14 +110,34 @@ def save_token(token_data: dict):
         db.close()
 
 
+def _needs_refresh(token) -> bool:
+    return token.expires_at <= datetime.utcnow() + timedelta(seconds=60)
+
+
 async def get_valid_access_token() -> str:
+    # Fast path: valid token, no lock needed.
     db = SessionLocal()
     try:
         token = db.query(TumblrToken).first()
         if not token:
             raise ValueError("No Tumblr token found — complete OAuth via /tumblr/oauth/login")
+        if not _needs_refresh(token):
+            return token.access_token
+    finally:
+        db.close()
 
-        if token.expires_at <= datetime.utcnow() + timedelta(seconds=60):
+    # Slow path: serialize refresh; re-read under the lock so a token another
+    # thread just rotated is reused instead of refreshed again.
+    _refresh_lock.acquire()
+    try:
+        db = SessionLocal()
+        try:
+            token = db.query(TumblrToken).first()
+            if not token:
+                raise ValueError("No Tumblr token found — complete OAuth via /tumblr/oauth/login")
+            if not _needs_refresh(token):
+                return token.access_token
+
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.post(
                     TUMBLR_TOKEN_URL,
@@ -132,6 +157,8 @@ async def get_valid_access_token() -> str:
             token.expires_at = datetime.utcnow() + timedelta(seconds=new_data.get("expires_in", 3600))
             db.commit()
 
-        return token.access_token
+            return token.access_token
+        finally:
+            db.close()
     finally:
-        db.close()
+        _refresh_lock.release()
