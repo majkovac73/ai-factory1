@@ -152,6 +152,14 @@ class TaskProcessor:
             steps = steps[:1]
 
         context = task.prompt or ""
+        # A-2/A-4: ground SEO in real winning Etsy titles for this niche.
+        seo_context = meta.get("seo_context")
+        if seo_context:
+            titles = "; ".join(str(t) for t in seo_context[:10])
+            context += (
+                "\n\nReal Etsy titles currently RANKING for this niche — mine their "
+                f"long-tail keyword patterns for the tags/description, do NOT copy them:\n{titles}"
+            )
         outputs = []
 
         for i, step in enumerate(steps, start=1):

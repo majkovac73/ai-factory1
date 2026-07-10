@@ -238,7 +238,9 @@ class PipelineOrchestrator:
         # PDF pages actually produced (sections can differ from the concept's
         # page_count), so the description never promises a different count.
         pdf_page_count = report["stages"].get("delivery_asset", {}).get("page_count") if is_pdf else None
-        listing_id = self._stage_create_listing(task_id, product_name, output_data, task_type, is_pod, report, pod_product=pod_product, pdf_page_count=pdf_page_count)
+        # A-2: ground the digital price in the real Etsy market median when available.
+        market_price = ((task.metadata_ or {}).get("market") or {}).get("price_p50")
+        listing_id = self._stage_create_listing(task_id, product_name, output_data, task_type, is_pod, report, pod_product=pod_product, pdf_page_count=pdf_page_count, market_price=market_price)
 
         # 6 — attach images / digital file, then publish; readback-verify both
         if listing_id:
@@ -1023,7 +1025,7 @@ class PipelineOrchestrator:
                 f"to listing {listing_id}: {e}"
             )
 
-    def _stage_create_listing(self, task_id: str, product_name: str, output_data: dict, task_type: str, is_pod: bool, report: dict, pod_product=None, pdf_page_count: Optional[int] = None) -> Optional[str]:
+    def _stage_create_listing(self, task_id: str, product_name: str, output_data: dict, task_type: str, is_pod: bool, report: dict, pod_product=None, pdf_page_count: Optional[int] = None, market_price: Optional[float] = None) -> Optional[str]:
         from app.services.etsy_shipping_service import EtsyShippingService
         from app.services.etsy_client import DIGITAL_WHEN_MADE, POD_WHEN_MADE
 
@@ -1093,6 +1095,13 @@ class PipelineOrchestrator:
             # P0-11: never let a None/0/out-of-band LLM price reach Etsy — clamp
             # into the format's band (midpoint if invalid). Etsy rejects <$0.20.
             listing["price"] = clamp_price(listing.get("price"), task_type)
+
+            # A-2: prefer the real Etsy market median when it falls inside our
+            # sane band — grounds price in what buyers actually pay for this niche
+            # rather than a band midpoint guess. (POD's cost-based price, set
+            # below, still overrides this to protect margin.)
+            if market_price and band_lo <= float(market_price) <= band_hi:
+                listing["price"] = round(float(market_price), 2)
 
             # P0-4: for POD, the cost-based margin-safe price WINS over the band
             # clamp (a sale must never lose money, even if it exceeds the band).

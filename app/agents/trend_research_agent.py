@@ -169,6 +169,11 @@ class TrendResearchAgent(BaseAgent):
 
                 data["confidence"] = data.get("confidence") or fallback_confidence
 
+                # A-2: validate against REAL Etsy buyer data (competition + real
+                # prices + winning titles). Attach it so the critic sees the
+                # saturation signal and the listing stage can ground price/SEO.
+                self._attach_market(data)
+
                 critique = self._critic.critique(data)
                 logger.info(
                     f"TrendResearchAgent: viability critique score={critique['score']} "
@@ -246,6 +251,26 @@ Return ONLY valid JSON with this structure:
   "confidence": "high/medium/low"
 }}{retry_note}
 """
+
+    def _attach_market(self, data: dict) -> None:
+        """A-2: look up real Etsy market data for the concept and attach it to
+        `data['market']`. Best-effort — never raises, never blocks."""
+        try:
+            import asyncio
+            from app.services.etsy_market_service import EtsyMarketService
+            # Use the product name (minus format noise) as the search phrase.
+            keywords = (data.get("product_name") or "").strip()
+            if not keywords:
+                return
+            market = asyncio.run(EtsyMarketService().validate_concept(keywords))
+            if market:
+                data["market"] = market
+                logger.info(
+                    f"TrendResearchAgent: market for '{keywords}': "
+                    f"competition={market.get('competition_count')}, p50={market.get('price_p50')}"
+                )
+        except Exception as e:
+            logger.warning(f"TrendResearchAgent: market attach failed: {e}")
 
     DEDUP_RATIO = 0.75
 

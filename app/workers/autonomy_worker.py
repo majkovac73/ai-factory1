@@ -147,6 +147,13 @@ class AutonomyWorker:
         metadata = {"source": "autonomy_worker", "product_name": product_name}
         if page_count:
             metadata["page_count"] = page_count
+        # A-2: carry the Etsy market data (real median price + winning titles)
+        # so the listing stage grounds pricing and the executor grounds SEO.
+        market = opportunity.get("market")
+        if market:
+            metadata["market"] = market
+            if market.get("top_titles"):
+                metadata["seo_context"] = market["top_titles"]
 
         task_service = TaskService()
         task = task_service.create_task(TaskCreate(

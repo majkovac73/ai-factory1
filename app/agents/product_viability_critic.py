@@ -87,7 +87,10 @@ for THIS item, judging against these principles:
 
 4. EFFORT SIGNAL: Would producing this require real creative work, or
    could the whole thing be one line of text on a stock background?
-   Low-effort text-on-blank products are weak.
+   Low-effort text-on-blank products are weak. Also: if the concept
+   includes a "market" object with a very high competition_count (tens of
+   thousands+), demand a clear differentiator — a generic item in a
+   saturated niche is a graveyard; weight it down unless it has a real hook.
 
 5. TRADEMARK / IP (HARD RULE, overrides everything): If the concept
    references or clearly derives from a trademarked brand, franchise,
