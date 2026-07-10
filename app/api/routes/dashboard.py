@@ -89,6 +89,9 @@ def rooms_status():
 
     db = SessionLocal()
     try:
+        # P3-8: two clocks on purpose — now_utc (aware) is compared against
+        # tz-aware worker heartbeats; cutoff_24h (naive) is compared against
+        # naive DB timestamps (models use datetime.utcnow). Keep them separate.
         now_utc = datetime.now(timezone.utc)
         cutoff_24h = datetime.utcnow() - timedelta(hours=24)
 
@@ -199,7 +202,7 @@ def rooms_status():
                         "detail": f"Queue size: {task_queue.size()}",
                     }
                 ],
-                "events": _errors_for({"TaskWorker", "TaskService", "TaskQueue", "PlannerAgent"}),
+                "events": _errors_for({"TaskWorker", "TaskProcessor", "TaskService", "TaskQueue", "PlannerAgent"}),
                 "counts": {"NEW": sc.get("NEW", 0), "PLANNED": sc.get("PLANNED", 0), "queue": task_queue.size()},
             },
             "content": {
@@ -227,7 +230,7 @@ def rooms_status():
                         "detail": "ProductImageAgent / SocialImageAgent / PODDesignAgent",
                     }
                 ],
-                "events": _errors_for({"ProductImageAgent", "SocialImageAgent", "PODDesignAgent", "ImageValidationService"}),
+                "events": _errors_for({"ProductImageAgent", "SocialImageAgent", "PODDesignAgent", "ImageValidationService", "PipelineOrchestrator", "PDFGenerationService", "MockupService"}),
                 "counts": {"last_24h": recent_images, "total": total_images},
             },
             "qa": {
@@ -255,7 +258,7 @@ def rooms_status():
                         "detail": f"AUTO_PUBLISH_LISTINGS={auto_publish}",
                     }
                 ],
-                "events": _errors_for({"EtsyService", "EtsyImageService", "ListingAgent"}),
+                "events": _errors_for({"EtsyClient", "EtsyImageService", "EtsyShippingService", "PipelineOrchestrator"}),
                 "counts": {"pod_products": total_pods, "auto_publish": auto_publish},
             },
             "marketing": {
@@ -276,7 +279,7 @@ def rooms_status():
                         "detail": f"{post_sc.get('pending', 0)} pending, {post_sc.get('success', 0)} ok, {post_sc.get('failed', 0)} failed",
                     }
                 ],
-                "events": _errors_for({"MarketingService", "PinterestChannel", "SEOPostingService"}),
+                "events": _errors_for({"MarketingService", "PinterestChannel", "TumblrChannel", "MarketingRefreshWorker", "PipelineOrchestrator"}),
                 "counts": {
                     "pending": post_sc.get("pending", 0),
                     "success": post_sc.get("success", 0),

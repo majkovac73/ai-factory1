@@ -19,10 +19,9 @@ class TaskProcessor:
     Drives a single task through the full lifecycle:
     NEW -> PLANNED -> RUNNING -> QA -> DONE
 
-    Each stage currently does placeholder work. Steps 15-17 (Planner,
-    Executor, QA modules) will replace the placeholder bodies of
-    _plan(), _execute(), and _qa() with real logic without needing to
-    change the control flow here.
+    _plan()/_execute()/_qa() run the real Planner/Executor/QA agents; on
+    reaching DONE for a recognized product_format, run_post_completion fires
+    the image/listing/marketing pipeline.
     """
 
     def __init__(self):
@@ -141,6 +140,16 @@ class TaskProcessor:
         if not steps:
             logger.warning(f"Task {task_id}: no plan steps found, executing prompt directly")
             steps = [task.prompt]
+
+        # P2-2: a product-format task needs exactly ONE executor generation — the
+        # executor prompt already asks for the complete SEO object, and QA/the
+        # sanitizer keep only the FIRST balanced JSON object anyway, so running
+        # every planner step (typically 3) was 2x-3x wasted LLM spend whose
+        # output was silently discarded.
+        from app.core.product_formats import PRODUCT_FORMATS
+        if task.type in PRODUCT_FORMATS and len(steps) > 1:
+            logger.info(f"Task {task_id}: product format — collapsing {len(steps)} plan steps to 1 (P2-2)")
+            steps = steps[:1]
 
         context = task.prompt or ""
         outputs = []
