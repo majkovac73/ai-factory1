@@ -649,6 +649,7 @@ class PipelineOrchestrator:
         fs = ImageFileService()
         validator = ImageValidationService()
         out = []
+        page_pngs = []  # P2-8: track extracted temp pages so we can clean them up
 
         # (filename, builder) — for a PDF deliverable the mockups are built from
         # the REAL extracted pages (a page on a desk + a fan of several pages);
@@ -686,6 +687,15 @@ class PipelineOrchestrator:
                 out.append(p)
             except Exception as e:
                 logger.warning(f"PipelineOrchestrator: listing mockup {fname} ({role}) failed for {task_id}: {e}")
+
+        # P2-8: the extracted PDF page PNGs were written with delete=False; now
+        # that mockups are built they're no longer needed — unlink them so they
+        # don't accumulate on the container disk.
+        for p in page_pngs:
+            try:
+                Path(p).unlink()
+            except Exception:
+                pass
 
         report["stages"]["listing_images"] = {"ok": bool(out), "count": len(out), "source": "delivery_mockup"}
         return out

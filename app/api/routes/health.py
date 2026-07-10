@@ -7,9 +7,12 @@ from app.services import worker_registry
 router = APIRouter()
 
 _WORKER_MAX_AGE = {
-    "TaskWorker": 10,           # heartbeats every ~1s poll cycle
-    "EtsyReceiptWorker": 660,   # polls every 300s — allow 2x + margin
-    "AutonomyWorker": 7200,     # polls every 3600s — allow 2x
+    "TaskWorker": 10,               # heartbeats every ~1s poll cycle
+    "EtsyReceiptWorker": 660,       # polls every 300s — allow 2x + margin
+    "AutonomyWorker": 7200,         # polls every 3600s — allow 2x
+    # P2-4: MarketingRefreshWorker was missing — /health/workers never reported
+    # it, so its death was invisible. Polls every 21600s (6h) — allow 2x.
+    "MarketingRefreshWorker": 43200,
 }
 
 

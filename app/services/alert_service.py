@@ -56,9 +56,13 @@ class AlertService:
             logger.warning(f"AlertService: DISCORD_WEBHOOK_URL not set, dropping alert: {title}")
             return False
 
-        # Debounce: skip if same title was sent within DEBOUNCE_SECONDS
+        # Debounce (P2-9): key on title + the first 60 chars of the message, not
+        # the title alone — two DIFFERENT failures that happen to share a title
+        # (e.g. "Task blocked" for two different tasks within a minute) must not
+        # silently collapse into one alert.
+        debounce_key = f"{title}|{message[:60]}"
         now = time.monotonic()
-        last = _last_sent.get(title, 0.0)
+        last = _last_sent.get(debounce_key, 0.0)
         if now - last < DEBOUNCE_SECONDS:
             logger.debug(
                 f"AlertService: debounced '{title}' "
@@ -83,7 +87,7 @@ class AlertService:
             if resp.status_code not in (200, 204):
                 logger.warning(f"AlertService: Discord returned {resp.status_code}")
                 return False
-            _last_sent[title] = now
+            _last_sent[debounce_key] = now
             return True
         except Exception as e:
             logger.warning(f"AlertService: failed to send alert '{title}': {e}")

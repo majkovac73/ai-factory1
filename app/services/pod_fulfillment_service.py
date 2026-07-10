@@ -401,15 +401,20 @@ class PODFulfillmentService:
         if not shipments:
             return False
 
-        shipment = shipments[0]
-        tracking_number = shipment.get("number", "")
-        carrier = shipment.get("carrier", "")
-        if not tracking_number:
+        # P2-5: a multi-parcel order has several shipments — push EVERY tracking
+        # number to Etsy (Etsy accepts multiple tracking posts per receipt),
+        # not just the first, so no parcel goes untracked.
+        tracked = [s for s in shipments if s.get("number")]
+        if not tracked:
             return False
 
-        # Push tracking to Etsy
         import asyncio
-        asyncio.run(self._push_tracking_to_etsy(receipt_id, tracking_number, carrier))
+        for s in tracked:
+            asyncio.run(self._push_tracking_to_etsy(receipt_id, s.get("number", ""), s.get("carrier", "")))
+
+        # Record the last tracking number/carrier on the record for reference.
+        tracking_number = tracked[-1].get("number", "")
+        carrier = tracked[-1].get("carrier", "")
 
         # Update DB
         db = SessionLocal()
