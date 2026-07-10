@@ -9,6 +9,17 @@ from typing import Dict, Optional
 
 
 _heartbeats: Dict[str, datetime] = {}
+# P3-5: registry of live worker instances so the health check can RESTART a
+# worker whose thread has died (not just alert about it).
+_workers: Dict[str, object] = {}
+
+
+def register_worker(worker_name: str, worker: object) -> None:
+    _workers[worker_name] = worker
+
+
+def get_worker(worker_name: str) -> Optional[object]:
+    return _workers.get(worker_name)
 
 
 def record_heartbeat(worker_name: str) -> None:

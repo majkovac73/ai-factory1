@@ -27,16 +27,23 @@ fallback if generation fails, so a mockup is always produced.
 import asyncio
 import base64
 import logging
+import random
 from io import BytesIO
 from pathlib import Path
 
 import httpx
 from PIL import Image, ImageDraw, ImageFilter, ImageOps
 
+from app.core.paths import get_data_dir
 from app.core.providers.image_manager import ImageProviderManager
 from config import settings
 
 logger = logging.getLogger("ai-factory")
+
+# P3-6: cache generated background scenes (empty wall / desk — product-agnostic)
+# and reuse them, instead of paying ~$0.04 per scene per product. Build up to
+# this many per role, then pick randomly for variety at zero cost.
+_MAX_CACHED_SCENES = 5
 
 
 class MockupService:
@@ -190,6 +197,23 @@ class MockupService:
 
     def _scene(self, role: str, size: int) -> Image.Image:
         if getattr(settings, "MOCKUP_USE_GENERATED_SCENES", True):
+            # P3-6: reuse a cached scene if we already have enough; the scene is
+            # product-agnostic (empty wall/desk), so caching loses no quality.
+            cache_dir = get_data_dir() / "images" / "scenes"
+            cached = []
+            try:
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                cached = sorted(cache_dir.glob(f"{role}_*.png"))
+            except Exception:
+                pass
+            if len(cached) >= _MAX_CACHED_SCENES:
+                try:
+                    pick = random.choice(cached)
+                    scene = Image.open(pick).convert("RGB")
+                    return ImageOps.fit(scene, (size, size), Image.LANCZOS)
+                except Exception as e:
+                    logger.warning(f"MockupService: cached scene load failed ({pick}): {e}")
+
             try:
                 provider = self._image_provider or ImageProviderManager.get_provider()
                 prompt = self.SCENES.get(role, self.SCENES["framed"])
@@ -203,6 +227,11 @@ class MockupService:
                 else:
                     raise ValueError("image result had neither b64 nor url")
                 scene = Image.open(BytesIO(raw)).convert("RGB")
+                # Persist to the cache (best-effort) so future products reuse it.
+                try:
+                    scene.save(cache_dir / f"{role}_{len(cached)}.png", format="PNG")
+                except Exception:
+                    pass
                 return ImageOps.fit(scene, (size, size), Image.LANCZOS)
             except Exception as e:
                 logger.warning(f"MockupService: scene generation failed ({role}), using PIL fallback: {e}")

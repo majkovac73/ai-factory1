@@ -118,6 +118,12 @@ async def startup_event():
     import threading
     threading.Thread(target=_resume_incomplete_pipelines, daemon=True, name="PipelineResume").start()
 
+    # P3-5: register worker instances so the health self-check can restart a
+    # worker whose thread has died (not just alert).
+    from app.services import worker_registry
+    for _w in (task_worker, etsy_receipt_worker, autonomy_worker, marketing_refresh_worker):
+        worker_registry.register_worker(_w.__class__.__name__, _w)
+
     task_worker.start()
     etsy_receipt_worker.start()
     autonomy_worker.start()

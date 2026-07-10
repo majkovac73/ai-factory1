@@ -473,9 +473,10 @@ class EtsyReceiptWorker:
 
     def _check_worker_health(self):
         """
-        Check heartbeat registry and alert via Discord if any worker is stale.
-        Limitation: if the whole process dies, this check dies with it.
-        Railway's crash/restart notifications act as the external backstop.
+        Check heartbeat registry, RESTART any worker whose thread has died
+        (P3-5), and alert via Discord about stale workers. Limitation: if the
+        whole process dies, this check dies with it; Railway's crash/restart
+        notifications act as the external backstop.
         """
         stale_thresholds = {
             "TaskWorker": 30,                 # should beat every ~1s
@@ -488,18 +489,38 @@ class EtsyReceiptWorker:
             for name, max_age in stale_thresholds.items()
             if worker_registry.is_stale(name, max_age)
         ]
-        if stale:
-            logger.warning(f"EtsyReceiptWorker: stale heartbeats detected: {stale}")
-            try:
-                from app.services.alert_service import AlertService
-                AlertService().send_alert_sync(
-                    "Stale worker heartbeat",
-                    f"Workers with no recent heartbeat: {', '.join(stale)}. "
-                    "They may have died silently. Check Railway logs.",
-                    level="warning",
-                )
-            except Exception as e:
-                logger.warning(f"EtsyReceiptWorker: failed to send stale-heartbeat alert: {e}")
+        if not stale:
+            return
+
+        logger.warning(f"EtsyReceiptWorker: stale heartbeats detected: {stale}")
+
+        # P3-5: self-heal — if a stale worker's thread is actually DEAD (not just
+        # slow), restart it. A stale-but-alive worker is left alone (it may be
+        # mid-operation); restarting a live one would spawn a duplicate.
+        restarted = []
+        for name in stale:
+            if name == self.__class__.__name__:
+                continue  # can't be dead — we're running inside it
+            worker = worker_registry.get_worker(name)
+            thread = getattr(worker, "_thread", None) if worker else None
+            if worker is not None and (thread is None or not thread.is_alive()):
+                try:
+                    worker.start()
+                    restarted.append(name)
+                    logger.critical(f"EtsyReceiptWorker: restarted dead worker {name}")
+                except Exception as e:
+                    logger.error(f"EtsyReceiptWorker: failed to restart dead worker {name}: {e}")
+
+        try:
+            from app.services.alert_service import AlertService
+            msg = (
+                f"Workers with no recent heartbeat: {', '.join(stale)}. "
+                + (f"Auto-restarted: {', '.join(restarted)}. " if restarted else "")
+                + "Check Railway logs."
+            )
+            AlertService().send_alert_sync("Stale worker heartbeat", msg, level="warning")
+        except Exception as e:
+            logger.warning(f"EtsyReceiptWorker: failed to send stale-heartbeat alert: {e}")
 
     # ── State persistence ─────────────────────────────────────────────────────
 
