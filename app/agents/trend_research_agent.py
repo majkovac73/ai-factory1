@@ -19,6 +19,7 @@ import logging
 from app.agents.base_agent import BaseAgent
 from app.agents.market_intelligence.research import ResearchAgent
 from app.agents.market_intelligence.intelligence import IntelligenceAgent
+from app.agents.product_viability_critic import ProductViabilityCriticAgent
 from app.core.product_formats import PRODUCT_FORMATS
 from app.core.utils.json_sanitizer import JSONSanitizer
 from config import settings
@@ -69,6 +70,7 @@ class TrendResearchAgent(BaseAgent):
         super().__init__(provider, model)
         self._research = ResearchAgent(provider, model)
         self._intelligence = IntelligenceAgent(provider, model)
+        self._critic = ProductViabilityCriticAgent(provider, model)
         self.sanitizer = JSONSanitizer()
 
     def run(self) -> dict | None:
@@ -145,7 +147,25 @@ class TrendResearchAgent(BaseAgent):
             error = self._validate_product(data)
             if not error:
                 data["confidence"] = data.get("confidence") or fallback_confidence
-                return data
+
+                critique = self._critic.critique(data)
+                logger.info(
+                    f"TrendResearchAgent: viability critique score={critique['score']} "
+                    f"passed={critique['passed']} for '{data.get('product_name')}'"
+                )
+                if critique["passed"]:
+                    return data
+
+                logger.warning(
+                    f"TrendResearchAgent: concept attempt {attempt} failed viability "
+                    f"critique: {critique['reason']}"
+                )
+                feedback = (
+                    f"Your previous concept was schema-valid but rejected as not "
+                    f"commercially viable: {critique['reason']}. Propose a genuinely "
+                    f"different, more compelling concept that addresses this."
+                )
+                continue
 
             logger.warning(f"TrendResearchAgent: concept attempt {attempt} rejected: {error}")
             feedback = (

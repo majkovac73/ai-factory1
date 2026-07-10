@@ -51,7 +51,15 @@ class Settings(BaseSettings):
     # callback URLs are registered on the Tumblr app.
     TUMBLR_SEND_REDIRECT_URI: bool = False
 
-    SECRET_KEY: str = "change_me"
+    # API access control (step 102 / P0-3). When set, every money-spending or
+    # shop-mutating request (POST/PUT/PATCH/DELETE) plus the sensitive /logs
+    # reads must carry header `X-Factory-Key: <FACTORY_API_KEY>`. Read-only
+    # dashboards/health/OAuth-callbacks stay open so the /ui frontend and
+    # Railway healthcheck keep working without a key. When UNSET, enforcement
+    # is OFF (nothing breaks on deploy) — set this in Railway env to turn
+    # protection on. There is no default: a hardcoded key would be worse than
+    # none.
+    FACTORY_API_KEY: str | None = None
 
     LOG_LEVEL: str = "info"
 
@@ -100,6 +108,16 @@ class Settings(BaseSettings):
     # here if QA accuracy needs improving.
     CONTENT_QA_MODEL: str = "openai/gpt-4o-mini"
     CONTENT_QA_MAX_ATTEMPTS: int = 2  # regenerate-and-recheck attempts before blocking
+
+    # Product-viability critic (step 102): an independent LLM judgment step that
+    # scores a schema-valid concept 1-10 on whether a real stranger would
+    # actually buy THIS specific item, and rejects (fails) anything scoring
+    # below this threshold. Pass/fail is derived from the score in code (not the
+    # model's own inconsistent internal bar) so it's tunable without a prompt
+    # change. 6 = "a real niche buyer would plausibly purchase this"; raise to be
+    # stricter, lower to be more permissive. Calibrated against manual spot-checks
+    # so genuinely sellable products pass and generic/low-effort ones fail.
+    VIABILITY_CRITIC_MIN_SCORE: int = 6
 
     # Real trend research (Google Trends via pytrends). Seed keywords the
     # TrendDataService pulls live search-interest data for; empty = use the
