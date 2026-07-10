@@ -119,24 +119,19 @@ class PipelineOrchestrator:
         content_context = self._marketing_content_context(is_pdf, output_data)
 
         # 1 — listing images.
-        # For all DIGITAL products (single-image AND multi-page PDF) the listing
-        # photos are DERIVED from the real delivery further below (step 2.6), NOT
-        # independently generated: an independent text-to-image hero/lifestyle
-        # depicts genuinely DIFFERENT content (a different dinosaur; different
-        # planner pages) than the delivered file — which the consistency gate
-        # correctly rejects and no prompt/remake can fix (confirmed live on tasks
-        # e881c422 and the pdf blocks). POD keeps the independent-generation path,
-        # guarded by the marketing/deliverable consistency gate below. (Using the
-        # real Printify product mockups as the listing photos instead is a
-        # tracked follow-up — P1-1 — deferred because it bypasses that gate.)
+        # No format generates independent text-to-image listing photos upfront:
+        #   - DIGITAL (single-image + PDF): photos are DERIVED from the real
+        #     delivery at step 2.6 (an independent hero/lifestyle depicts
+        #     genuinely DIFFERENT content than the delivered file — the
+        #     consistency gate rejects it and no remake fixes it; confirmed live
+        #     on tasks e881c422 and the pdf blocks).
+        #   - POD (P1-1): photos are the REAL Printify mockup renders of the
+        #     uploaded design, fetched at step 4.5 after the Printify product
+        #     exists — never a text-to-image guess of what the garment might look
+        #     like. The only independent generation left is the POD *fallback*
+        #     (Printify mockups unavailable), which IS consistency-gated at 4.5.
         derive_listing_from_delivery = digital_required
-        if derive_listing_from_delivery:
-            image_paths = []
-        else:
-            image_paths = self._stage_listing_images(
-                task_id, product_name, visual_brief, is_autonomy, report,
-                task_type=task_type, content_context=content_context,
-            )
+        image_paths = []
 
         # 2 — delivery asset (single image or multi-page PDF)
         if is_pdf:
@@ -208,6 +203,35 @@ class PipelineOrchestrator:
         if gate_error:
             self._block_task(task_id, gate_error, report, pre_listing=True)
             return report
+
+        # 4.5 — P1-1: POD listing photos are the REAL Printify mockup renders of
+        # the uploaded design (guaranteed to depict the exact product — no
+        # consistency gate needed, and 2 image generations saved). If none can be
+        # fetched, fall back to independently-generated photos AND run the
+        # marketing/deliverable consistency gate on that fallback (which may block).
+        if is_pod and pod_product:
+            image_paths = self._stage_pod_listing_images(task_id, pod_product, report)
+            if image_paths:
+                report["stages"].setdefault("marketing_consistency", {
+                    "ok": True,
+                    "skipped": "POD listing photos are real Printify mockups of the uploaded design — nothing independent to verify",
+                })
+            else:
+                logger.warning(
+                    f"PipelineOrchestrator: no Printify mockups for {task_id}; "
+                    f"falling back to generated listing photos (consistency-gated)"
+                )
+                image_paths = self._stage_listing_images(
+                    task_id, product_name, visual_brief, is_autonomy, report,
+                    task_type=task_type, content_context=content_context,
+                )
+                if design_path and image_paths:
+                    image_paths = self._stage_marketing_consistency(
+                        task_id, design_path, image_paths, product_name, visual_brief, is_autonomy, report,
+                        task_type=task_type, content_context=content_context,
+                    )
+                    if report.get("blocked"):
+                        return report
 
         # 5 — create Etsy draft listing
         # P1-6: reconcile the listing's page-count claims with the REAL number of
@@ -725,6 +749,55 @@ class PipelineOrchestrator:
         except Exception as e:
             logger.warning(f"PipelineOrchestrator: failed to extract PDF pages from {pdf_path}: {e}")
         return pages
+
+    def _stage_pod_listing_images(self, task_id: str, pod_product, report: dict) -> list:
+        """P1-1: use the REAL Printify mockup renders of the uploaded design as
+        the POD listing photos (front/lifestyle), instead of independent
+        text-to-image guesses that often show a plausible-but-wrong garment.
+        Downloads up to 3 mockups, validates them, registers and returns paths.
+        Returns [] on any failure so the caller can fall back to generation."""
+        import httpx
+        from app.services.image_file_service import ImageFileService
+        from app.services.printify_client import PrintifyClient
+        from config import settings
+
+        fs = ImageFileService()
+        validator = ImageValidationService()
+        saved = []
+        try:
+            printify_product_id = getattr(pod_product, "printify_product_id", None)
+            if not printify_product_id:
+                report["stages"]["listing_images"] = {"ok": False, "error": "pod product has no printify_product_id", "source": "printify_mockup"}
+                return []
+            product = PrintifyClient().get_product(printify_product_id)
+            images = product.get("images", []) or []
+            # Prefer the default / publishing-selected mockups first.
+            images = sorted(images, key=lambda im: (not im.get("is_default"), not im.get("is_selected_for_publishing")))
+            urls = [im.get("src") for im in images if im.get("src")][:3]
+            if not urls:
+                report["stages"]["listing_images"] = {"ok": False, "error": "no Printify mockup images", "source": "printify_mockup"}
+                return []
+            for idx, url in enumerate(urls):
+                try:
+                    resp = httpx.get(url, timeout=60.0, follow_redirects=True)
+                    resp.raise_for_status()
+                    fname = "hero.png" if idx == 0 else f"mockup{idx}.png"
+                    p = Path(fs.save_bytes(resp.content, task_id, "listing", fname))
+                    validator.validate(p, use_case="listing")
+                    self.catalog.register(
+                        task_id=task_id, local_path=str(p), variant="listing",
+                        use_case="listing", agent="PrintifyMockup",
+                        provider="printify", model="product_mockup",
+                    )
+                    saved.append(p)
+                except Exception as e:
+                    logger.warning(f"PipelineOrchestrator: Printify mockup {idx} failed for {task_id}: {e}")
+            report["stages"]["listing_images"] = {"ok": bool(saved), "count": len(saved), "source": "printify_mockup"}
+            return saved
+        except Exception as e:
+            logger.error(f"PipelineOrchestrator: failed to fetch Printify mockups for {task_id}: {e}")
+            report["stages"]["listing_images"] = {"ok": False, "error": str(e), "source": "printify_mockup"}
+            return []
 
     def _stage_listing_images(self, task_id: str, product_name: str, visual_brief: str, is_autonomy: bool, report: dict, record_spend: bool = True, task_type: str = None, content_context: str = "") -> list:
         from config import settings
