@@ -49,12 +49,41 @@ step 93 changelog):
   pod_apparel_design             : 482   "T-shirts" (Clothing > Gender-Neutral Adult Clothing > ... > T-shirts) — true leaf. This is a static default for the common case (unisex adult tee); Etsy's tree has separate T-shirt leaves per demographic (men's/women's/boys'/girls'/gender-neutral, ids 449/559/11136/11143/482) and per apparel type (hoodie/tee/etc.) that a real Printify blueprint could map to more precisely — flagged as a follow-up, not built here (would need blueprint-title-to-taxonomy matching, a materially larger feature).
 """
 
+# price_band (P0-11): the realistic Etsy price range for each format, in USD.
+# The listing-pricing LLM is HINTED with this band and its output is CLAMPED to
+# it (midpoint if the LLM returns something out of range / None / 0), so a
+# listing can never publish at $0 (Etsy rejects <$0.20) or a wildly wrong price.
+# The old single hardcoded "$10-25" band overpriced cheap digital goods (a
+# coloring page / wallpaper sells for ~$2-6) and underpriced nothing usefully.
+# pod_apparel_design's band is only a conservative FALLBACK floor — real POD
+# pricing must be cost-based (P0-4) to guarantee margin; the band keeps it from
+# ever going stupidly low if that computation is unavailable.
 PRODUCT_FORMATS = {
-    "single_print":         {"category": "digital", "delivery": "single_image", "taxonomy_id": 2078},
-    "coloring_page":        {"category": "digital", "delivery": "single_image", "taxonomy_id": 339},
-    "greeting_card_design": {"category": "digital", "delivery": "single_image", "taxonomy_id": 1280},
-    "phone_wallpaper":      {"category": "digital", "delivery": "single_image", "taxonomy_id": 2078},
-    "sticker_sheet_design": {"category": "digital", "delivery": "single_image", "taxonomy_id": 1326},
-    "pdf_planner_or_guide": {"category": "digital", "delivery": "pdf",          "taxonomy_id": 354},
-    "pod_apparel_design":   {"category": "pod",     "delivery": "single_image", "taxonomy_id": 482},
+    "single_print":         {"category": "digital", "delivery": "single_image", "taxonomy_id": 2078, "price_band": (3.50, 8.00)},
+    "coloring_page":        {"category": "digital", "delivery": "single_image", "taxonomy_id": 339,  "price_band": (2.00, 4.50)},
+    "greeting_card_design": {"category": "digital", "delivery": "single_image", "taxonomy_id": 1280, "price_band": (3.00, 6.00)},
+    "phone_wallpaper":      {"category": "digital", "delivery": "single_image", "taxonomy_id": 2078, "price_band": (2.00, 4.00)},
+    "sticker_sheet_design": {"category": "digital", "delivery": "single_image", "taxonomy_id": 1326, "price_band": (3.00, 6.00)},
+    "pdf_planner_or_guide": {"category": "digital", "delivery": "pdf",          "taxonomy_id": 354,  "price_band": (5.00, 12.00)},
+    "pod_apparel_design":   {"category": "pod",     "delivery": "single_image", "taxonomy_id": 482,  "price_band": (24.00, 40.00)},
 }
+
+# Fallback band for any format missing one (defensive — every format above has
+# an explicit band).
+DEFAULT_PRICE_BAND = (3.00, 10.00)
+
+
+def price_band_for(product_format: str):
+    """Return (low, high) USD price band for a format, or the default."""
+    spec = PRODUCT_FORMATS.get(product_format) or {}
+    band = spec.get("price_band") or DEFAULT_PRICE_BAND
+    return float(band[0]), float(band[1])
+
+
+def clamp_price(price, product_format: str) -> float:
+    """Clamp an LLM-proposed price into the format's band; return the band
+    midpoint if it's missing/non-numeric/out of range. NEVER returns 0/None."""
+    lo, hi = price_band_for(product_format)
+    if not isinstance(price, (int, float)) or isinstance(price, bool) or price < lo or price > hi:
+        return round((lo + hi) / 2, 2)
+    return round(float(price), 2)

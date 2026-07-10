@@ -36,11 +36,19 @@ class EtsyClient:
         # orchestrator sets it explicitly per listing type: a real recent-era
         # value for digital downloads (so Etsy shows the instant-download file
         # slot) and made_to_order for POD physical goods.
+        # P0-11: refuse to publish a listing with no real price. Etsy's minimum
+        # is $0.20; a 0/None price means pricing failed upstream and should
+        # block, not silently create a broken listing. The pipeline clamps the
+        # price into a per-format band before this, so a valid price is expected.
+        price = listing.get("price")
+        if not isinstance(price, (int, float)) or isinstance(price, bool) or price < 0.20:
+            raise ValueError(f"Refusing to create Etsy listing with invalid price {price!r} (min $0.20)")
+
         payload = {
             "quantity": listing.get("quantity", 1),
             "title": listing.get("title", "")[:140],
             "description": listing.get("description", ""),
-            "price": listing.get("price") or 0,
+            "price": price,
             "who_made": "i_did",
             "when_made": listing.get("when_made", POD_WHEN_MADE),
             "taxonomy_id": listing.get("taxonomy_id", 1),

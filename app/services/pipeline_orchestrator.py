@@ -923,21 +923,32 @@ class PipelineOrchestrator:
         # 4534427807). made_to_order is correct for POD physical goods.
         intended_when_made = POD_WHEN_MADE if is_pod else DIGITAL_WHEN_MADE
 
+        from app.core.product_formats import price_band_for, clamp_price
+        band_lo, band_hi = price_band_for(task_type)
+
         try:
             product = {
                 "product_name": product_name,
                 "concept": product_name,
                 "materials": [],
-                "estimated_price_range": "$10-25",
+                # P0-11: per-format band instead of the old blanket "$10-25".
+                "estimated_price_range": f"${band_lo:.2f}-{band_hi:.2f}",
                 "target_audience": "",
             }
             listing = ListingGeneratorAgent().generate_listing(product, output_data)
             listing["taxonomy_id"] = intended_taxonomy_id
             listing["when_made"] = intended_when_made
 
+            # P0-11: never let a None/0/out-of-band LLM price reach Etsy — clamp
+            # into the format's band (midpoint if invalid). Etsy rejects <$0.20.
+            listing["price"] = clamp_price(listing.get("price"), task_type)
+
             if is_pod:
                 listing["type"] = "physical"
-                listing["quantity"] = 1
+                # P0-5: made-to-order POD goods must not sell out after one sale;
+                # 999 keeps the winning listing alive (Etsy marks quantity=1 sold
+                # out and deactivates it).
+                listing["quantity"] = 999
                 shipping_id = asyncio.run(EtsyShippingService().get_or_create())
                 if shipping_id:
                     listing["shipping_profile_id"] = shipping_id
