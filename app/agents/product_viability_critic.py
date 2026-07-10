@@ -89,6 +89,14 @@ for THIS item, judging against these principles:
    could the whole thing be one line of text on a stock background?
    Low-effort text-on-blank products are weak.
 
+5. TRADEMARK / IP (HARD RULE, overrides everything): If the concept
+   references or clearly derives from a trademarked brand, franchise,
+   character, celebrity, sports team/league, or another artist's signature
+   style (e.g. anything evoking Disney, Bluey, Pokémon, Taylor Swift, Nike,
+   Stanley, the NFL, etc.), score it 1 and say why — a single such listing
+   can get the whole shop permanently suspended. When in doubt, treat it as
+   infringing and fail it.
+
 Scoring guide (be consistent with this):
   1-3  = generic, lazy, a bare phrase/topic, or clear format mismatch.
          Would erode trust in the shop. REJECT.

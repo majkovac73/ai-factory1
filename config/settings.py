@@ -159,6 +159,11 @@ class Settings(BaseSettings):
     # so genuinely sellable products pass and generic/low-effort ones fail.
     VIABILITY_CRITIC_MIN_SCORE: int = 6
 
+    # STEP 103 C-1: extra trademark/brand terms to block beyond the built-in
+    # list, as a JSON array env, e.g. TRADEMARK_BLOCKLIST_EXTRA='["acme","foo"]'.
+    # Screened against concept name/description, tags, and trend queries.
+    TRADEMARK_BLOCKLIST_EXTRA: list = []
+
     # Real trend research (Google Trends via pytrends). Seed keywords the
     # TrendDataService pulls live search-interest data for; empty = use the
     # service's built-in SEED_KEYWORDS default. Lets the anchor list be tuned

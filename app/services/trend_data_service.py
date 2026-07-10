@@ -102,6 +102,13 @@ class TrendDataService:
                 f"for keywords={kws}. Last error: {last_error}"
             )
 
+        # C-1: drop trademark/brand-poisoned rising queries BEFORE they reach the
+        # research/concept prompt — Google's rising queries are full of brand,
+        # character and celebrity terms precisely because they trend, and those
+        # must never seed a listing.
+        from app.core.trademark_screen import filter_queries
+        rising_queries = {kw: filter_queries(qs) for kw, qs in rising_queries.items()}
+
         return {
             "keywords": kws,
             "rising_queries": rising_queries,

@@ -1049,6 +1049,19 @@ class PipelineOrchestrator:
             listing["taxonomy_id"] = intended_taxonomy_id
             listing["when_made"] = intended_when_made
 
+            # C-1: final trademark screen on the tags (rights-holders' bots scan
+            # tags) — drop any that slipped through, and block outright if the
+            # title itself carries a brand term (should never happen — the
+            # concept was screened — but fail closed if it does).
+            from app.core.trademark_screen import filter_tags, find_trademark
+            clean_tags, dropped = filter_tags(listing.get("tags", []))
+            if dropped:
+                logger.warning(f"PipelineOrchestrator: dropped trademarked tags for {task_id}: {dropped}")
+            listing["tags"] = clean_tags
+            title_hit = find_trademark(listing.get("title", "")) or find_trademark(product_name)
+            if title_hit:
+                raise RuntimeError(f"listing title/name contains a trademarked term '{title_hit}' — refusing to publish")
+
             # P1-6: make the description's page-count truthful. Rewrite any
             # "N-page"/"N pages" claim to the REAL count and append an explicit
             # line, so a buyer never receives a different number of pages than

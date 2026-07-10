@@ -243,6 +243,17 @@ Return ONLY valid JSON with this structure:
             return "description is missing or empty"
         if name.lower() not in description.lower():
             return "description does not reference the specific product_name"
+
+        # C-1: reject any concept that references a trademarked brand / character
+        # / celebrity / franchise — an existential Etsy-suspension risk.
+        from app.core.trademark_screen import screen as _tm_screen
+        tm_hit = _tm_screen(name, description)
+        if tm_hit:
+            return (
+                f"concept references a trademarked/branded term ('{tm_hit}') — this is a "
+                "legal/IP risk and must be avoided; propose a wholly original concept with "
+                "no brand, character, celebrity, franchise, or sports references"
+            )
         lowered_desc = description.lower()
         for marker in _MULTI_ITEM_MARKERS:
             if marker in lowered_desc:
