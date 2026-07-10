@@ -106,6 +106,21 @@ class Settings(BaseSettings):
 
     DISCORD_WEBHOOK_URL: str | None = None
 
+    # STEP 103 C-3: automatic backups. A daily tick zips a consistent copy of the
+    # SQLite DB (OAuth tokens, PODProduct↔listing mappings, the whole
+    # analytics/revenue ledger the learning loop depends on) + the runtime state
+    # JSONs. If an S3-compatible bucket is configured (Cloudflare R2 / Backblaze
+    # B2 etc.) it's uploaded off-box; otherwise the last BACKUP_KEEP_LOCAL zips
+    # are kept on the volume and a weekly alert warns that offsite is unconfigured.
+    BACKUP_ENABLED: bool = True
+    BACKUP_INTERVAL_HOURS: int = 24
+    BACKUP_KEEP_LOCAL: int = 7
+    BACKUP_S3_BUCKET: str | None = None
+    BACKUP_S3_ENDPOINT_URL: str | None = None   # e.g. https://<acct>.r2.cloudflarestorage.com
+    BACKUP_S3_ACCESS_KEY_ID: str | None = None
+    BACKUP_S3_SECRET_ACCESS_KEY: str | None = None
+    BACKUP_S3_REGION: str = "auto"
+
     MAX_TASKS_PER_DAY: int = 10
     MAX_DAILY_SPEND_USD: float = 5.00
 

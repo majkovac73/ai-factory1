@@ -104,6 +104,12 @@ class EtsyReceiptWorker:
                     _check_interval = 0
                     self._check_worker_health()
 
+                # C-3: daily backup tick (folded into this worker's loop).
+                try:
+                    self._maybe_backup()
+                except Exception as e:
+                    logger.error(f"EtsyReceiptWorker: backup tick failed: {e}")
+
                 self._stop_event.wait(self._poll_seconds)
         finally:
             if not self._stop_event.is_set():
@@ -521,6 +527,41 @@ class EtsyReceiptWorker:
             AlertService().send_alert_sync("Stale worker heartbeat", msg, level="warning")
         except Exception as e:
             logger.warning(f"EtsyReceiptWorker: failed to send stale-heartbeat alert: {e}")
+
+    # ── Daily backup tick (C-3) ───────────────────────────────────────────────
+
+    def _maybe_backup(self):
+        if not getattr(settings, "BACKUP_ENABLED", True):
+            return
+        state = self._load_state()
+        now = int(datetime.now(timezone.utc).timestamp())
+        interval = getattr(settings, "BACKUP_INTERVAL_HOURS", 24) * 3600
+        if now - state.get("last_backup_at", 0) < interval:
+            return
+
+        from app.services.backup_service import BackupService
+        svc = BackupService()
+        report = svc.create_backup()
+        state["last_backup_at"] = now
+
+        # Weekly nag if offsite isn't configured — local-only backups don't
+        # survive a volume failure.
+        if not svc.offsite_configured():
+            if now - state.get("last_backup_warn_at", 0) >= 7 * 24 * 3600:
+                state["last_backup_warn_at"] = now
+                try:
+                    from app.services.alert_service import AlertService
+                    AlertService().send_alert_sync(
+                        "Offsite backup NOT configured",
+                        "Backups are kept only on the Railway volume (last N zips) — a volume "
+                        "failure would still lose everything. Configure BACKUP_S3_* (Cloudflare "
+                        "R2 / Backblaze B2) for real off-box protection.",
+                        level="warning",
+                    )
+                except Exception:
+                    pass
+        self._save_state(state)
+        logger.info(f"EtsyReceiptWorker: backup tick done — {report}")
 
     # ── State persistence ─────────────────────────────────────────────────────
 

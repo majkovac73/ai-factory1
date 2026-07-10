@@ -11,3 +11,4 @@ Pillow==12.3.0
 pypdf==6.14.2
 pytrends==4.9.2
 pandas==2.3.3
+boto3==1.43.46

@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.routes import health, tasks, logs, dashboard, etsy, pinterest, tumblr, marketing, analytics, pod
+from app.api.routes import health, tasks, logs, dashboard, etsy, pinterest, tumblr, marketing, analytics, pod, admin
 
 api_router = APIRouter()
 
@@ -14,3 +14,4 @@ api_router.include_router(tumblr.router, prefix="/tumblr", tags=["Tumblr"])
 api_router.include_router(marketing.router, prefix="/marketing", tags=["Marketing"])
 api_router.include_router(analytics.router, prefix="/analytics", tags=["Analytics"])
 api_router.include_router(pod.router, prefix="/pod", tags=["POD"])
+api_router.include_router(admin.router, prefix="/admin", tags=["Admin"])
