@@ -9,10 +9,16 @@ from pydantic import ValidationError
 # Should pass
 try:
     valid = SEOSchema(
-        title="Handmade Ceramic Mug",
-        description="A lovely mug.",
-        keywords=["mug", "ceramic"],
-        sections=["Intro", "Details"],
+        title="Handmade Ceramic Coffee Mug",
+        # description must be >=120 chars, keywords >=3, sections >=4 per the
+        # current SEOSchema minimums (fixture was stale — pre-dated tightening).
+        description=(
+            "A lovely handmade ceramic coffee mug, glazed by hand and finished "
+            "for everyday use. Microwave and dishwasher safe, it makes a warm, "
+            "thoughtful gift for coffee and tea lovers alike."
+        ),
+        keywords=["mug", "ceramic", "handmade", "coffee"],
+        sections=["Intro", "Details", "Care", "Shipping"],
     )
     print("VALID CASE PASSED:", valid.title)
 except ValidationError as e:
