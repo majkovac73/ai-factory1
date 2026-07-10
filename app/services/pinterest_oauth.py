@@ -14,6 +14,22 @@ PINTEREST_TOKEN_URL = "https://api.pinterest.com/v5/oauth/token"
 _pending_states = set()
 
 
+def is_connected() -> bool:
+    """
+    Cheap, synchronous check for whether Pinterest can actually receive a
+    post: app credentials + board configured AND an OAuth token row exists.
+    Used by the pipeline to skip the (billable) pin-image generation entirely
+    when Pinterest isn't connected — see P0-6. Does NOT refresh the token.
+    """
+    if not (settings.PINTEREST_APP_ID and settings.PINTEREST_APP_SECRET and settings.PINTEREST_BOARD_ID):
+        return False
+    db = SessionLocal()
+    try:
+        return db.query(PinterestToken).first() is not None
+    finally:
+        db.close()
+
+
 def build_authorization_url(scopes: str = "boards:read,pins:read,pins:write") -> str:
     state = secrets.token_urlsafe(16)
     _pending_states.add(state)

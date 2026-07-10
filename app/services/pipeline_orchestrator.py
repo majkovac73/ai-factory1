@@ -1145,6 +1145,16 @@ class PipelineOrchestrator:
         from config import settings
 
         try:
+            # P0-6: skip BEFORE generating the pin image when Pinterest can't
+            # receive a post anyway (not configured / not OAuth-connected).
+            # enrich_listing_with_image below spends a real ~$0.04 image call;
+            # generating it only to have the post fail wasted money on every
+            # task while Pinterest is inactive.
+            from app.services.pinterest_oauth import is_connected as pinterest_connected
+            if not pinterest_connected():
+                report["stages"]["pinterest"] = {"skipped": "Pinterest not connected"}
+                return
+
             marketing_svc = MarketingService()
             existing = marketing_svc.get_posts_for_task(task_id)
             if any(p.channel == "pinterest" and p.status == "success" for p in existing):
