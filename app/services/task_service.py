@@ -61,6 +61,24 @@ class TaskService:
         finally:
             db.close()
 
+    def recent_product_titles(self, limit: int = 50) -> list:
+        """A-3: the most recent product tasks' (title, type), newest first, for
+        dedup — so the concept generator doesn't keep proposing the same product.
+        Title comes from output_data.title, falling back to metadata product_name."""
+        db = SessionLocal()
+        try:
+            rows = db.query(Task).order_by(Task.created_at.desc()).limit(limit * 3).all()
+        finally:
+            db.close()
+        out = []
+        for t in rows:
+            title = (t.output_data or {}).get("title") or (t.metadata_ or {}).get("product_name")
+            if title and t.type:
+                out.append((title, t.type))
+            if len(out) >= limit:
+                break
+        return out
+
     def update_status(self, task_id: str, new_status: str):
         valid_values = {s.value for s in TaskStatus}
         if new_status not in valid_values:

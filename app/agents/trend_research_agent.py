@@ -72,6 +72,9 @@ class TrendResearchAgent(BaseAgent):
         self._intelligence = IntelligenceAgent(provider, model)
         self._critic = ProductViabilityCriticAgent(provider, model)
         self.sanitizer = JSONSanitizer()
+        # A-3: recent shop products, loaded per run() for dedup. Empty by default
+        # so direct _propose_product() calls (tests) don't dedup against the DB.
+        self._recent_products: list = []
 
     def run(self) -> dict | None:
         """
@@ -106,6 +109,16 @@ class TrendResearchAgent(BaseAgent):
         if not opportunities:
             logger.info("TrendResearchAgent: no opportunities returned by intelligence agent")
             return None
+
+        # A-3: load recent shop products so the concept generator avoids
+        # proposing near-duplicates (which cannibalize Etsy search and waste the
+        # full build cost).
+        try:
+            from app.services.task_service import TaskService
+            self._recent_products = TaskService().recent_product_titles(50)
+        except Exception as e:
+            logger.warning(f"TrendResearchAgent: could not load recent products for dedup: {e}")
+            self._recent_products = []
 
         insight = opportunities[0]
         product = self._propose_product(insight, intel.get("confidence", "low"))
@@ -146,6 +159,14 @@ class TrendResearchAgent(BaseAgent):
 
             error = self._validate_product(data)
             if not error:
+                # A-3: reject near-duplicates of existing shop products BEFORE the
+                # (paid) critic call — consumes a retry with dedup feedback.
+                dup = self._dedup_error(data)
+                if dup:
+                    logger.warning(f"TrendResearchAgent: concept attempt {attempt} rejected as duplicate: {dup}")
+                    feedback = f"{dup} Propose a clearly different product — different theme AND different wording."
+                    continue
+
                 data["confidence"] = data.get("confidence") or fallback_confidence
 
                 critique = self._critic.critique(data)
@@ -177,6 +198,15 @@ class TrendResearchAgent(BaseAgent):
 
     def _build_concept_prompt(self, insight: str, feedback: str) -> str:
         retry_note = f"\n\nIMPORTANT — retry feedback:\n{feedback}" if feedback else ""
+        # A-3: list existing shop products so the model doesn't re-propose them.
+        dedup_note = ""
+        if self._recent_products:
+            listed = "; ".join(f"{t} ({fmt})" for t, fmt in self._recent_products[:30])
+            dedup_note = (
+                "\n\nProducts ALREADY in the shop — your proposal MUST be clearly "
+                "different from ALL of these (different theme AND different wording), "
+                f"not a variation of them:\n{listed}"
+            )
         return f"""
 You are a product strategist for a solo Etsy seller. Your pipeline can ONLY
 produce products in these exact formats — nothing else is buildable:
@@ -204,7 +234,7 @@ anything requiring software/interactivity (no apps, no AR, no "tools" —
 only something a static image or PDF can actually be).
 
 Market insight:
-{insight}
+{insight}{dedup_note}
 
 Return ONLY valid JSON with this structure:
 {{
@@ -216,6 +246,28 @@ Return ONLY valid JSON with this structure:
   "confidence": "high/medium/low"
 }}{retry_note}
 """
+
+    DEDUP_RATIO = 0.75
+
+    def _dedup_error(self, data: dict) -> str | None:
+        """A-3: return a rejection reason if the concept's name is too similar
+        (difflib ratio > DEDUP_RATIO) to a recent shop product of the SAME
+        format, else None."""
+        import difflib
+        name = (data.get("product_name") or "").strip().lower()
+        fmt = data.get("product_format")
+        if not name:
+            return None
+        for title, ttype in (self._recent_products or []):
+            if ttype != fmt:
+                continue
+            ratio = difflib.SequenceMatcher(None, name, str(title).strip().lower()).ratio()
+            if ratio > self.DEDUP_RATIO:
+                return (
+                    f"This concept ('{data.get('product_name')}') is too similar to an "
+                    f"existing shop product ('{title}') (similarity {ratio:.2f})."
+                )
+        return None
 
     def _validate_product(self, data: dict) -> str | None:
         """Return an error string if data isn't a valid, specific, buildable product concept, else None."""
