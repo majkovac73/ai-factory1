@@ -78,6 +78,7 @@ DETERMINISTIC = [
     "test_step104_seasonal_lifecycle.py",
     "test_step104_learning_signals.py",
     "test_step104_trend_direction_stale.py",
+    "test_step104_diversity.py",
 ]
 
 

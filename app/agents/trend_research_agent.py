@@ -15,6 +15,7 @@ confidence, or None if nothing promising / valid was produced.
 """
 import json
 import logging
+import random
 
 from app.agents.base_agent import BaseAgent
 from app.agents.market_intelligence.research import ResearchAgent
@@ -97,8 +98,23 @@ class TrendResearchAgent(BaseAgent):
             )
             return None
 
+        # 1-7: vary the research topic. Every ~3rd cycle, when an occasion is in
+        # its buying window, research that occasion directly instead of the same
+        # fixed sentence every time — combats the attractor-concept problem that
+        # A-3 dedup only fights as a symptom.
+        research_topic = _RESEARCH_TOPIC
         try:
-            research = self._research.research(_RESEARCH_TOPIC, _RESEARCH_SCOPE, real_trend_data=trend_data)
+            from app.core.seasonality import upcoming_occasions
+            in_window = upcoming_occasions()
+            if in_window and random.random() < 0.34:
+                occ = random.choice(in_window)["occasion"]
+                research_topic = f"Etsy {occ} printable and wall-art products buyers want right now"
+        except Exception:
+            pass
+        logger.info(f"TrendResearchAgent: research topic = {research_topic!r}")
+
+        try:
+            research = self._research.research(research_topic, _RESEARCH_SCOPE, real_trend_data=trend_data)
         except Exception as e:
             logger.error(f"TrendResearchAgent: research step failed: {e}")
             return None
@@ -128,7 +144,10 @@ class TrendResearchAgent(BaseAgent):
         # earned / got engagement, away from formats piling up unsold.
         self._insights_block = self._load_insights_block()
 
-        insight = opportunities[0]
+        # 1-7: randomize among the top 3 opportunities instead of always [0].
+        idx = random.randrange(min(3, len(opportunities)))
+        insight = opportunities[idx]
+        logger.info(f"TrendResearchAgent: using opportunity index {idx} of {len(opportunities)}")
         product = self._propose_product(insight, intel.get("confidence", "low"))
         if not product:
             logger.error(
