@@ -16,7 +16,7 @@ import logging
 from io import BytesIO
 from pathlib import Path
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 logger = logging.getLogger("ai-factory")
 
@@ -50,6 +50,8 @@ class DeliveryBundleService:
                 return self._phone_bundle(master)
             if product_format == "coloring_page":
                 return self._coloring_bundle(master)
+            if product_format == "greeting_card_design":
+                return self._card_bundle(master)
             return [master]
         except Exception as e:
             logger.warning(f"DeliveryBundleService: bundle failed for {product_format}: {e}; delivering master only")
@@ -91,6 +93,28 @@ class DeliveryBundleService:
         page.save(pdf_path, format="PDF", resolution=300.0)
         return [master, pdf_path]
 
+    def _card_bundle(self, master: Path) -> list:
+        """B-2: a print-ready HALF-FOLD card PDF (landscape letter, fold down the
+        middle; art on the right = the front when folded, small back note on the
+        left) plus the original art PNG. A flat PNG doesn't fold into a card."""
+        img = Image.open(master).convert("RGB")
+        W, H = 3300, 2550  # landscape letter @ 300 dpi
+        half = W // 2
+        margin = 160
+        sheet = Image.new("RGB", (W, H), (255, 255, 255))
+        draw = ImageDraw.Draw(sheet)
+        draw.line([(half, 0), (half, H)], fill=(210, 210, 210), width=2)  # fold guide
+        art = ImageOps.contain(img, (half - 2 * margin, H - 2 * margin), Image.LANCZOS)
+        sheet.paste(art, (half + (half - art.width) // 2, (H - art.height) // 2))
+        try:
+            f = ImageFont.load_default(size=40)
+            draw.text((margin, H - 140), "Printable greeting card — print & fold in half.", fill=(150, 150, 150), font=f)
+        except Exception:
+            pass
+        pdf_path = master.parent / f"{master.stem}_card.pdf"
+        sheet.save(pdf_path, format="PDF", resolution=300.0)
+        return [master, pdf_path]
+
     @staticmethod
     def size_summary(product_format: str, n_files: int) -> str:
         """A short 'Includes N sizes/files' line for the description (A-4/A-5)."""
@@ -100,4 +124,6 @@ class DeliveryBundleService:
             return f"Includes {n_files} device sizes."
         if product_format == "coloring_page" and n_files > 1:
             return "Includes a ready-to-print letter-size PDF and the original PNG."
+        if product_format == "greeting_card_design" and n_files > 1:
+            return "Includes a print-ready fold-over card PDF and the original art."
         return ""

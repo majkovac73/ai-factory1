@@ -19,6 +19,12 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str | None = None  # no longer used for images; kept in case a future step needs it directly
     ANTHROPIC_API_KEY: str | None = None
     DEFAULT_MODEL: str = "openai/gpt-4o-mini"
+    # B-5: the concept and SEO calls are the two highest-leverage LLM outputs in
+    # the system (what to build, how it's found) yet cost well under $0.05/day on
+    # mini. Point these at a stronger model (e.g. anthropic/claude-sonnet-5 or
+    # openai/gpt-4o via OpenRouter) for cents more per day. Default = DEFAULT_MODEL.
+    CONCEPT_MODEL: str | None = None
+    SEO_MODEL: str | None = None
 
     OPENROUTER_API_KEY: str | None = None
 

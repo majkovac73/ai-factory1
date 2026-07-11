@@ -67,6 +67,8 @@ class TrendResearchAgent(BaseAgent):
     MAX_CONCEPT_ATTEMPTS = 3
 
     def __init__(self, provider=None, model: str = None):
+        # B-5: concept generation uses CONCEPT_MODEL when configured.
+        model = model or getattr(settings, "CONCEPT_MODEL", None)
         super().__init__(provider, model)
         self._research = ResearchAgent(provider, model)
         self._intelligence = IntelligenceAgent(provider, model)

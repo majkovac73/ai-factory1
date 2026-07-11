@@ -65,9 +65,13 @@ check("2 phone bundle multi-file", len(pf) >= 2)
 cp = svc.build(make_master("cp.png"), "coloring_page")
 check("3 coloring bundle has a PDF", any(f.suffix == ".pdf" for f in cp))
 
-# [4] other format -> master only
+# [4] B-2: greeting card -> original + half-fold card PDF
 gc = svc.build(make_master("gc.png"), "greeting_card_design")
-check("4 greeting card single file", len(gc) == 1)
+check("4 greeting card bundle has 2 files", len(gc) == 2)
+check("4 greeting card includes a fold-over PDF", any(f.suffix == ".pdf" for f in gc))
+# a truly single-file format (sticker) still returns master only
+st = svc.build(make_master("st.png"), "sticker_sheet_design")
+check("4 sticker sheet single file", len(st) == 1)
 
 # [5] size summary
 check("5 single_print summary mentions ratios", "ratios" in DeliveryBundleService.size_summary("single_print", 5))

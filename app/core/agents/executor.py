@@ -1,11 +1,14 @@
 import json
 from app.agents.base_agent import BaseAgent
 from app.core.utils.json_sanitizer import JSONSanitizer
+from config import settings
 
 
 class ExecutorAgent(BaseAgent):
 
     def __init__(self, provider=None, model: str = None):
+        # B-5: SEO/listing generation uses SEO_MODEL when configured.
+        model = model or getattr(settings, "SEO_MODEL", None)
         super().__init__(provider, model)
         self.sanitizer = JSONSanitizer()
 
