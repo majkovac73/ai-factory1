@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     PINTEREST_APP_SECRET: str | None = None
     PINTEREST_REDIRECT_URI: str = "http://localhost:8000/pinterest/oauth/callback"
     PINTEREST_BOARD_ID: str | None = None
+    # A-9: optional per-format Pinterest board routing (product_format ->
+    # board_id) as a JSON env, e.g. '{"single_print":"123","pdf_planner_or_guide":"456"}'.
+    # Falls back to PINTEREST_BOARD_ID when a format isn't mapped.
+    PINTEREST_BOARD_MAP: dict = {}
 
     # Tumblr (OAuth 2.0). Maj registered the app and set the consumer key/secret
     # in Railway. The redirect_uri MUST match one registered on the Tumblr app —
@@ -84,6 +88,10 @@ class Settings(BaseSettings):
     # for the id and sets this env; POD listings then send production_partner_ids.
     # Unset = not sent (safe, but POD listings are then non-compliant).
     ETSY_PRODUCTION_PARTNER_ID: str | None = None
+    # B-7: optional per-format Etsy shop section routing (product_format ->
+    # shop_section_id) as a JSON env. Populate after running
+    # scripts/create_shop_sections.py. Sent as shop_section_id on listing creation.
+    SHOP_SECTION_MAP: dict = {}
     # Honest AI-assisted-design disclosure appended to every listing description
     # (Etsy requires accurate "how it's made" info). Mirror it in the shop About.
     SHOP_AI_DISCLOSURE: str = "Original design created using AI-assisted design tools and refined for print."

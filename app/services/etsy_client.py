@@ -56,6 +56,13 @@ class EtsyClient:
             "materials": listing.get("materials", [])[:13],
         }
 
+        # B-7: place the listing in its shop section when configured.
+        if listing.get("shop_section_id"):
+            try:
+                payload["shop_section_id"] = int(listing["shop_section_id"])
+            except (TypeError, ValueError):
+                pass
+
         # Only include optional fields when explicitly provided — sending null
         # shipping_profile_id causes 422 on physical listings; sending no type
         # field defaults to physical which then requires a shipping profile.

@@ -267,7 +267,7 @@ class PipelineOrchestrator:
             self._stage_link_printify_listing(pod_product, listing_id, report)
 
         # 8 — Social marketing (independent of Etsy stages): Pinterest + Tumblr.
-        self._stage_pinterest(task_id, product_name, visual_brief, output_data, report)
+        self._stage_pinterest(task_id, product_name, visual_brief, output_data, report, task_type=task_type)
         self._stage_tumblr(task_id, product_name, output_data, listing_id, report)
 
         # P0-9: stamp COMPLETED so a restart's resume scan won't re-run (and
@@ -1067,6 +1067,11 @@ class PipelineOrchestrator:
             listing = ListingGeneratorAgent().generate_listing(product, output_data)
             listing["taxonomy_id"] = intended_taxonomy_id
             listing["when_made"] = intended_when_made
+            # B-7: route the listing into its shop section when mapped.
+            from config import settings as _sec_settings
+            section_id = (getattr(_sec_settings, "SHOP_SECTION_MAP", None) or {}).get(task_type)
+            if section_id:
+                listing["shop_section_id"] = section_id
 
             # C-1: final trademark screen on the tags (rights-holders' bots scan
             # tags) — drop any that slipped through, and block outright if the
@@ -1345,7 +1350,7 @@ class PipelineOrchestrator:
                 self._cleanup_unbacked_listing(listing_id, report)
                 self._block_task(task_id, f"attach/publish failed for required digital product: {e}", report, pre_listing=False)
 
-    def _stage_pinterest(self, task_id: str, product_name: str, visual_brief: str, output_data: dict, report: dict):
+    def _stage_pinterest(self, task_id: str, product_name: str, visual_brief: str, output_data: dict, report: dict, task_type: str = None):
         from config import settings
 
         try:
@@ -1370,6 +1375,7 @@ class PipelineOrchestrator:
                 "description": output_data.get("description", ""),
                 "keywords": output_data.get("keywords", []),
                 "product_name": product_name,
+                "product_format": task_type,  # A-9: per-format board routing
             }
 
             enriched = PinterestImageService().enrich_listing_with_image(

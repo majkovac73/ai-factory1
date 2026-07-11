@@ -26,8 +26,12 @@ class PinterestChannel(MarketingChannel):
         except Exception as e:
             return {"success": False, "external_id": None, "url": None, "error": str(e)}
 
+        # A-9: route the pin to the board for this product's format when mapped.
+        fmt = listing.get("product_format") or listing.get("type")
+        board_id = (getattr(settings, "PINTEREST_BOARD_MAP", None) or {}).get(fmt) or settings.PINTEREST_BOARD_ID
+
         payload = {
-            "board_id": settings.PINTEREST_BOARD_ID,
+            "board_id": board_id,
             "title": listing.get("title", "")[:100],
             "description": listing.get("description", "")[:500],
             "link": listing.get("listing_url") or listing.get("product_url") or "",
