@@ -137,7 +137,16 @@ class PipelineOrchestrator:
         if is_pdf:
             design_path = self._stage_pdf_design(task, task_id, product_name, visual_brief, output_data, report)
         else:
-            design_path = self._stage_pod_design(task_id, product_name, visual_brief, task_type, report)
+            # B-4: for text-led concepts, render the words deterministically —
+            # generate a TEXT-FREE background, then overlay the exact text (Pillow).
+            display_text = (task.metadata_ or {}).get("display_text") if (task.metadata_ or {}).get("text_led") else None
+            design_brief = visual_brief
+            if display_text:
+                design_brief = (
+                    f"{visual_brief}. IMPORTANT: create a purely DECORATIVE background with NO text, "
+                    "no letters, no words, no captions — leave clear space in the center for text."
+                )
+            design_path = self._stage_pod_design(task_id, product_name, design_brief, task_type, report, display_text=display_text)
 
         # 2.5 — CONTENT-QUALITY GATE (step 96). The FIRST check that inspects
         # actual content, not structure — catches garbled/incoherent
@@ -884,7 +893,7 @@ class PipelineOrchestrator:
             logger.warning(f"PipelineOrchestrator: white-background flatten failed for {path}: {e}")
             return False
 
-    def _stage_pod_design(self, task_id: str, product_name: str, visual_brief: str, task_type: str, report: dict) -> Optional[Path]:
+    def _stage_pod_design(self, task_id: str, product_name: str, visual_brief: str, task_type: str, report: dict, display_text: str = None) -> Optional[Path]:
         from config import settings
 
         # PODPipelineService/PODDesignAgent's product_type label only affects
@@ -923,6 +932,13 @@ class PipelineOrchestrator:
             # registered, or used to build the listing mockups.
             if task_type == "coloring_page":
                 self._flatten_white_background(design_path)
+
+            # B-4: render the exact words onto the text-free background BEFORE QA,
+            # so content-quality sees pixel-crisp, correctly-spelled typography.
+            if display_text:
+                from app.services.text_overlay_service import TextOverlayService
+                if TextOverlayService().overlay(str(design_path), display_text):
+                    report["stages"]["text_overlay"] = {"ok": True, "text": display_text[:60]}
 
             try:
                 ImageValidationService().validate(design_path, use_case="delivery", expected_ratio=expected_ratio)

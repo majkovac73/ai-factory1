@@ -71,6 +71,7 @@ DETERMINISTIC = [
     "test_step103_sections_boards.py",
     "test_step103_fees_prune.py",
     "test_step103_tierd.py",
+    "test_step103_text_overlay.py",
 ]
 
 

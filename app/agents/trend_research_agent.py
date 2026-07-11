@@ -277,7 +277,9 @@ Return ONLY valid JSON with this structure:
   "page_count": <integer, ONLY meaningful/required if product_format is pdf_planner_or_guide, otherwise omit or set to 1>,
   "description": "1-2 sentences specific to THIS item, mentioning it by name",
   "target_audience": "who this is for",
-  "confidence": "high/medium/low"
+  "confidence": "high/medium/low",
+  "text_led": <true ONLY if the product's main visual IS a word/phrase/quote (a quote print, affirmation, name print); else false or omit>,
+  "display_text": "<if text_led, the EXACT words to show, correctly spelled — e.g. 'Be Kind'; else omit>"
 }}{retry_note}
 """
 

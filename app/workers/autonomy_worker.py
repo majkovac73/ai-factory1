@@ -154,6 +154,11 @@ class AutonomyWorker:
             metadata["market"] = market
             if market.get("top_titles"):
                 metadata["seo_context"] = market["top_titles"]
+        # B-4: carry a text-led flag + exact words so the design stage renders
+        # the typography deterministically (no garbled Seedream text).
+        if opportunity.get("text_led") and opportunity.get("display_text"):
+            metadata["text_led"] = True
+            metadata["display_text"] = opportunity["display_text"]
 
         task_service = TaskService()
         task = task_service.create_task(TaskCreate(
