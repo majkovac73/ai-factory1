@@ -96,7 +96,34 @@ def _migrate_pod_products_add_cost_price(engine):
     logger.info("Migration: pod_products cost/price columns added")
 
 
+def _migrate_analytics_events_add_indexes(engine):
+    """D-3: add an indexed transaction_id column + indexes on event_type/entity_id
+    so idempotency and per-task analytics queries stop scanning the whole table."""
+    inspector = inspect(engine)
+    if "analytics_events" not in inspector.get_table_names():
+        return
+    cols = {c["name"] for c in inspector.get_columns("analytics_events")}
+    with engine.connect() as conn:
+        if "transaction_id" not in cols:
+            logger.info("Migration: adding transaction_id to analytics_events")
+            conn.execute(text("ALTER TABLE analytics_events ADD COLUMN transaction_id VARCHAR"))
+        for name, col in (
+            ("ix_analytics_events_transaction_id", "transaction_id"),
+            ("ix_analytics_events_event_type", "event_type"),
+            ("ix_analytics_events_entity_id", "entity_id"),
+        ):
+            conn.execute(text(f"CREATE INDEX IF NOT EXISTS {name} ON analytics_events ({col})"))
+        # backfill transaction_id from the JSON payload for existing sale rows
+        conn.execute(text(
+            "UPDATE analytics_events SET transaction_id = json_extract(payload, '$.transaction_id') "
+            "WHERE transaction_id IS NULL AND event_type = 'sale_recorded'"
+        ))
+        conn.commit()
+    logger.info("Migration: analytics_events indexes ready")
+
+
 def run_all_migrations(engine):
     """Run every migration in order. Safe to call on every startup."""
     _migrate_fulfillment_records_add_transaction_id(engine)
     _migrate_pod_products_add_cost_price(engine)
+    _migrate_analytics_events_add_indexes(engine)

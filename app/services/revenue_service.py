@@ -22,16 +22,20 @@ class RevenueService:
 
     def has_sale_for_transaction(self, transaction_id: str) -> bool:
         """Idempotency guard: True if a sale was already recorded for this
-        Etsy transaction_id (so re-polling the same receipt never double-counts)."""
+        Etsy transaction_id. D-3: O(1) indexed lookup on the transaction_id
+        column instead of scanning 10k rows and reading each JSON payload."""
         if not transaction_id:
             return False
-        events = self.analytics_service.get_events(
-            event_type="sale_recorded", entity_type="task", limit=10000
-        )
-        for e in events:
-            if (e.payload or {}).get("transaction_id") == str(transaction_id):
-                return True
-        return False
+        from app.db.database import SessionLocal
+        from app.models.analytics_event import AnalyticsEvent
+        db = SessionLocal()
+        try:
+            return db.query(AnalyticsEvent).filter(
+                AnalyticsEvent.event_type == "sale_recorded",
+                AnalyticsEvent.transaction_id == str(transaction_id),
+            ).first() is not None
+        finally:
+            db.close()
 
     def record_sale(
         self,
@@ -47,11 +51,19 @@ class RevenueService:
         if quantity <= 0:
             raise ValueError("quantity must be a positive integer")
 
+        if currency != "USD":
+            # D-6: revenue aggregation assumes USD; surface non-USD sales instead
+            # of silently summing mixed currencies.
+            import logging
+            logging.getLogger("ai-factory").warning(
+                f"RevenueService: recording non-USD sale ({currency}) for task {task_id}"
+            )
         self.analytics_service.record_event(
             event_type="sale_recorded",
             entity_type="task",
             entity_id=task_id,
             value=amount,
+            transaction_id=str(transaction_id) if transaction_id else None,  # D-3 column
             payload={
                 "currency": currency,
                 "quantity": quantity,

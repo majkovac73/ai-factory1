@@ -25,6 +25,7 @@ class AnalyticsService:
         entity_id: str,
         value: Optional[float] = None,
         payload: Optional[dict] = None,
+        transaction_id: Optional[str] = None,
     ) -> None:
         db = SessionLocal()
         try:
@@ -34,6 +35,7 @@ class AnalyticsService:
                 entity_type=entity_type,
                 entity_id=entity_id,
                 value=value,
+                transaction_id=transaction_id,  # D-3
                 payload=payload or {},
                 created_at=datetime.utcnow(),
             )
