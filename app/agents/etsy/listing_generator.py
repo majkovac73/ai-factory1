@@ -23,6 +23,26 @@ class ListingGeneratorAgent(BaseAgent):
     MAX_TAGS = 13
     MAX_TAG_LENGTH = 20
 
+    @staticmethod
+    def title_ngrams(titles: list, max_terms: int = 8) -> list:
+        """2-4: extract 2-3 word buyer-search phrases from the real winning Etsy
+        titles for this niche (A-2 market.top_titles), trademark-filtered
+        (competitor titles DO contain brand terms). These are proven-to-rank
+        phrases — far better tag padding than product-name fragments."""
+        from app.core.trademark_screen import find_trademark
+        out, seen = [], set()
+        for title in titles or []:
+            toks = [t for t in "".join(c if c.isalnum() or c.isspace() else " " for c in str(title).lower()).split() if len(t) > 2]
+            for n in (3, 2):
+                for i in range(len(toks) - n + 1):
+                    phrase = " ".join(toks[i:i + n])
+                    if len(phrase) <= 20 and phrase not in seen and not find_trademark(phrase):
+                        seen.add(phrase)
+                        out.append(phrase)
+                        if len(out) >= max_terms:
+                            return out
+        return out
+
     def _derive_tags(self, keywords: list, product_name: str = "", extra_terms: list = None) -> list:
         """
         Converts SEO keywords into Etsy-compliant tags: max 20 chars each,

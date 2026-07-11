@@ -594,6 +594,11 @@ class EtsyReceiptWorker:
             auto = AutonomyService()
             if not auto.can_create_winner_variant():
                 return
+            # 2-3: a variant costs ~$0.80 of image spend that was never reserved —
+            # without this a sale late in the day pushes past MAX_DAILY_SPEND_USD.
+            if not auto.can_spend(0.80):
+                logger.info("EtsyReceiptWorker: winner variant skipped — daily spend cap reached")
+                return
             from app.core.product_formats import PRODUCT_FORMATS
             from app.services.task_service import TaskService
             from app.schemas.task import TaskCreate
@@ -607,11 +612,16 @@ class EtsyReceiptWorker:
                 f"seller ('{title}'): keep the appealing theme and style that made it sell, but make it a "
                 f"clearly different, original design (not a copy). No brand/trademark references."
             )
-            new_task = ts.create_task(TaskCreate(
-                prompt=prompt, type=parent.type,
-                metadata={"source": "winner_variant", "parent_task_id": task_id,
-                          "product_name": f"{title} variation"},
-            ))
+            # 2-3: carry the parent's grounding so the variant isn't a blind guess —
+            # market data, SEO context, and (for PDF planners) page_count, without
+            # which _resolve_pdf_page_briefs would silently make a 1-page planner.
+            pmeta = parent.metadata_ or {}
+            vmeta = {"source": "winner_variant", "parent_task_id": task_id,
+                     "product_name": f"{title} variation"}
+            for k in ("market", "seo_context", "page_count", "occasion"):
+                if pmeta.get(k) is not None:
+                    vmeta[k] = pmeta[k]
+            new_task = ts.create_task(TaskCreate(prompt=prompt, type=parent.type, metadata=vmeta))
             auto.record_winner_variant()
             logger.info(f"EtsyReceiptWorker: spawned winner-variant task {new_task.id} from sold task {task_id}")
         except Exception as e:

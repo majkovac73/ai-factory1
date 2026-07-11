@@ -116,6 +116,21 @@ def clamp_price(price, product_format: str) -> float:
     return round(float(price), 2)
 
 
+def snap_charm(price: float, product_format: str) -> float:
+    """4-2: snap a price to the nearest psychological .99/.49 ending WITHIN the
+    format's band (Etsy digital buyers respond to $X.99/$X.49 anchors; a flat
+    $5.75 band-midpoint looks arbitrary). e.g. 5.75->5.99, 8.00 band-cap->7.99."""
+    try:
+        lo, hi = price_band_for(product_format)
+        base = int(price)
+        candidates = [d + c for d in (base - 1, base, base + 1) for c in (0.49, 0.99)]
+        in_band = [c for c in candidates if lo <= c <= hi]
+        pool = in_band or candidates
+        return round(min(pool, key=lambda c: abs(c - price)), 2)
+    except Exception:
+        return round(price, 2)
+
+
 # A-4: Etsy materials per format (the old code always sent an empty list, wasting
 # a small search/relevance surface). Physical POD carries real materials.
 _MATERIALS = {

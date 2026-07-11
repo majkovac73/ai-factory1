@@ -79,6 +79,7 @@ DETERMINISTIC = [
     "test_step104_learning_signals.py",
     "test_step104_trend_direction_stale.py",
     "test_step104_diversity.py",
+    "test_step104_variant_tags_pin_charm.py",
 ]
 
 

@@ -259,8 +259,10 @@ class PipelineOrchestrator:
         # page_count), so the description never promises a different count.
         pdf_page_count = report["stages"].get("delivery_asset", {}).get("page_count") if is_pdf else None
         # A-2: ground the digital price in the real Etsy market median when available.
-        market_price = ((task.metadata_ or {}).get("market") or {}).get("price_p50")
-        listing_id = self._stage_create_listing(task_id, product_name, output_data, task_type, is_pod, report, pod_product=pod_product, pdf_page_count=pdf_page_count, market_price=market_price, bundle_note=bundle_note)
+        _market = (task.metadata_ or {}).get("market") or {}
+        market_price = _market.get("price_p50")
+        market_titles = _market.get("top_titles")  # 2-4: proven-ranking title phrases
+        listing_id = self._stage_create_listing(task_id, product_name, output_data, task_type, is_pod, report, pod_product=pod_product, pdf_page_count=pdf_page_count, market_price=market_price, bundle_note=bundle_note, market_titles=market_titles)
 
         # 6 — attach images / digital file, then publish; readback-verify both
         if listing_id:
@@ -1090,7 +1092,7 @@ class PipelineOrchestrator:
                 f"to listing {listing_id}: {e}"
             )
 
-    def _stage_create_listing(self, task_id: str, product_name: str, output_data: dict, task_type: str, is_pod: bool, report: dict, pod_product=None, pdf_page_count: Optional[int] = None, market_price: Optional[float] = None, bundle_note: str = "") -> Optional[str]:
+    def _stage_create_listing(self, task_id: str, product_name: str, output_data: dict, task_type: str, is_pod: bool, report: dict, pod_product=None, pdf_page_count: Optional[int] = None, market_price: Optional[float] = None, bundle_note: str = "", market_titles: Optional[list] = None) -> Optional[str]:
         from app.services.etsy_shipping_service import EtsyShippingService
         from app.services.etsy_client import DIGITAL_WHEN_MADE, POD_WHEN_MADE
 
@@ -1110,11 +1112,14 @@ class PipelineOrchestrator:
             # overridden below for product formats, so it was pure wasted spend
             # and an extra JSON-parse failure mode per task.
             gen = ListingGeneratorAgent()
+            # 2-4: pad tags with proven-ranking n-grams mined from the real winning
+            # Etsy titles for this niche (trademark-filtered), not just name fragments.
+            extra_terms = gen.title_ngrams(market_titles) if market_titles else None
             listing = {
                 "product_name": product_name,
                 "title": output_data.get("title", ""),
                 "description": output_data.get("description", ""),
-                "tags": gen._derive_tags(output_data.get("keywords", []), product_name=product_name),
+                "tags": gen._derive_tags(output_data.get("keywords", []), product_name=product_name, extra_terms=extra_terms),
                 "sections": output_data.get("sections", []),
                 "materials": [],
                 "currency": "USD",
@@ -1193,6 +1198,11 @@ class PipelineOrchestrator:
                 if vt:
                     listing["description"] = (listing.get("description") or "") + \
                         f"\n\nSold as: {vt} (made to order — printed just for you)."
+            else:
+                # 4-2: charm pricing for digital — snap to a .99/.49 anchor within
+                # the band (POD keeps its exact cost-based price to protect margin).
+                from app.core.product_formats import snap_charm
+                listing["price"] = snap_charm(listing["price"], task_type)
 
             if is_pod:
                 listing["type"] = "physical"
@@ -1414,6 +1424,26 @@ class PipelineOrchestrator:
                 self._cleanup_unbacked_listing(listing_id, report)
                 self._block_task(task_id, f"attach/publish failed for required digital product: {e}", report, pre_listing=False)
 
+    def _pin_from_mockup(self, task_id: str) -> Optional[str]:
+        """3-3: render a free 2:3 (1000x1500) Pinterest pin from an existing
+        listing mockup of the real design. Returns a path, or None if no mockup."""
+        try:
+            from PIL import Image, ImageOps
+            from app.services.image_file_service import ImageFileService
+            from io import BytesIO
+            assets = self.catalog.get_listing_assets(task_id)
+            src = next((a.local_path for a in (assets or []) if a.local_path and Path(a.local_path).exists()), None)
+            if not src:
+                return None
+            img = Image.open(src).convert("RGB")
+            pin = ImageOps.pad(img, (1000, 1500), color=(255, 255, 255), method=Image.LANCZOS)
+            buf = BytesIO()
+            pin.save(buf, format="PNG")
+            return str(ImageFileService().save_bytes(buf.getvalue(), task_id, "listing", "pin.png"))
+        except Exception as e:
+            logger.warning(f"PipelineOrchestrator: pin-from-mockup failed for {task_id}: {e}")
+            return None
+
     def _stage_pinterest(self, task_id: str, product_name: str, visual_brief: str, output_data: dict, report: dict, task_type: str = None):
         from config import settings
 
@@ -1442,21 +1472,34 @@ class PipelineOrchestrator:
                 "product_format": task_type,  # A-9: per-format board routing
             }
 
-            enriched = PinterestImageService().enrich_listing_with_image(
-                listing=listing,
-                task_id=task_id,
-                visual_brief=visual_brief,
-            )
+            # 3-3: compose the pin from an EXISTING free listing mockup of the
+            # real design (Pinterest's ideal is 2:3) instead of spending $0.04 on
+            # a fresh generation — which also reintroduces the "marketing image
+            # differs from the product" risk. Fall back to generation only if no
+            # mockup exists.
+            pin_path_str = self._pin_from_mockup(task_id)
+            if pin_path_str:
+                import base64 as _b64
+                with open(pin_path_str, "rb") as _f:
+                    listing["image_base64"] = _b64.b64encode(_f.read()).decode()
+                listing["pin_image_path"] = pin_path_str
+                enriched = listing
+                report["stages"].setdefault("pinterest_pin", {"source": "mockup"})
+            else:
+                enriched = PinterestImageService().enrich_listing_with_image(
+                    listing=listing, task_id=task_id, visual_brief=visual_brief,
+                )
+                pin_path_str = enriched.get("pin_image_path")
+                report["stages"].setdefault("pinterest_pin", {"source": "generated"})
 
             # Register pin image in catalog
-            pin_path_str = enriched.get("pin_image_path")
             if pin_path_str:
                 self.catalog.register(
                     task_id=task_id,
                     local_path=pin_path_str,
                     variant="listing",
                     use_case="pinterest",
-                    agent="SocialImageAgent",
+                    agent="PinterestPinMockup" if report["stages"].get("pinterest_pin", {}).get("source") == "mockup" else "SocialImageAgent",
                     provider=settings.IMAGE_PROVIDER,
                     model=settings.OPENROUTER_IMAGE_MODEL,
                 )
