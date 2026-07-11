@@ -79,6 +79,58 @@ class RevenueService:
             "quantity": quantity,
         }
 
+    def record_fee_estimate(
+        self,
+        task_id: str,
+        sale_amount: float,
+        currency: str = "USD",
+        transaction_id: Optional[str] = None,
+    ) -> float:
+        """4-1: record an ESTIMATED Etsy fee for a sale so the P&L reflects net,
+        not gross. Etsy takes a transaction fee (~6.5%) + payment-processing fee
+        (~3% + $0.25 flat) on every sale; ignoring it overstates profit by
+        ~9.5%+. This is an estimate (the exact fee also depends on VAT/regulatory
+        operating fees per country), recorded as its own `fee_estimate` event so
+        it's auditable and never double-counted. Idempotent by construction: the
+        caller only reaches here right after a NEW sale_recorded is written."""
+        from config import settings
+        if sale_amount <= 0:
+            return 0.0
+        fee = round(
+            sale_amount * float(getattr(settings, "ETSY_TRANSACTION_FEE_PCT", 0.065))
+            + sale_amount * float(getattr(settings, "ETSY_PAYMENT_FEE_PCT", 0.03))
+            + float(getattr(settings, "ETSY_PAYMENT_FEE_FLAT", 0.25)),
+            4,
+        )
+        self.analytics_service.record_event(
+            event_type="fee_estimate",
+            entity_type="task",
+            entity_id=task_id,
+            value=fee,
+            transaction_id=str(transaction_id) if transaction_id else None,
+            payload={
+                "currency": currency,
+                "sale_amount": sale_amount,
+                "transaction_id": str(transaction_id) if transaction_id else None,
+                "basis": "6.5% transaction + 3% payment + $0.25 flat (estimate)",
+            },
+        )
+        return fee
+
+    def get_total_fees(self, task_id: Optional[str] = None) -> dict:
+        """4-1: total estimated Etsy fees (transaction + payment processing)."""
+        events = self.analytics_service.get_events(
+            event_type="fee_estimate",
+            entity_type="task",
+            entity_id=task_id,
+            limit=10000,
+        )
+        return {
+            "total_fees": round(sum(e.value or 0 for e in events), 4),
+            "fee_count": len(events),
+            "task_id": task_id,
+        }
+
     def get_total_revenue(self, task_id: Optional[str] = None) -> dict:
         events = self.analytics_service.get_events(
             event_type="sale_recorded",

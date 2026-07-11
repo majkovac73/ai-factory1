@@ -15,17 +15,27 @@ log_service = LogService()
 
 @router.get("/pnl")
 def pnl():
-    """D-6: the one number that matters — lifetime recorded revenue vs recorded
-    spend (image/vision/text + Etsy listing fees), and profit."""
+    """D-6/4-1: the one number that matters — lifetime revenue vs spend, with an
+    HONEST net. Gross is what buyers paid; Etsy then takes ~9.5% + $0.25 per
+    order (transaction + payment fees), so net_revenue = gross - estimated fees.
+    Profit is net_revenue minus our production spend (image/vision/text + Etsy
+    listing fees). Reporting only gross would overstate profit by ~10% of sales."""
     from app.services.autonomy_service import AutonomyService
     from app.services.revenue_service import RevenueService
     spend = AutonomyService().lifetime_spend()
-    rev = RevenueService().get_total_revenue()
-    revenue = round(rev.get("total_revenue", 0.0) or 0.0, 2)
+    rs = RevenueService()
+    rev = rs.get_total_revenue()
+    fees = rs.get_total_fees()
+    gross = round(rev.get("total_revenue", 0.0) or 0.0, 2)
+    etsy_fees = round(fees.get("total_fees", 0.0) or 0.0, 2)
+    net_revenue = round(gross - etsy_fees, 2)
     return {
-        "revenue_usd": revenue,
+        "revenue_usd": gross,                 # gross, kept for backwards compat
+        "gross_revenue_usd": gross,
+        "etsy_fees_usd": etsy_fees,
+        "net_revenue_usd": net_revenue,
         "spend_usd": round(spend, 2),
-        "profit_usd": round(revenue - spend, 2),
+        "profit_usd": round(net_revenue - spend, 2),
         "sales": rev.get("sale_count", 0),
     }
 

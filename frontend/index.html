@@ -936,8 +936,8 @@
             <span className="hdr-title">AI Factory Facility</span>
             <span className="hdr-meta">
               {pnl && (
-                <span className="pnl-tile" title="Lifetime recorded revenue vs spend (images/vision/text + Etsy listing fees)">
-                  💰 ${pnl.revenue_usd} rev · ${pnl.spend_usd} spent ·{' '}
+                <span className="pnl-tile" title={`Gross $${pnl.gross_revenue_usd} − Etsy fees $${pnl.etsy_fees_usd} = net $${pnl.net_revenue_usd}; minus $${pnl.spend_usd} production spend (images/vision/text + Etsy listing fees)`}>
+                  💰 ${pnl.net_revenue_usd != null ? pnl.net_revenue_usd : pnl.revenue_usd} net rev · ${pnl.spend_usd} spent ·{' '}
                   <b style={{ color: pnl.profit_usd >= 0 ? '#5bd97a' : '#e57373' }}>
                     ${pnl.profit_usd} profit
                   </b>{' '}({pnl.sales} {pnl.sales === 1 ? 'sale' : 'sales'})

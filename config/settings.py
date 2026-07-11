@@ -81,6 +81,12 @@ class Settings(BaseSettings):
     # never lose money: price = ceil((max_variant_cost + shipping_est + $0.20
     # listing fee + target_profit) / (1 - etsy_fee_fraction)). Rounding UP to a
     # whole dollar protects margin further.
+    # 4-1: Etsy fee estimate per sale for honest P&L (transaction + payment
+    # processing). ~6.5% transaction + ~3% payment + $0.25 flat.
+    ETSY_TRANSACTION_FEE_PCT: float = 0.065
+    ETSY_PAYMENT_FEE_PCT: float = 0.03
+    ETSY_PAYMENT_FEE_FLAT: float = 0.25
+
     POD_TARGET_PROFIT_USD: float = 6.00
     POD_SHIPPING_ESTIMATE_USD: float = 5.00
     # ~6.5% transaction + ~3% payment; bumped to 0.12 (D-6) to leave headroom

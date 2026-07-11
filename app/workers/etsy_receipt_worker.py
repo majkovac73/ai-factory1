@@ -447,9 +447,17 @@ class EtsyReceiptWorker:
                 notes=f"Etsy transaction {transaction_id}",
                 transaction_id=transaction_id,
             )
+            # 4-1: record the estimated Etsy fee for this sale so the P&L is net,
+            # not gross (Etsy takes ~9.5% + $0.25 per order).
+            fee = rev.record_fee_estimate(
+                task_id=task_id,
+                sale_amount=line_total,
+                currency=currency,
+                transaction_id=transaction_id,
+            )
             logger.info(
                 f"EtsyReceiptWorker: recorded sale {currency} {line_total:.2f} "
-                f"for task {task_id} (transaction {transaction_id})"
+                f"(est. fee {fee:.2f}) for task {task_id} (transaction {transaction_id})"
             )
             # A-1: a real sale is the strongest signal there is — spawn a
             # variant of the winner (capped, respects the kill switch).
