@@ -59,6 +59,10 @@ Note: Google Trends is a TRAILING window — a query can be a top riser because 
 occasion just PASSED. Treat any occasion that has passed or is outside its
 buying window (per the seasonal timing above) as NOT an opportunity.
 
+The data includes an "interest_trend" per keyword with a "direction"
+(rising/flat/falling). Weight RISING keywords far more heavily than falling ones
+— a falling keyword's wave has already crested and a new listing arrives too late.
+
 Using ONLY the real data above (if present), provide:
 - Key findings grounded specifically in the rising queries / interest
   levels shown above — reference the actual keywords and numbers
