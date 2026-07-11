@@ -141,6 +141,13 @@ class Settings(BaseSettings):
     IMAGE_CLEANUP_ENABLED: bool = True
     IMAGE_CLEANUP_LISTING_MAX_AGE_HOURS: int = 6
     IMAGE_CLEANUP_DELIVERY_MAX_AGE_DAYS: int = 3
+
+    # C-5: prune dead inventory — active listings older than this many days with
+    # ZERO sales and views at/below the threshold are auto-renew fee burn and
+    # drag perceived shop quality. POST /admin/prune-listings reports candidates
+    # (dry-run) or, with apply=true, deactivates them.
+    LISTING_PRUNE_MIN_AGE_DAYS: int = 100
+    LISTING_PRUNE_MAX_VIEWS: int = 10
     BACKUP_S3_BUCKET: str | None = None
     BACKUP_S3_ENDPOINT_URL: str | None = None   # e.g. https://<acct>.r2.cloudflarestorage.com
     BACKUP_S3_ACCESS_KEY_ID: str | None = None

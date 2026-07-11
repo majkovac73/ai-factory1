@@ -1157,6 +1157,14 @@ class PipelineOrchestrator:
             if not listing_id:
                 raise RuntimeError(f"Etsy API returned no listing_id: {draft}")
 
+            # C-5: Etsy's $0.20 listing fee is real same-day money — record it in
+            # the ledger (P0-13 only covered image/vision spend).
+            try:
+                from app.services.autonomy_service import AutonomyService
+                AutonomyService().record_spend(0.20, f"etsy listing fee {listing_id}")
+            except Exception:
+                pass
+
             report["stages"]["create_listing"] = {"ok": True, "listing_id": listing_id}
         except Exception as e:
             logger.error(f"PipelineOrchestrator: create_listing failed for {task_id}: {e}")

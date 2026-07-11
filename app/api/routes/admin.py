@@ -24,3 +24,11 @@ def run_image_cleanup():
     """Manually prune old generated images (disk hygiene). Returns counts."""
     from app.services.image_cleanup_service import ImageCleanupService
     return ImageCleanupService().cleanup()
+
+
+@router.post("/prune-listings")
+def prune_listings(apply: bool = False):
+    """C-5: report (dry-run, default) or deactivate (apply=true) stale zero-sale,
+    low-view listings. Always alerts Discord with the candidate list."""
+    from app.services.listing_prune_service import ListingPruneService
+    return ListingPruneService().run(apply=apply)
