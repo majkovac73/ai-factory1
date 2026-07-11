@@ -155,8 +155,9 @@ with tempfile.TemporaryDirectory() as tmp:
             if not tops or (max(tops) - min(tops)) < 10:
                 angled_ok = False
 
-    if len(paths) == 2 and names == ["hero.png", "lifestyle.png"] and dims_ok:
-        ok("[1] two valid 1024x1024 listing mockups (hero.png, lifestyle.png)")
+    EXPECTED_MOCKUPS = {"hero.png", "lifestyle.png", "styled.png", "desk.png"}
+    if len(paths) == 4 and set(names) == EXPECTED_MOCKUPS and dims_ok:
+        ok("[1] four valid 1024x1024 listing mockups (A-8: hero, lifestyle, styled, desk)")
     else:
         fail("[1] mockup files", f"paths={paths}, dims_ok={dims_ok}")
 
@@ -173,7 +174,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # [3] registered as listing assets by DeliveryMockup, and stage reported
     listing_regs = [c for c in catalog_calls if c.get("variant") == "listing" and c.get("agent") == "DeliveryMockup"]
     stage = report["stages"].get("listing_images", {})
-    if len(listing_regs) == 2 and stage.get("source") == "delivery_mockup" and stage.get("ok"):
+    if len(listing_regs) == 4 and stage.get("source") == "delivery_mockup" and stage.get("ok"):
         ok("[3] both mockups registered as 'listing' by DeliveryMockup; stage source=delivery_mockup")
     else:
         fail("[3] registration", f"listing_regs={len(listing_regs)}, stage={stage}")
@@ -242,7 +243,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
     captured = {}
     eis = MagicMock()
-    async def _attach(listing_id, listing_image_paths, digital_file_path=None):
+    async def _attach(listing_id, listing_image_paths, digital_file_path=None, **kwargs):
         captured["listing_photos"] = list(listing_image_paths)
         captured["digital_file"] = digital_file_path
         return {"listing_id": listing_id,
@@ -272,7 +273,7 @@ with tempfile.TemporaryDirectory() as tmp:
     photos = [Path(p).name for p in captured.get("listing_photos", [])]
     design_str = str(design)
     raw_not_public = design_str not in [str(p) for p in captured.get("listing_photos", [])]
-    only_mockups = set(photos) == {"hero.png", "lifestyle.png"}
+    only_mockups = set(photos) == {"hero.png", "lifestyle.png", "styled.png", "desk.png"}
     clean_is_digital_file = str(captured.get("digital_file")) == design_str
 
     if raw_not_public and only_mockups and clean_is_digital_file:

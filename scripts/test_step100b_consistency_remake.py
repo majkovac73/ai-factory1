@@ -209,7 +209,7 @@ class FakeEtsyClientHappy:
 def _fake_eis():
     m = MagicMock()
     st = {"n": 0}
-    async def _attach(listing_id, listing_image_paths, digital_file_path=None):
+    async def _attach(listing_id, listing_image_paths, digital_file_path=None, **kwargs):
         st["n"] = len(listing_image_paths)
         return {"listing_id": listing_id,
                 "uploaded_images": [{"path": p, "result": {"ok": True}} for p in listing_image_paths],

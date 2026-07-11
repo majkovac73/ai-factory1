@@ -163,6 +163,17 @@ class PipelineOrchestrator:
         if design_path and derive_listing_from_delivery:
             image_paths = self._build_listing_mockups(task_id, design_path, report)
 
+        # 2.6b — A-5: build the multi-file delivery BUNDLE (extra print ratios /
+        # device sizes / letter PDF) from the content-verified master, all pure
+        # PIL (zero image-gen). PDFs (already the final file) and POD skip this.
+        digital_files = None
+        bundle_note = ""
+        if design_path and digital_required and not is_pdf:
+            from app.services.delivery_bundle_service import DeliveryBundleService
+            digital_files = DeliveryBundleService().build(design_path, task_type)
+            bundle_note = DeliveryBundleService.size_summary(task_type, len(digital_files or []))
+            report["stages"]["delivery_bundle"] = {"ok": True, "files": len(digital_files or [])}
+
         # 2.7 — MARKETING/DELIVERABLE CONSISTENCY GATE (step 96): backstop that
         # every INDEPENDENTLY-GENERATED listing photo plausibly depicts the same
         # product as the delivery asset, blocking a buyer-misrepresentation
@@ -240,11 +251,11 @@ class PipelineOrchestrator:
         pdf_page_count = report["stages"].get("delivery_asset", {}).get("page_count") if is_pdf else None
         # A-2: ground the digital price in the real Etsy market median when available.
         market_price = ((task.metadata_ or {}).get("market") or {}).get("price_p50")
-        listing_id = self._stage_create_listing(task_id, product_name, output_data, task_type, is_pod, report, pod_product=pod_product, pdf_page_count=pdf_page_count, market_price=market_price)
+        listing_id = self._stage_create_listing(task_id, product_name, output_data, task_type, is_pod, report, pod_product=pod_product, pdf_page_count=pdf_page_count, market_price=market_price, bundle_note=bundle_note)
 
         # 6 — attach images / digital file, then publish; readback-verify both
         if listing_id:
-            self._stage_attach_publish(task_id, listing_id, image_paths, design_path, digital_required, report)
+            self._stage_attach_publish(task_id, listing_id, image_paths, design_path, digital_required, report, digital_files=digital_files)
         else:
             report["stages"]["attach_publish"] = {"skipped": "create_listing failed"}
 
@@ -692,9 +703,14 @@ class PipelineOrchestrator:
                 ("lifestyle.png", "pdf_fan", lambda: mockups.build_flatlay_bytes([str(p) for p in page_pngs], size=1024)),
             ]
         else:
+            # A-8: more listing photos convert better; all are free PIL composites
+            # of the already-verified design, and the P3-6 scene cache gives each
+            # a different background for variety.
             builders = [
                 ("hero.png", "framed", lambda: mockups.build_mockup_bytes(str(delivery_path), role="framed", size=1024)),
                 ("lifestyle.png", "flatlay", lambda: mockups.build_mockup_bytes(str(delivery_path), role="flatlay", size=1024)),
+                ("styled.png", "framed", lambda: mockups.build_mockup_bytes(str(delivery_path), role="framed", size=1024)),
+                ("desk.png", "flatlay", lambda: mockups.build_mockup_bytes(str(delivery_path), role="flatlay", size=1024)),
             ]
 
         for fname, role, build in builders:
@@ -775,7 +791,7 @@ class PipelineOrchestrator:
             images = product.get("images", []) or []
             # Prefer the default / publishing-selected mockups first.
             images = sorted(images, key=lambda im: (not im.get("is_default"), not im.get("is_selected_for_publishing")))
-            urls = [im.get("src") for im in images if im.get("src")][:3]
+            urls = [im.get("src") for im in images if im.get("src")][:6]  # A-8: up to 6 photos
             if not urls:
                 report["stages"]["listing_images"] = {"ok": False, "error": "no Printify mockup images", "source": "printify_mockup"}
                 return []
@@ -1025,7 +1041,7 @@ class PipelineOrchestrator:
                 f"to listing {listing_id}: {e}"
             )
 
-    def _stage_create_listing(self, task_id: str, product_name: str, output_data: dict, task_type: str, is_pod: bool, report: dict, pod_product=None, pdf_page_count: Optional[int] = None, market_price: Optional[float] = None) -> Optional[str]:
+    def _stage_create_listing(self, task_id: str, product_name: str, output_data: dict, task_type: str, is_pod: bool, report: dict, pod_product=None, pdf_page_count: Optional[int] = None, market_price: Optional[float] = None, bundle_note: str = "") -> Optional[str]:
         from app.services.etsy_shipping_service import EtsyShippingService
         from app.services.etsy_client import DIGITAL_WHEN_MADE, POD_WHEN_MADE
 
@@ -1070,6 +1086,8 @@ class PipelineOrchestrator:
             from app.core.product_formats import materials_for, description_blocks
             listing["materials"] = materials_for(task_type)
             blocks = description_blocks(task_type, pdf_page_count)
+            if bundle_note:
+                blocks = blocks + "\n" + bundle_note  # A-5: "Includes N sizes: ..."
             if "WHAT YOU GET" not in (listing.get("description") or ""):
                 listing["description"] = (listing.get("description") or "").rstrip() + "\n\n" + blocks
 
@@ -1176,13 +1194,15 @@ class PipelineOrchestrator:
         report["stages"]["create_listing"]["when_made"] = real_when_made
         return listing_id
 
-    def _stage_attach_publish(self, task_id: str, listing_id: str, image_paths: list, design_path: Optional[Path], digital_required: bool, report: dict):
+    def _stage_attach_publish(self, task_id: str, listing_id: str, image_paths: list, design_path: Optional[Path], digital_required: bool, report: dict, digital_files: Optional[list] = None):
         try:
+            files = [str(p) for p in digital_files] if digital_files else ([str(design_path)] if design_path else [])
             result = asyncio.run(
                 EtsyImageService().attach_images_and_publish(
                     listing_id=listing_id,
                     listing_image_paths=[str(p) for p in image_paths],
-                    digital_file_path=str(design_path) if design_path else None,
+                    digital_file_path=files[0] if files else None,  # back-compat
+                    digital_file_paths=files,
                 )
             )
 

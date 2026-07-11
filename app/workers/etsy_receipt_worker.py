@@ -116,6 +116,12 @@ class EtsyReceiptWorker:
                 except Exception as e:
                     logger.error(f"EtsyReceiptWorker: listing-stats tick failed: {e}")
 
+                # Disk hygiene: prune old generated images so the volume doesn't fill.
+                try:
+                    self._maybe_cleanup_images()
+                except Exception as e:
+                    logger.error(f"EtsyReceiptWorker: image-cleanup tick failed: {e}")
+
                 self._stop_event.wait(self._poll_seconds)
         finally:
             if not self._stop_event.is_set():
@@ -604,6 +610,18 @@ class EtsyReceiptWorker:
             logger.info(f"EtsyReceiptWorker: spawned winner-variant task {new_task.id} from sold task {task_id}")
         except Exception as e:
             logger.error(f"EtsyReceiptWorker: winner-variant spawn failed for {task_id}: {e}")
+
+    def _maybe_cleanup_images(self):
+        """Once per day, prune old generated images so the volume doesn't fill."""
+        state = self._load_state()
+        now = int(datetime.now(timezone.utc).timestamp())
+        if now - state.get("last_image_cleanup_at", 0) < 24 * 3600:
+            return
+        from app.services.image_cleanup_service import ImageCleanupService
+        report = ImageCleanupService().cleanup()
+        state["last_image_cleanup_at"] = now
+        self._save_state(state)
+        logger.info(f"EtsyReceiptWorker: image-cleanup tick done — {report}")
 
     def _maybe_poll_listing_stats(self):
         """A-10: once per day, poll active-listing views/favorites and record

@@ -184,7 +184,7 @@ def _make_etsy_image_service_mock(get_images_result=None, get_images_error=None)
     mock_cls = MagicMock()
     _state = {"n": 0}
 
-    async def _attach(listing_id, listing_image_paths, digital_file_path=None):
+    async def _attach(listing_id, listing_image_paths, digital_file_path=None, **kwargs):
         uploaded = [{"path": p, "result": {"ok": True}} for p in listing_image_paths]
         _state["n"] = len(uploaded)
         digital_upload = {"ok": True} if digital_file_path else None

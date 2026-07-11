@@ -221,7 +221,7 @@ def _run_with_filetype(tmp, filetype):
     eis = MagicMock()
     _st = {"n": 0}
 
-    async def _attach(listing_id, listing_image_paths, digital_file_path=None):
+    async def _attach(listing_id, listing_image_paths, digital_file_path=None, **kwargs):
         _st["n"] = len(listing_image_paths)
         return {
             "listing_id": listing_id,

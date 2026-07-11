@@ -184,7 +184,7 @@ with tempfile.TemporaryDirectory() as tmp:
     eis2 = MagicMock()
     _st2 = {"n": 0}
 
-    async def _attach2(listing_id, listing_image_paths, digital_file_path=None):
+    async def _attach2(listing_id, listing_image_paths, digital_file_path=None, **kwargs):
         _st2["n"] = len(listing_image_paths)
         return {
             "listing_id": listing_id,

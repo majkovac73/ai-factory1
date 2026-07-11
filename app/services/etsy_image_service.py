@@ -309,20 +309,17 @@ class EtsyImageService:
         listing_id: str,
         listing_image_paths: list,
         digital_file_path: str = None,
+        digital_file_paths: list = None,
     ) -> dict:
         """
         Orchestrate the full image-attachment sequence:
           1. Upload each listing image (hero, lifestyle, etc.)
-          2. Upload the digital delivery file if product_type is digital_download
+          2. Upload the digital delivery file(s) — A-5: up to 5 files (a size
+             bundle), not just one — if product_type is digital_download
           3. Publish the listing if AUTO_PUBLISH_LISTINGS is True
 
-        Args:
-            listing_id: Etsy listing ID.
-            listing_image_paths: List of local paths to listing images.
-            digital_file_path: Path to the delivery-ready file, or None.
-
-        Returns:
-            Summary dict with upload results and publish status.
+        Pass either digital_file_paths (a list, preferred) or the legacy
+        singular digital_file_path. Returns a summary dict.
         """
         uploaded_images = []
         for img_path in listing_image_paths:
@@ -332,18 +329,27 @@ class EtsyImageService:
             except Exception as e:
                 uploaded_images.append({"path": str(img_path), "error": str(e)})
 
-        digital_upload = None
-        if digital_file_path:
+        # Normalize to a list (Etsy caps at 5 digital files per listing).
+        files = list(digital_file_paths) if digital_file_paths else ([digital_file_path] if digital_file_path else [])
+        files = [f for f in files if f][:5]
+
+        digital_uploads = []
+        for f in files:
             try:
-                digital_upload = await self.upload_digital_file(listing_id, str(digital_file_path))
+                digital_uploads.append({"path": str(f), "result": await self.upload_digital_file(listing_id, str(f))})
             except Exception as e:
-                digital_upload = {"error": str(e)}
+                digital_uploads.append({"path": str(f), "error": str(e)})
 
         publish_result = await self.publish_listing(listing_id)
 
+        # Back-compat: expose the first upload as `digital_upload` (existing
+        # callers/tests read this), plus the full list.
+        first = digital_uploads[0]["result"] if digital_uploads and "result" in digital_uploads[0] else (
+            digital_uploads[0].get("error") if digital_uploads else None)
         return {
             "listing_id": listing_id,
             "uploaded_images": uploaded_images,
-            "digital_upload": digital_upload,
+            "digital_upload": first,
+            "digital_uploads": digital_uploads,
             "publish_result": publish_result,
         }

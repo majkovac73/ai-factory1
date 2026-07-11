@@ -65,6 +65,10 @@ step 93 changelog):
 # aspect strings; non-square delivery renders at 4K to clear Seedream's pixel
 # floor (see PipelineOrchestrator._stage_pod_design).
 PRODUCT_FORMATS = {
+    # NOTE: master stays 1:1 for now — DeliveryBundleService still center-crops
+    # it to portrait print ratios (2:3/3:4/4:5/A). A portrait master (A-5 pt 2)
+    # would give crops more real estate but changes many delivery-validation
+    # fixtures; tracked as a follow-up.
     "single_print":         {"category": "digital", "delivery": "single_image", "taxonomy_id": 2078, "price_band": (3.50, 8.00),  "delivery_aspect": "1:1"},
     "coloring_page":        {"category": "digital", "delivery": "single_image", "taxonomy_id": 339,  "price_band": (2.00, 4.50),  "delivery_aspect": "3:4"},
     "greeting_card_design": {"category": "digital", "delivery": "single_image", "taxonomy_id": 1280, "price_band": (3.00, 6.00),  "delivery_aspect": "3:4"},

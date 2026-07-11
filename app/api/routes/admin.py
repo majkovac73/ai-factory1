@@ -17,3 +17,10 @@ def run_backup():
     report (file name, size, whether it was uploaded off-box)."""
     from app.services.backup_service import BackupService
     return BackupService().create_backup()
+
+
+@router.post("/cleanup")
+def run_image_cleanup():
+    """Manually prune old generated images (disk hygiene). Returns counts."""
+    from app.services.image_cleanup_service import ImageCleanupService
+    return ImageCleanupService().cleanup()

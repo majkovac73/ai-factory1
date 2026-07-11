@@ -114,7 +114,19 @@ class Settings(BaseSettings):
     # are kept on the volume and a weekly alert warns that offsite is unconfigured.
     BACKUP_ENABLED: bool = True
     BACKUP_INTERVAL_HOURS: int = 24
-    BACKUP_KEEP_LOCAL: int = 7
+    # Each backup zips the whole DB (~34MB). On a 500MB Railway volume, keeping 7
+    # would eat ~240MB, so keep only 2 locally and rely on BACKUP_S3_* for history.
+    BACKUP_KEEP_LOCAL: int = 2
+
+    # Automatic image pruning (STEP 103 disk hygiene). Generated listing mockups
+    # are transient (uploaded to Etsy then never read again); delivery files are
+    # hosted by Etsy after publish. Without pruning, data/images grows unbounded
+    # and fills the volume (A-5's multi-ratio bundle accelerates this). A daily
+    # tick deletes listing mockups older than LISTING hours and delivery files
+    # older than DELIVERY days. Scenes cache is preserved.
+    IMAGE_CLEANUP_ENABLED: bool = True
+    IMAGE_CLEANUP_LISTING_MAX_AGE_HOURS: int = 6
+    IMAGE_CLEANUP_DELIVERY_MAX_AGE_DAYS: int = 3
     BACKUP_S3_BUCKET: str | None = None
     BACKUP_S3_ENDPOINT_URL: str | None = None   # e.g. https://<acct>.r2.cloudflarestorage.com
     BACKUP_S3_ACCESS_KEY_ID: str | None = None

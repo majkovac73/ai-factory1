@@ -144,7 +144,7 @@ def _fake_etsy_image_service_happy():
     m = MagicMock()
     state = {"n_images": 0}
 
-    async def _attach(listing_id, listing_image_paths, digital_file_path=None):
+    async def _attach(listing_id, listing_image_paths, digital_file_path=None, **kwargs):
         uploaded = [{"path": p, "result": {"ok": True}} for p in listing_image_paths]
         state["n_images"] = len(uploaded)
         return {
