@@ -48,29 +48,57 @@ class BestProductsService:
         return results
 
     def get_best_product_insights(self, limit: int = 10, min_score: float = None) -> dict:
-        best = self.get_best_products(limit=limit, min_score=min_score)
+        """2-1: the LEARNING-LOOP consumer. Rank by REAL REVENUE first; only when
+        nothing has sold yet, fall back to engagement VELOCITY (2-2). Reliability
+        (pipeline-didn't-crash) never qualifies a product as "best" here — that's
+        merchandising noise. Also surfaces the anti-signal: formats piling up
+        listings with $0 revenue."""
+        from app.core.product_formats import PRODUCT_FORMATS
+        from app.services.revenue_service import RevenueService
 
-        if not best:
-            return {
-                "count": 0,
-                "average_score": 0,
-                "top_task_types": [],
-                "top_keywords": [],
-                "products": [],
-            }
+        revenue_by_task = RevenueService().get_revenue_by_task() or {}
+        product_tasks = [t for t in self.task_service.list_tasks() if t.type in PRODUCT_FORMATS]
+        by_id = {t.id: t for t in product_tasks}
 
-        average_score = round(sum(p["score"] for p in best) / len(best), 2)
+        earners = sorted(
+            [(tid, rev) for tid, rev in revenue_by_task.items() if rev and rev > 0 and tid in by_id],
+            key=lambda x: -x[1],
+        )
+        has_sales = bool(earners)
 
-        task_type_counts = Counter(p["task_type"] for p in best if p["task_type"])
-        keyword_counts = Counter()
-        for p in best:
-            for kw in p.get("keywords") or []:
-                keyword_counts[kw.lower().strip()] += 1
+        if has_sales:
+            ranked = [(tid, rev) for tid, rev in earners[:limit]]
+            label = "Products that have EARNED real money (bias toward these themes/formats):"
+        else:
+            scored = [(t.id, self.performance_service.engagement_velocity(t.id)) for t in product_tasks]
+            scored = sorted([s for s in scored if s[1] > 0], key=lambda x: -x[1])[:limit]
+            ranked = scored
+            label = "No sales yet — formats with the most buyer view/favorite VELOCITY (per day):"
+
+        products, type_counts, keyword_counts = [], Counter(), Counter()
+        for tid, metric in ranked:
+            t = by_id.get(tid)
+            if not t:
+                continue
+            out = t.output_data or {}
+            products.append({"task_id": tid, "metric": round(metric, 2), "task_type": t.type,
+                             "title": out.get("title"), "keywords": out.get("keywords", [])})
+            if t.type:
+                type_counts[t.type] += 1
+            for kw in out.get("keywords") or []:
+                keyword_counts[str(kw).lower().strip()] += 1
+
+        # Anti-signal: formats with several listings and ZERO revenue.
+        fmt_total = Counter(t.type for t in product_tasks)
+        fmt_earning = Counter(by_id[tid].type for tid, _ in earners if tid in by_id)
+        zero_rev_formats = [(fmt, n) for fmt, n in fmt_total.items() if n >= 3 and fmt_earning.get(fmt, 0) == 0]
 
         return {
-            "count": len(best),
-            "average_score": average_score,
-            "top_task_types": task_type_counts.most_common(5),
+            "count": len(products),
+            "has_sales": has_sales,
+            "label": label,
+            "top_task_types": type_counts.most_common(5),
             "top_keywords": keyword_counts.most_common(10),
-            "products": best,
+            "zero_revenue_formats": zero_rev_formats,
+            "products": products,
         }

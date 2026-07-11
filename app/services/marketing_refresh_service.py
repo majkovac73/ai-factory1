@@ -128,13 +128,11 @@ class MarketingRefreshService:
         return candidates[:limit]
 
     def _engagement(self, task_id: str) -> float:
-        """Latest listing_stats value (views + 10*favorites) for a task, or 0."""
+        """2-2: engagement VELOCITY (per-day), so re-promotion favors products
+        with fresh momentum, not stale listings sitting on lifetime view counts."""
         try:
-            from app.services.analytics_service import AnalyticsService
-            events = AnalyticsService().get_events(
-                event_type="listing_stats", entity_type="task", entity_id=task_id, limit=1
-            )
-            return float(events[0].value or 0) if events else 0.0
+            from app.services.performance_service import PerformanceService
+            return PerformanceService().engagement_velocity(task_id)
         except Exception:
             return 0.0
 

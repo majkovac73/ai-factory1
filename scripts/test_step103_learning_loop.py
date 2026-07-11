@@ -59,12 +59,12 @@ evts = AnalyticsService().get_events(event_type="listing_stats", entity_type="ta
 check("1 listing_stats event exists", len(evts) == 1)
 check("1 payload has views/favorites", (evts[0].payload or {}).get("views") == 40 and (evts[0].payload or {}).get("favorites") == 3)
 
-# [2] engagement score
+# [2] engagement score — STEP104 2-2: now velocity-based (per-day), not cumulative.
+# Single event + no Task row -> age fallback 1 day -> velocity 70 -> capped -> 20.
 from app.services.performance_service import PerformanceService
 ps = PerformanceService()
 score = ps._engagement_score("dig-1")
-# engagement 40 + 30 = 70; ratio 0.70 * 20 = 14
-check("2 engagement score from views+10*fav", abs(score - 14.0) < 0.01)
+check("2 engagement score is velocity-based (capped 20)", abs(score - 20.0) < 0.01)
 check("2 no stats -> 0", ps._engagement_score("nonexistent") == 0.0)
 
 # [3] insights block

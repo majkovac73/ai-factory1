@@ -296,12 +296,14 @@ Return ONLY valid JSON with this structure:
             revenue_by_task = RevenueService().get_revenue_by_task() or {}
             parts = []
 
+            # 2-1: honest label — "earned money" vs "no sales yet, by view velocity".
             top_types = insights.get("top_task_types") or []
             if top_types:
-                parts.append("Best-performing formats so far: " + ", ".join(f"{t} ({n})" for t, n in top_types))
+                parts.append((insights.get("label") or "Best so far:") + " " +
+                             ", ".join(f"{t} ({n})" for t, n in top_types))
             top_kws = insights.get("top_keywords") or []
             if top_kws:
-                parts.append("Themes/keywords that performed best: " + ", ".join(k for k, _ in top_kws[:8]))
+                parts.append("Themes/keywords in the above: " + ", ".join(k for k, _ in top_kws[:8]))
 
             total_rev = sum(v or 0 for v in revenue_by_task.values())
             if total_rev > 0:
@@ -310,14 +312,18 @@ Return ONLY valid JSON with this structure:
                     "proven themes/formats above — propose a NEW product in that vein, not a copy."
                 )
 
-            # Light format budget (sub-step 3): how many of each format we already
-            # have, so the model doesn't keep piling into a saturated own-format.
+            # 2-1 anti-signal: formats piling up listings with ZERO revenue.
+            zero = insights.get("zero_revenue_formats") or []
+            if zero:
+                parts.append(
+                    "AVOID these formats — they already have several listings and $0 revenue: "
+                    + ", ".join(f"{fmt} ({n})" for fmt, n in zero)
+                )
+
+            # Light format budget: current shop mix.
             fmt_counts = Counter(fmt for _t, fmt in (self._recent_products or []))
             if fmt_counts:
-                parts.append(
-                    "Current shop mix (avoid over-producing a format that already has many and no sales): "
-                    + ", ".join(f"{fmt}: {n}" for fmt, n in fmt_counts.most_common())
-                )
+                parts.append("Current shop mix: " + ", ".join(f"{fmt}: {n}" for fmt, n in fmt_counts.most_common()))
 
             if not parts:
                 return ""

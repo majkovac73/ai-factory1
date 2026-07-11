@@ -46,22 +46,39 @@ class PerformanceService:
         ratio = max(0.0, 1 - (retry_count / self.MAX_RETRIES_CONSIDERED))
         return round(ratio * self.RELIABILITY_WEIGHT, 2)
 
-    def _engagement_score(self, task_id: str) -> float:
-        """A-10: score from the latest listing_stats event (views + 10x favorites)."""
+    ENGAGEMENT_VELOCITY_CAP = 10.0  # (views + 10*favorites) per DAY for full points
+
+    def engagement_velocity(self, task_id: str) -> float:
+        """2-2: (views + 10*favorites) gained PER DAY, from the two most recent
+        daily listing_stats events. Etsy's views field is LIFETIME cumulative, so
+        a raw value lets old listings dominate fresh momentum — velocity fixes
+        that. Fallback for a single data point: engagement over the listing's age."""
+        from datetime import datetime
         events = self.analytics_service.get_events(
-            event_type="listing_stats",
-            entity_type="task",
-            entity_id=task_id,
-            limit=50,
+            event_type="listing_stats", entity_type="task", entity_id=task_id, limit=50,
         )
         if not events:
             return 0.0
-        latest = events[0]  # get_events returns newest first
-        payload = latest.payload or {}
-        views = payload.get("views", 0) or 0
-        favorites = payload.get("favorites", 0) or 0
-        engagement = views + 10 * favorites
-        ratio = min(engagement / self.ENGAGEMENT_CAP_FOR_FULL_SCORE, 1.0)
+        lp = events[0].payload or {}
+        views, favs = (lp.get("views", 0) or 0), (lp.get("favorites", 0) or 0)
+        if len(events) >= 2:
+            pp = events[1].payload or {}
+            dt_days = (events[0].created_at - events[1].created_at).total_seconds() / 86400.0
+            if dt_days > 0:
+                dv = max(0.0, views - (pp.get("views", 0) or 0))
+                df = max(0.0, favs - (pp.get("favorites", 0) or 0))
+                return round((dv + 10 * df) / dt_days, 3)
+        # single-point fallback: total engagement over listing age (task age).
+        task = self.task_service.get_task(task_id)
+        age = 1.0
+        if task and task.created_at:
+            age = max(1.0, (datetime.utcnow() - task.created_at).total_seconds() / 86400.0)
+        return round((views + 10 * favs) / age, 3)
+
+    def _engagement_score(self, task_id: str) -> float:
+        """A-10/2-2: engagement VELOCITY (per-day), not lifetime cumulative views."""
+        vel = self.engagement_velocity(task_id)
+        ratio = min(vel / self.ENGAGEMENT_VELOCITY_CAP, 1.0)
         return round(ratio * self.ENGAGEMENT_WEIGHT, 2)
 
     def score_task(self, task_id: str) -> dict:
