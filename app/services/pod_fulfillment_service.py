@@ -127,16 +127,30 @@ class PODFulfillmentService:
             raise RuntimeError(f"No print providers for blueprint {blueprint_id}")
         print_provider_id = int(providers[0]["id"])
 
-        # 5. Pick ONE deliberate variant (P0-5) — a mid-size neutral tee — instead
-        # of 10 arbitrary ones the buyer can't even choose between.
+        # 5. Variant selection.
+        #  - POD off (default): ONE deliberate mid-size neutral tee (P0-5).
+        #  - POD on (7-2): a real, buyer-choosable size/color run so the listing
+        #    actually converts. Etsy variations are pushed post-listing by
+        #    PipelineOrchestrator._stage_pod_variations using the same selection.
         variants_resp = self._printify.list_variants(blueprint_id, print_provider_id)
         all_variants = variants_resp.get("variants", [])
-        chosen_variant = self._pick_single_variant(all_variants)
-        if not chosen_variant:
-            raise RuntimeError(f"No variants available for blueprint {blueprint_id}")
+        if getattr(settings, "POD_APPAREL_ENABLED", False):
+            from app.services.pod_variant_mapper import PodVariantMapper
+            selected = PodVariantMapper.select_variants(all_variants)
+            if not selected:
+                single = self._pick_single_variant(all_variants)
+                selected = [single] if single else []
+            if not selected:
+                raise RuntimeError(f"No variants available for blueprint {blueprint_id}")
+            enabled_variant_ids = [v["id"] for v in selected]
+            chosen_variant = selected[len(selected) // 2]  # representative for cost/title
+        else:
+            chosen_variant = self._pick_single_variant(all_variants)
+            if not chosen_variant:
+                raise RuntimeError(f"No variants available for blueprint {blueprint_id}")
+            enabled_variant_ids = [chosen_variant["id"]]
         variant_id = chosen_variant["id"]
         variant_title = chosen_variant.get("title", "")
-        enabled_variant_ids = [variant_id]
 
         # 6. Create Printify product with the real title (P1-8). Price is set from
         # cost after readback (P0-4); provisional high price avoids a $0 product

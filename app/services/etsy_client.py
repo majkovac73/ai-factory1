@@ -148,6 +148,26 @@ class EtsyClient:
                 raise Exception(f"Etsy API error {response.status_code}: {response.text}")
             return response.json()
 
+    async def update_listing_inventory(self, listing_id: str, inventory: dict) -> dict:
+        """7-2: set a listing's variations (size/color inventory). Etsy endpoint:
+        PUT /v3/application/listings/{listing_id}/inventory (NOT shop-scoped).
+        `inventory` is the PodVariantMapper.build_etsy_inventory payload."""
+        access_token = await get_valid_access_token()
+        api_key_header = f"{settings.ETSY_API_KEY}:{settings.ETSY_SHARED_SECRET}"
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.put(
+                f"{ETSY_API_BASE}/listings/{listing_id}/inventory",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "x-api-key": api_key_header,
+                    "Content-Type": "application/json",
+                },
+                json=inventory,
+            )
+            if response.status_code >= 400:
+                raise Exception(f"Etsy inventory error {response.status_code}: {response.text}")
+            return response.json()
+
     async def delete_listing(self, listing_id: str) -> bool:
         """
         Delete a listing outright. Used by PipelineOrchestrator's hard product

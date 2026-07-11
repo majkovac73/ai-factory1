@@ -299,6 +299,10 @@ class PipelineOrchestrator:
         # 7 — link the precreated Printify product to the now-real listing
         if is_pod and listing_id and pod_product:
             self._stage_link_printify_listing(pod_product, listing_id, report)
+            # 7-2: push the size/color variations onto the Etsy listing so buyers
+            # can pick — gated by POD_APPAREL_ENABLED (matches the multi-variant
+            # Printify product created upstream).
+            self._stage_pod_variations(pod_product, listing_id, report)
 
         # 8 — Social marketing (independent of Etsy stages): Pinterest + Tumblr.
         self._stage_pinterest(task_id, product_name, visual_brief, output_data, report, task_type=task_type)
@@ -1219,6 +1223,41 @@ class PipelineOrchestrator:
                 f"PipelineOrchestrator: failed to link Printify product {pod_product.id} "
                 f"to listing {listing_id}: {e}"
             )
+
+    def _stage_pod_variations(self, pod_product, listing_id: str, report: dict):
+        """7-2: build the Etsy size/color inventory from the Printify product's
+        variants (priced per-variant from real Printify cost) and PUT it onto the
+        listing. Best-effort and gated — never fails a publish."""
+        from config import settings
+        if not getattr(settings, "POD_APPAREL_ENABLED", False):
+            report["stages"]["pod_variations"] = {"skipped": "POD_APPAREL_ENABLED off"}
+            return
+        try:
+            from app.services.pod_variant_mapper import PodVariantMapper
+            from app.services.printify_client import PrintifyClient
+            from app.services.pod_fulfillment_service import PODFulfillmentService
+
+            product = PrintifyClient().get_product(str(pod_product.printify_product_id))
+            enabled_ids = set(pod_product.variant_ids or [])
+            pv = [v for v in (product.get("variants") or []) if v.get("id") in enabled_ids] or (product.get("variants") or [])
+
+            def price_cents_fn(variant):
+                cost = variant.get("cost")
+                if cost:
+                    return PODFulfillmentService._pod_price_cents_from_cost(int(cost))
+                return int(pod_product.price_cents or 0)
+
+            inventory = PodVariantMapper.build_etsy_inventory(pv, price_cents_fn)
+            if not inventory.get("products"):
+                report["stages"]["pod_variations"] = {"skipped": "no mappable variants"}
+                return
+            import asyncio
+            asyncio.run(EtsyClient().update_listing_inventory(listing_id, inventory))
+            report["stages"]["pod_variations"] = {"ok": True, "variations": len(inventory["products"])}
+            logger.info(f"PipelineOrchestrator: pushed {len(inventory['products'])} Etsy variations to {listing_id}")
+        except Exception as e:
+            logger.warning(f"PipelineOrchestrator: pod_variations failed for {listing_id}: {e}")
+            report["stages"]["pod_variations"] = {"error": str(e)[:200]}
 
     def _stage_create_listing(self, task_id: str, product_name: str, output_data: dict, task_type: str, is_pod: bool, report: dict, pod_product=None, pdf_page_count: Optional[int] = None, market_price: Optional[float] = None, bundle_note: str = "", market_titles: Optional[list] = None) -> Optional[str]:
         from app.services.etsy_shipping_service import EtsyShippingService
