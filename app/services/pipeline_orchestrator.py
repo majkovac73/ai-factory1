@@ -255,7 +255,7 @@ class PipelineOrchestrator:
 
         # 6 — attach images / digital file, then publish; readback-verify both
         if listing_id:
-            self._stage_attach_publish(task_id, listing_id, image_paths, design_path, digital_required, report, digital_files=digital_files)
+            self._stage_attach_publish(task_id, listing_id, image_paths, design_path, digital_required, report, digital_files=digital_files, alt_text_base=product_name)
         else:
             report["stages"]["attach_publish"] = {"skipped": "create_listing failed"}
 
@@ -1208,7 +1208,7 @@ class PipelineOrchestrator:
         report["stages"]["create_listing"]["when_made"] = real_when_made
         return listing_id
 
-    def _stage_attach_publish(self, task_id: str, listing_id: str, image_paths: list, design_path: Optional[Path], digital_required: bool, report: dict, digital_files: Optional[list] = None):
+    def _stage_attach_publish(self, task_id: str, listing_id: str, image_paths: list, design_path: Optional[Path], digital_required: bool, report: dict, digital_files: Optional[list] = None, alt_text_base: str = None):
         try:
             files = [str(p) for p in digital_files] if digital_files else ([str(design_path)] if design_path else [])
             result = asyncio.run(
@@ -1217,6 +1217,7 @@ class PipelineOrchestrator:
                     listing_image_paths=[str(p) for p in image_paths],
                     digital_file_path=files[0] if files else None,  # back-compat
                     digital_file_paths=files,
+                    alt_text_base=alt_text_base,
                 )
             )
 

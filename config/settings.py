@@ -83,7 +83,9 @@ class Settings(BaseSettings):
     # whole dollar protects margin further.
     POD_TARGET_PROFIT_USD: float = 6.00
     POD_SHIPPING_ESTIMATE_USD: float = 5.00
-    POD_ETSY_FEE_FRACTION: float = 0.10  # ~6.5% transaction + ~3% payment
+    # ~6.5% transaction + ~3% payment; bumped to 0.12 (D-6) to leave headroom
+    # for Etsy Offsite Ads fees (12-15% when a sale is attributed).
+    POD_ETSY_FEE_FRACTION: float = 0.12
 
     ETSY_SHIPPING_PROFILE_ID: str | None = None
     ETSY_SHOP_ORIGIN_COUNTRY: str = "US"  # ISO 3166-1 alpha-2; set in env if shop is not US-based
@@ -247,6 +249,10 @@ class Settings(BaseSettings):
     # service's built-in SEED_KEYWORDS default. Lets the anchor list be tuned
     # without a redeploy-requiring code change.
     TREND_SEED_KEYWORDS: list = []
+    # D-1: serve Google Trends data from a local cache within this many hours
+    # (trends don't change hourly; re-fetching every cycle from one IP risks a
+    # 429 ban that halts all autonomy). 0 disables caching.
+    TREND_CACHE_HOURS: int = 12
 
     # Per-page QA for multi-page PDF planners/guides (step 100l). PDF pages are
     # text-and-layout heavy, so their content review is STRICTER than a generic

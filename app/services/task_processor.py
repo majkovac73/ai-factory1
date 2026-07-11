@@ -118,10 +118,16 @@ class TaskProcessor:
 
     def _plan(self, task_id: str):
         task = self.task_service.get_task(task_id)
-        planner = PlannerAgent()
-
         task_type = task.type or "general"
-        plan = planner.create_plan(task_type, task.prompt)
+
+        # D-2: a product-format task needs no planning LLM call — it runs exactly
+        # one executor generation (P2-2), so a static one-step plan avoids a
+        # wasted call and its JSON-parse failure mode.
+        from app.core.product_formats import PRODUCT_FORMATS
+        if task_type in PRODUCT_FORMATS:
+            plan = {"steps": [task.prompt]}
+        else:
+            plan = PlannerAgent().create_plan(task_type, task.prompt)
 
         self.task_service.save_plan(task_id, plan)
         logger.info(f"Task {task_id}: plan created with {len(plan.get('steps', []))} step(s)")

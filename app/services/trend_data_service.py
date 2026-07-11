@@ -79,6 +79,16 @@ class TrendDataService:
         it's an exception.
         """
         kws = keywords or self._default_keywords()
+
+        # D-1: serve from cache within TTL. Google Trends aggressively 429s
+        # scrapers, and a ban stops ALL autonomous cycles (fail-loud = no tasks);
+        # trends don't change hourly, so re-fetching every cycle from one Railway
+        # IP is pure wasted risk.
+        cached = self._load_cache(kws)
+        if cached is not None:
+            logger.info("TrendDataService: trend cache hit")
+            return cached
+
         rising_queries: dict = {}
         interest_snapshot: dict = {}
         last_error = None
@@ -86,7 +96,8 @@ class TrendDataService:
         for kw in kws:
             for attempt in range(1, _MAX_RETRIES + 1):
                 try:
-                    self._pytrends.build_payload([kw], timeframe="today 3-m")
+                    # geo=US: Etsy buyers are predominantly US; worldwide dilutes.
+                    self._pytrends.build_payload([kw], timeframe="today 3-m", geo="US")
 
                     interest_df = self._pytrends.interest_over_time()
                     if not interest_df.empty:
@@ -119,8 +130,46 @@ class TrendDataService:
         from app.core.trademark_screen import filter_queries
         rising_queries = {kw: filter_queries(qs) for kw, qs in rising_queries.items()}
 
-        return {
+        result = {
             "keywords": kws,
             "rising_queries": rising_queries,
             "interest_snapshot": interest_snapshot,
         }
+        self._save_cache(result)
+        return result
+
+    # ── D-1: trend cache ────────────────────────────────────────────────────────
+
+    def _cache_path(self):
+        from app.core.paths import get_data_dir
+        return get_data_dir() / "trend_cache.json"
+
+    def _load_cache(self, kws):
+        import json
+        import time as _t
+        ttl_hours = getattr(settings, "TREND_CACHE_HOURS", 12)
+        if ttl_hours <= 0:
+            return None
+        try:
+            p = self._cache_path()
+            if not p.exists():
+                return None
+            data = json.loads(p.read_text(encoding="utf-8"))
+            if _t.time() - data.get("_cached_at", 0) > ttl_hours * 3600:
+                return None
+            # only serve cache if it was built for the same keyword set
+            if data.get("payload", {}).get("keywords") != list(kws):
+                return None
+            return data["payload"]
+        except Exception:
+            return None
+
+    def _save_cache(self, payload):
+        import json
+        import time as _t
+        try:
+            p = self._cache_path()
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps({"_cached_at": _t.time(), "payload": payload}), encoding="utf-8")
+        except Exception as e:
+            logger.warning(f"TrendDataService: could not write trend cache: {e}")

@@ -93,7 +93,7 @@ class EtsyImageService:
         return f"{settings.ETSY_API_KEY}:{settings.ETSY_SHARED_SECRET}"
 
     async def upload_listing_image(
-        self, listing_id: str, image_path: str
+        self, listing_id: str, image_path: str, alt_text: str = None
     ) -> dict:
         """
         Upload a local image file as a listing photo on an existing Etsy listing.
@@ -113,6 +113,8 @@ class EtsyImageService:
         # P3-4: send the file's real MIME type (a JPEG mockup would be mislabeled
         # as image/png) — _guess_content_type already exists in this module.
         files = {"image": (filename, image_bytes, _guess_content_type(image_path, filename))}
+        # D-4: alt text is a free SEO + accessibility win.
+        data = {"alt_text": alt_text[:250]} if alt_text else None
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(
@@ -122,6 +124,7 @@ class EtsyImageService:
                     "x-api-key": self._api_key_header(),
                 },
                 files=files,
+                data=data,
             )
             if response.status_code >= 400:
                 raise RuntimeError(
@@ -310,6 +313,7 @@ class EtsyImageService:
         listing_image_paths: list,
         digital_file_path: str = None,
         digital_file_paths: list = None,
+        alt_text_base: str = None,
     ) -> dict:
         """
         Orchestrate the full image-attachment sequence:
@@ -324,7 +328,11 @@ class EtsyImageService:
         uploaded_images = []
         for img_path in listing_image_paths:
             try:
-                r = await self.upload_listing_image(listing_id, str(img_path))
+                alt = None
+                if alt_text_base:
+                    role = str(img_path).replace("\\", "/").split("/")[-1].rsplit(".", 1)[0]
+                    alt = f"{alt_text_base} — {role}"
+                r = await self.upload_listing_image(listing_id, str(img_path), alt_text=alt)
                 uploaded_images.append({"path": str(img_path), "result": r})
             except Exception as e:
                 uploaded_images.append({"path": str(img_path), "error": str(e)})
