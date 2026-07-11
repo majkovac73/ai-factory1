@@ -159,6 +159,16 @@ class AutonomyWorker:
         if opportunity.get("text_led") and opportunity.get("display_text"):
             metadata["text_led"] = True
             metadata["display_text"] = opportunity["display_text"]
+        # 1-4: stamp the occasion this product is FOR (if any) so the seasonal
+        # listing-lifecycle tick can deactivate it after the window closes and
+        # reactivate it when the window reopens next year.
+        try:
+            from app.core.seasonality import occasion_for
+            occ = occasion_for(product_name, description)
+            if occ:
+                metadata["occasion"] = occ
+        except Exception:
+            pass
 
         task_service = TaskService()
         task = task_service.create_task(TaskCreate(

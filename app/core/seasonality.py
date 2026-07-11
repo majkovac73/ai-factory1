@@ -119,6 +119,23 @@ def seasonal_seed_keywords(today: date = None) -> list:
     return [o["keyword"] for o in upcoming_occasions(today)][:2]
 
 
+def occasion_for(name: str, description: str = "") -> str:
+    """1-4: the event KEY a concept is for (by keyword match), or None. Unlike
+    occasion_mismatch this is date-independent — it just labels the product."""
+    text = f"{name or ''} {description or ''}".lower()
+    for ev in _EVENTS:
+        if any(kw in text for kw in ev["match"]):
+            return ev["key"]
+    return None
+
+
+def occasion_in_window(key: str, today: date = None) -> bool:
+    """1-4: True if the event `key`'s buying window includes today."""
+    today = today or date.today()
+    ev = next((e for e in _EVENTS if e["key"] == key), None)
+    return _in_window(ev, today) if ev else False
+
+
 def occasion_mismatch(name: str, description: str = "", today: date = None) -> str:
     """1-3 hard gate: if the concept references an occasion whose window does NOT
     include today, return a rejection reason; else None. Deterministic — used in

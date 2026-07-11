@@ -122,6 +122,12 @@ class EtsyReceiptWorker:
                 except Exception as e:
                     logger.error(f"EtsyReceiptWorker: image-cleanup tick failed: {e}")
 
+                # 1-4: weekly seasonal listing lifecycle + monthly dead-inventory report.
+                try:
+                    self._maybe_seasonal_lifecycle()
+                except Exception as e:
+                    logger.error(f"EtsyReceiptWorker: seasonal-lifecycle tick failed: {e}")
+
                 self._stop_event.wait(self._poll_seconds)
         finally:
             if not self._stop_event.is_set():
@@ -610,6 +616,24 @@ class EtsyReceiptWorker:
             logger.info(f"EtsyReceiptWorker: spawned winner-variant task {new_task.id} from sold task {task_id}")
         except Exception as e:
             logger.error(f"EtsyReceiptWorker: winner-variant spawn failed for {task_id}: {e}")
+
+    def _maybe_seasonal_lifecycle(self):
+        """1-4: weekly — deactivate out-of-window seasonal listings and reactivate
+        in-window ones; monthly — run the dead-inventory prune report (dry-run)."""
+        state = self._load_state()
+        now = int(datetime.now(timezone.utc).timestamp())
+        if now - state.get("last_seasonal_tick_at", 0) >= 7 * 24 * 3600:
+            from app.services.seasonal_listing_service import SeasonalListingService
+            rep = SeasonalListingService().run(apply=True)
+            state["last_seasonal_tick_at"] = now
+            self._save_state(state)
+            logger.info(f"EtsyReceiptWorker: seasonal lifecycle done — {rep}")
+        if now - state.get("last_prune_report_at", 0) >= 30 * 24 * 3600:
+            from app.services.listing_prune_service import ListingPruneService
+            rep = ListingPruneService().run(apply=False)  # dry-run report → Discord
+            state["last_prune_report_at"] = now
+            self._save_state(state)
+            logger.info(f"EtsyReceiptWorker: monthly prune report — candidates={len(rep.get('candidates', []))}")
 
     def _maybe_cleanup_images(self):
         """Once per day, prune old generated images so the volume doesn't fill."""
