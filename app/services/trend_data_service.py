@@ -52,7 +52,17 @@ class TrendDataService:
 
     def _default_keywords(self) -> list:
         configured = getattr(settings, "TREND_SEED_KEYWORDS", None) or []
-        return list(configured) if configured else SEED_KEYWORDS
+        base = list(configured) if configured else list(SEED_KEYWORDS)
+        # A-7: fold in 1-2 in-season seed keywords so trend data reflects the
+        # occasions buyers are shopping for now, not just evergreen categories.
+        try:
+            from app.core.seasonality import seasonal_seed_keywords
+            for kw in seasonal_seed_keywords():
+                if kw not in base:
+                    base.append(kw)
+        except Exception:
+            pass
+        return base
 
     def get_real_trend_signals(self, keywords: "list[str] | None" = None) -> dict:
         """

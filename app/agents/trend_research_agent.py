@@ -208,6 +208,15 @@ class TrendResearchAgent(BaseAgent):
         return None
 
     @staticmethod
+    def _seasonal_block() -> str:
+        """A-7: name the occasions buyers are shopping for right now."""
+        try:
+            from app.core.seasonality import seasonal_prompt_block
+            return seasonal_prompt_block()
+        except Exception:
+            return ""
+
+    @staticmethod
     def _proposable_formats() -> list:
         """B-1(b): formats the concept generator may propose — excludes
         pod_apparel_design while POD is paused (POD_APPAREL_ENABLED=False)."""
@@ -257,7 +266,7 @@ anything requiring software/interactivity (no apps, no AR, no "tools" —
 only something a static image or PDF can actually be).
 
 Market insight:
-{insight}{self._insights_block}{dedup_note}
+{insight}{self._insights_block}{self._seasonal_block()}{dedup_note}
 
 Return ONLY valid JSON with this structure:
 {{
