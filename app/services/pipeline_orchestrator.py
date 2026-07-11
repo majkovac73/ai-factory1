@@ -109,6 +109,7 @@ class PipelineOrchestrator:
         visual_brief = output_data.get("description") or task.prompt or ""
         is_pod = format_spec["category"] == "pod"
         is_pdf = format_spec["delivery"] == "pdf"
+        is_set = format_spec["delivery"] == "image_set"  # 7-1: wall_art_set_3
         digital_required = format_spec["category"] == "digital"
 
         is_autonomy = bool((task.metadata_ or {}).get("source") == "autonomy_worker")
@@ -133,9 +134,18 @@ class PipelineOrchestrator:
         derive_listing_from_delivery = digital_required
         image_paths = []
 
-        # 2 — delivery asset (single image or multi-page PDF)
+        # 2 — delivery asset (single image, multi-page PDF, or 3-piece set)
+        set_result = None
         if is_pdf:
             design_path = self._stage_pdf_design(task, task_id, product_name, visual_brief, output_data, report)
+        elif is_set:
+            # 7-1: the set stage generates + content-QA's its 3 pieces internally,
+            # and produces the gallery-wall delivery asset, mockups, and per-piece
+            # digital files up front.
+            set_result = self._stage_wall_art_set(task_id, product_name, visual_brief, report)
+            if report.get("blocked"):
+                return report
+            design_path = set_result.get("triptych") if set_result else None
         else:
             # B-4: for text-led concepts, render the words deterministically —
             # generate a TEXT-FREE background, then overlay the exact text (Pillow).
@@ -155,7 +165,7 @@ class PipelineOrchestrator:
         # taxonomy-checking or uploading content already known to be garbage.
         # PDFs are content-QA'd per-page inside PDFGenerationService during
         # generation, so only single-image formats are reviewed here.
-        if design_path and not is_pdf:
+        if design_path and not is_pdf and not is_set:
             design_path = self._stage_content_quality(task_id, design_path, product_name, visual_brief, task_type, report)
             if report.get("blocked"):
                 return report
@@ -169,15 +179,23 @@ class PipelineOrchestrator:
         # _stage_attach_publish (digital_file_path=design_path). Uploading the
         # clean file as a listing photo would let anyone download the product for
         # free from the preview.
-        if design_path and derive_listing_from_delivery:
+        if design_path and derive_listing_from_delivery and not is_set:
             image_paths = self._build_listing_mockups(task_id, design_path, report)
+        elif is_set and set_result:
+            # 7-1: the set already built its gallery-wall mockups.
+            image_paths = set_result.get("mockups") or []
 
         # 2.6b — A-5: build the multi-file delivery BUNDLE (extra print ratios /
         # device sizes / letter PDF) from the content-verified master, all pure
         # PIL (zero image-gen). PDFs (already the final file) and POD skip this.
+        # The set already assembled its per-piece bundle in _stage_wall_art_set.
         digital_files = None
         bundle_note = ""
-        if design_path and digital_required and not is_pdf:
+        if is_set and set_result:
+            digital_files = set_result.get("digital_files") or []
+            bundle_note = f"Set of 3 coordinated prints — {len(digital_files)} files across standard sizes."
+            report["stages"]["delivery_bundle"] = {"ok": True, "files": len(digital_files)}
+        elif design_path and digital_required and not is_pdf:
             from app.services.delivery_bundle_service import DeliveryBundleService
             digital_files = DeliveryBundleService().build(design_path, task_type)
             bundle_note = DeliveryBundleService.size_summary(task_type, len(digital_files or []))
@@ -1001,6 +1019,111 @@ class PipelineOrchestrator:
             logger.error(f"PipelineOrchestrator: delivery_asset (single image) failed for {task_id}: {e}")
             self._alert("Delivery asset generation failed", f"task_id={task_id}: {e}")
             report["stages"]["delivery_asset"] = {"ok": False, "error": str(e)}
+            return None
+
+    def _stage_wall_art_set(self, task_id: str, product_name: str, visual_brief: str, report: dict) -> Optional[dict]:
+        """7-1: generate a coordinated SET of 3 wall-art prints (shared palette/
+        theme), content-QA each, verify they actually match, then assemble the
+        gallery-wall listing photo + the per-piece print-ratio delivery bundle.
+        Returns {triptych, pieces, digital_files, mockups} or None (blocked)."""
+        from config import settings
+        from app.services.wall_art_set_service import WallArtSetService, SET_SIZE
+        from app.services.content_quality_service import ContentQualityService
+        from app.services.delivery_bundle_service import DeliveryBundleService
+        from app.services.image_file_service import ImageFileService
+        from app.services.image_validation_service import ImageValidationService
+
+        briefs = WallArtSetService.piece_briefs(product_name, visual_brief)
+        cq = ContentQualityService()
+        pieces = []
+        try:
+            for i, brief in enumerate(briefs, start=1):
+                res = PODPipelineService().build_product_record(
+                    task_id=task_id,
+                    product_name=f"{product_name} (piece {i} of {SET_SIZE})",
+                    visual_brief=brief,
+                    product_type="digital_download",
+                    aspect_ratio="1:1",
+                    resolution="2K",
+                )
+                # note: PODDesignAgent writes filename=design.png by default; give
+                # each piece a distinct name so they don't clobber each other.
+                piece_str = res.get("design_path")
+                if not piece_str:
+                    report["stages"]["wall_art_set"] = {"ok": False, "error": f"piece {i} did not generate"}
+                    return None
+                piece_path = Path(piece_str)
+                distinct = piece_path.with_name(f"set_piece_{i}.png")
+                if distinct != piece_path:
+                    try:
+                        os.replace(str(piece_path), str(distinct))
+                        piece_path = distinct
+                    except Exception:
+                        pass
+                # content-QA each piece (block the whole set if any is garbage)
+                try:
+                    result = cq.review_asset_file(str(piece_path), product_name, "single_print", brief)
+                    if not result.passed:
+                        self._block_task(task_id, f"wall-art set piece {i} failed content QA: {result.specific_issues}", report, pre_listing=True)
+                        report["stages"]["wall_art_set"] = {"ok": False, "error": f"piece {i} content QA failed"}
+                        return None
+                except Exception as e:
+                    logger.warning(f"PipelineOrchestrator: set piece {i} QA raised for {task_id}: {e}")
+                pieces.append(piece_path)
+
+            # do the 3 pieces actually share a palette? (a clashing set is a bad
+            # product) — soft signal, logged/reported, not a hard block.
+            tol = float(getattr(settings, "WALL_ART_SET_PALETTE_TOL", 0.42))
+            consistency = WallArtSetService.palette_consistent([str(p) for p in pieces], tol=tol)
+            if not consistency["consistent"]:
+                logger.warning(f"PipelineOrchestrator: wall-art set {task_id} palette mismatch "
+                               f"(max_distance={consistency['max_distance']} > {tol})")
+
+            # gallery-wall listing photo, registered as the delivery asset so the
+            # hard delivery gate is satisfied by a single representative artifact.
+            ifs = ImageFileService()
+            ifs.delivery_dir(task_id).mkdir(parents=True, exist_ok=True)
+            triptych = str(ifs.delivery_dir(task_id) / "set_triptych.png")
+            WallArtSetService.compose_triptych([str(p) for p in pieces], triptych)
+            try:
+                ImageValidationService().validate(Path(triptych), use_case="delivery")
+            except Exception as ve:
+                logger.warning(f"PipelineOrchestrator: triptych validation soft-failed: {ve}")
+            self.catalog.register(
+                task_id=task_id, local_path=triptych, variant="delivery",
+                use_case="delivery", agent="WallArtSetService",
+                provider=settings.IMAGE_PROVIDER, model=settings.OPENROUTER_IMAGE_MODEL,
+            )
+
+            # buyer downloads: each piece + its standard print-ratio variants.
+            digital_files = []
+            for p in pieces:
+                digital_files.append(str(p))
+                try:
+                    digital_files.extend(DeliveryBundleService().build(str(p), "single_print") or [])
+                except Exception as e:
+                    logger.warning(f"PipelineOrchestrator: set bundle for {p} failed: {e}")
+            # de-dup while preserving order
+            seen, files = set(), []
+            for f in digital_files:
+                if f and f not in seen:
+                    seen.add(f); files.append(f)
+
+            # listing photos: the gallery-wall view (watermarked previews) + each
+            # individual piece as its own mockup.
+            mockups = self._build_listing_mockups(task_id, Path(triptych), report) or []
+
+            report["stages"]["wall_art_set"] = {
+                "ok": True, "pieces": len(pieces),
+                "palette_consistent": consistency["consistent"],
+                "palette_max_distance": consistency["max_distance"],
+                "delivery_files": len(files),
+            }
+            return {"triptych": Path(triptych), "pieces": pieces, "digital_files": files, "mockups": mockups}
+        except Exception as e:
+            logger.error(f"PipelineOrchestrator: wall-art set failed for {task_id}: {e}")
+            self._alert("Wall-art set generation failed", f"task_id={task_id}: {e}")
+            report["stages"]["wall_art_set"] = {"ok": False, "error": str(e)}
             return None
 
     def _stage_pdf_design(self, task, task_id: str, product_name: str, visual_brief: str, output_data: dict, report: dict) -> Optional[Path]:

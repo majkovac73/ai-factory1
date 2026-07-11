@@ -179,6 +179,12 @@ class Settings(BaseSettings):
     # 3-4: attach a deterministic ken-burns listing video on publish. Off by
     # default (encoding adds CPU/time per publish); flip on when ready.
     LISTING_VIDEO_ENABLED: bool = False
+    # 7-1: allow the wall_art_set_3 format (3 coordinated prints, ~3x image cost).
+    # Off until validated.
+    WALL_ART_SET_ENABLED: bool = False
+    # 7-1: max color-histogram distance (0-1) between set pieces for them to
+    # count as sharing a palette. Above this, the set is flagged inconsistent.
+    WALL_ART_SET_PALETTE_TOL: float = 0.42
 
     # P0-13: honest per-unit costs for the daily-spend ledger. Every image goes
     # through OpenRouterImageProvider.generate_image (flat-rate Seedream), so

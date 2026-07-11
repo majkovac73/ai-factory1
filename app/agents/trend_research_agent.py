@@ -244,6 +244,10 @@ class TrendResearchAgent(BaseAgent):
         formats = list(_FORMAT_LIST)
         if not getattr(settings, "POD_APPAREL_ENABLED", False):
             formats = [f for f in formats if f != "pod_apparel_design"]
+        # 7-1: wall_art_set_3 stays paused until validated (multi-piece generation
+        # costs ~3x an image; enable deliberately).
+        if not getattr(settings, "WALL_ART_SET_ENABLED", False):
+            formats = [f for f in formats if f != "wall_art_set_3"]
         return formats
 
     def _build_concept_prompt(self, insight: str, feedback: str) -> str:
@@ -254,6 +258,14 @@ class TrendResearchAgent(BaseAgent):
             "    - pod_apparel_design (one core design printed on apparel/merchandise;\n"
             "      the pipeline generates additional listing photos separately)\n\n"
             if getattr(settings, "POD_APPAREL_ENABLED", False) else ""
+        )
+        # 7-1: only advertise the wall-art set format when it's enabled.
+        set_line = (
+            "  Multi-piece digital SET:\n"
+            "    - wall_art_set_3 (a curated set of EXACTLY 3 coordinated wall-art\n"
+            "      prints sharing one palette and theme, sold as one listing — a\n"
+            "      'gallery wall' set; this is the ONE format where 'set of 3' is allowed)\n\n"
+            if getattr(settings, "WALL_ART_SET_ENABLED", False) else ""
         )
         # A-3: list existing shop products so the model doesn't re-propose them.
         dedup_note = ""
@@ -280,11 +292,13 @@ produce products in these exact formats — nothing else is buildable:
     - sticker_sheet_design (ONE image containing multiple sticker designs
       laid out on a single sheet — still one product, one image)
 
-{pod_line}Given this market insight, propose ONE specific, nameable, buildable product
+{pod_line}{set_line}Given this market insight, propose ONE specific, nameable, buildable product
 that fits EXACTLY ONE of the formats above — NOT a market strategy, NOT a
-category, NOT a bundle/set/kit/collection of multiple items, and NOT
-anything requiring software/interactivity (no apps, no AR, no "tools" —
-only something a static image or PDF can actually be).
+category, and NOT anything requiring software/interactivity (no apps, no AR,
+no "tools" — only something a static image or PDF can actually be). Do NOT
+propose a bundle/kit/collection of assorted items; the ONLY multi-item product
+allowed is wall_art_set_3 (exactly 3 coordinated prints), and only when it is
+listed as an available format above.
 
 Market insight:
 {insight}{self._insights_block}{self._seasonal_block()}{dedup_note}
@@ -402,17 +416,25 @@ Return ONLY valid JSON with this structure:
         if not name:
             return "product_name is missing or empty"
 
+        product_format = data.get("product_format")
+        if product_format not in PRODUCT_FORMATS:
+            return f"product_format must be one of {_FORMAT_LIST}, got {product_format!r}"
+
+        # 7-1: wall_art_set_3 is a legitimate curated SET of exactly 3 coordinated
+        # prints, so it is exempt from the multi-item marker ban (which exists to
+        # stop "a collection of everything" grab-bags). Every other format stays
+        # strictly single-product.
+        multi_item_exempt = product_format == "wall_art_set_3"
+
         lowered = name.lower()
         for marker in _STRATEGY_MARKERS:
             if marker in lowered:
                 return f"product_name reads as a strategy/category ('{marker}'), not a specific product"
-        for marker in _MULTI_ITEM_MARKERS:
-            if marker in lowered:
-                return f"product_name implies multiple distinct items ('{marker.strip()}'), not one specific product"
+        if not multi_item_exempt:
+            for marker in _MULTI_ITEM_MARKERS:
+                if marker in lowered:
+                    return f"product_name implies multiple distinct items ('{marker.strip()}'), not one specific product"
 
-        product_format = data.get("product_format")
-        if product_format not in PRODUCT_FORMATS:
-            return f"product_format must be one of {_FORMAT_LIST}, got {product_format!r}"
         # B-1(b): reject POD while it's paused.
         if product_format not in self._proposable_formats():
             return (
@@ -445,9 +467,10 @@ Return ONLY valid JSON with this structure:
         if season_err:
             return season_err
         lowered_desc = description.lower()
-        for marker in _MULTI_ITEM_MARKERS:
-            if marker in lowered_desc:
-                return f"description implies multiple distinct items ('{marker.strip()}'), not one specific product"
+        if not multi_item_exempt:
+            for marker in _MULTI_ITEM_MARKERS:
+                if marker in lowered_desc:
+                    return f"description implies multiple distinct items ('{marker.strip()}'), not one specific product"
 
         if product_format == "pdf_planner_or_guide":
             page_count = data.get("page_count")

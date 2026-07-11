@@ -84,6 +84,7 @@ DETERMINISTIC = [
     "test_step104_spend_ledger.py",
     "test_step104_seo_refresh_seeds.py",
     "test_step104_listing_video.py",
+    "test_step104_wall_art_set.py",
 ]
 
 

@@ -79,6 +79,14 @@ PRODUCT_FORMATS = {
     "seamless_pattern":     {"category": "digital", "delivery": "single_image", "taxonomy_id": 2078, "price_band": (3.00, 6.00),  "delivery_aspect": "1:1"},
     "pdf_planner_or_guide": {"category": "digital", "delivery": "pdf",          "taxonomy_id": 354,  "price_band": (5.00, 12.00), "delivery_aspect": "3:4"},
     "pod_apparel_design":   {"category": "pod",     "delivery": "single_image", "taxonomy_id": 482,  "price_band": (24.00, 40.00), "delivery_aspect": "1:1"},
+    # 7-1: a curated SET of 3 coordinated wall-art prints sharing one palette/
+    # theme, sold as one listing. Highest-AOV digital format on Etsy ($8-15 vs
+    # $3-6). delivery "image_set" (set_size pieces, each with its own print-ratio
+    # bundle). This is the ONLY format allowed "set of 3" language — the concept
+    # validator exempts it from the multi-item marker ban (it is genuinely a set,
+    # not a grab-bag). Master pieces stay 1:1 so the bundle service can crop the
+    # standard print ratios. Gated by WALL_ART_SET_ENABLED (off until validated).
+    "wall_art_set_3":       {"category": "digital", "delivery": "image_set",   "taxonomy_id": 2078, "price_band": (8.00, 15.00), "delivery_aspect": "1:1", "set_size": 3},
 }
 
 
@@ -142,6 +150,7 @@ _MATERIALS = {
     "pdf_planner_or_guide": ["digital download", "printable planner", "PDF"],
     "pod_apparel_design":   ["cotton", "unisex t-shirt", "DTG print"],
     "seamless_pattern":     ["digital download", "seamless pattern", "digital paper"],
+    "wall_art_set_3":       ["digital download", "printable wall art", "gallery wall set"],
 }
 
 
@@ -167,6 +176,7 @@ def description_blocks(product_format: str, page_count: int = None) -> str:
         "pdf_planner_or_guide": f"• 1 printable PDF{f' with {page_count} pages' if page_count else ''} — print at home or use on a tablet.",
         "pod_apparel_design": "• 1 made-to-order apparel item, printed just for you (see the size/variant note above).",
         "seamless_pattern": "• 1 high-resolution SEAMLESS repeating pattern tile (digital paper) — tiles edge-to-edge with no visible seams, for fabric, scrapbooking, packaging, and print projects.",
+        "wall_art_set_3": "• A SET of 3 coordinated high-resolution wall-art prints that share one palette and theme — designed to hang together as a gallery wall. Each print comes in several standard sizes.",
     }.get(product_format, "• 1 digital file.")
 
     if is_pod:
