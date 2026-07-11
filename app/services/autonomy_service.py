@@ -98,6 +98,20 @@ class AutonomyService:
             f"({state['winner_variants']}/{settings.WINNER_VARIANTS_PER_DAY} today)"
         )
 
+    def lifetime_spend(self) -> float:
+        """D-6: total recorded spend across ALL daily ledgers (the per-day state
+        files) — for the dashboard P&L tile."""
+        total = 0.0
+        try:
+            for p in self._state_dir.glob("autonomy_state_*.json"):
+                try:
+                    total += float(json.loads(p.read_text(encoding="utf-8")).get("spend_usd", 0) or 0)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return round(total, 4)
+
     # ── Read-only status ───────────────────────────────────────────────────────
 
     def daily_status(self) -> dict:

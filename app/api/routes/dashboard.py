@@ -13,6 +13,23 @@ task_queue = TaskQueue()
 log_service = LogService()
 
 
+@router.get("/pnl")
+def pnl():
+    """D-6: the one number that matters — lifetime recorded revenue vs recorded
+    spend (image/vision/text + Etsy listing fees), and profit."""
+    from app.services.autonomy_service import AutonomyService
+    from app.services.revenue_service import RevenueService
+    spend = AutonomyService().lifetime_spend()
+    rev = RevenueService().get_total_revenue()
+    revenue = round(rev.get("total_revenue", 0.0) or 0.0, 2)
+    return {
+        "revenue_usd": revenue,
+        "spend_usd": round(spend, 2),
+        "profit_usd": round(revenue - spend, 2),
+        "sales": rev.get("sale_count", 0),
+    }
+
+
 @router.get("/overview")
 def dashboard_overview():
     all_tasks = task_service.list_tasks()
