@@ -168,6 +168,14 @@ class Settings(BaseSettings):
     # can_spend() is advisory (racy under concurrency); past this ceiling a
     # provider raises SpendCapExceeded and refuses further paid calls.
     SPEND_CIRCUIT_BREAKER_MULT: float = 1.5
+    # 7-3: max in-season occasion seed phrases folded into the trend pull per
+    # cycle (each is a separate pytrends fetch; keep modest to avoid 429).
+    SEASONAL_SEED_MAX: int = 4
+    # 7-4: zero-view listing SEO refresh thresholds.
+    SEO_REFRESH_MIN_AGE_DAYS: int = 21
+    SEO_REFRESH_MAX_VIEWS: int = 5
+    SEO_REFRESH_MAX_PER_RUN: int = 5
+    SEO_REFRESH_ENABLED: bool = True
 
     # P0-13: honest per-unit costs for the daily-spend ledger. Every image goes
     # through OpenRouterImageProvider.generate_image (flat-rate Seedream), so

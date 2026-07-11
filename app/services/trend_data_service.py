@@ -53,11 +53,14 @@ class TrendDataService:
     def _default_keywords(self) -> list:
         configured = getattr(settings, "TREND_SEED_KEYWORDS", None) or []
         base = list(configured) if configured else list(SEED_KEYWORDS)
-        # A-7: fold in 1-2 in-season seed keywords so trend data reflects the
+        # A-7 / 7-3: fold in-season proven seed phrases so trend data reflects the
         # occasions buyers are shopping for now, not just evergreen categories.
+        # Bounded (SEASONAL_SEED_MAX) because every phrase is a separate pytrends
+        # fetch and too many invites a 429 ban.
         try:
             from app.core.seasonality import seasonal_seed_keywords
-            for kw in seasonal_seed_keywords():
+            cap = int(getattr(settings, "SEASONAL_SEED_MAX", 4))
+            for kw in seasonal_seed_keywords(max_seeds=cap):
                 if kw not in base:
                     base.append(kw)
         except Exception:

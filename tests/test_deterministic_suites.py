@@ -82,6 +82,7 @@ DETERMINISTIC = [
     "test_step104_variant_tags_pin_charm.py",
     "test_step104_pnl_fees.py",
     "test_step104_spend_ledger.py",
+    "test_step104_seo_refresh_seeds.py",
 ]
 
 

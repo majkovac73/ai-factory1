@@ -662,6 +662,20 @@ class EtsyReceiptWorker:
                 logger.warning(f"EtsyReceiptWorker: trend canary errored — {e}")
             state["last_trend_canary_at"] = now
             self._save_state(state)
+        if now - state.get("last_seo_refresh_at", 0) >= 7 * 24 * 3600:
+            # 7-4: weekly — rewrite zero-view listings' title/tags once from the
+            # current winning-title phrases (gated by SEO_REFRESH_ENABLED).
+            from config import settings as _s
+            if getattr(_s, "SEO_REFRESH_ENABLED", True):
+                try:
+                    from app.services.listing_seo_refresh_service import ListingSeoRefreshService
+                    rep = ListingSeoRefreshService().run(apply=True)
+                    logger.info(f"EtsyReceiptWorker: SEO refresh — candidates="
+                                f"{len(rep.get('candidates', []))}, refreshed={rep.get('refreshed', 0)}")
+                except Exception as e:
+                    logger.warning(f"EtsyReceiptWorker: SEO refresh errored — {e}")
+            state["last_seo_refresh_at"] = now
+            self._save_state(state)
 
     def _maybe_cleanup_images(self):
         """Once per day, prune old generated images so the volume doesn't fill."""

@@ -47,39 +47,54 @@ def nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
 # ── event table (1-1 dates + 1-2 per-event windows + 1-3 match keywords) ────
 # Each event: key, name, date_fn(year)->date, seed keyword, lead window (weeks),
 # and the keywords used to detect that a concept is FOR this occasion.
+# 7-3: each event carries `seeds` — its 2-3 proven, high-volume Etsy search
+# phrases. When the occasion is in its buying window these fold into the trend
+# pull (seasonal_seed_keywords) so research reflects what buyers are actually
+# typing this season, not just the single generic "<occasion> printable".
 _EVENTS = [
     {"key": "new_year", "name": "New Year / planning season", "date": lambda y: date(y, 1, 1),
      "keyword": "new year planner", "min_w": 2, "max_w": 8,
+     "seeds": ["new year planner printable", "goal planner printable", "vision board printable"],
      "match": ["new year", "resolution", "goal planner", "2026 planner", "2027 planner", "2028 planner"]},
     {"key": "valentines", "name": "Valentine's Day", "date": lambda y: date(y, 2, 14),
      "keyword": "valentines printable", "min_w": 4, "max_w": 9,
+     "seeds": ["valentines day printable", "valentine card printable", "galentines printable"],
      "match": ["valentine", "valentines", "galentine", "cupid"]},
     {"key": "st_patricks", "name": "St. Patrick's Day", "date": lambda y: date(y, 3, 17),
      "keyword": "st patricks day printable", "min_w": 4, "max_w": 9,
+     "seeds": ["st patricks day printable", "shamrock printable"],
      "match": ["st patrick", "st. patrick", "saint patrick", "shamrock", "leprechaun"]},
     {"key": "easter", "name": "Easter / spring", "date": lambda y: easter(y),
      "keyword": "easter printable", "min_w": 4, "max_w": 9,
+     "seeds": ["easter printable", "easter coloring page", "easter basket tags"],
      "match": ["easter", "easter bunny", "easter egg"]},
     {"key": "mothers_day", "name": "Mother's Day", "date": lambda y: nth_weekday(y, 5, 6, 2),
      "keyword": "mothers day printable", "min_w": 4, "max_w": 9,
+     "seeds": ["mothers day printable", "mothers day card printable", "gift for mom printable"],
      "match": ["mother's day", "mothers day", "mom gift", "gift for mom"]},
     {"key": "graduation", "name": "Graduation season", "date": lambda y: date(y, 6, 1),
      "keyword": "graduation printable", "min_w": 4, "max_w": 9,
+     "seeds": ["graduation printable", "graduation card printable", "class of 2026 printable"],
      "match": ["graduation", "graduate", "class of", "grad gift"]},
     {"key": "fathers_day", "name": "Father's Day", "date": lambda y: nth_weekday(y, 6, 6, 3),
      "keyword": "fathers day printable", "min_w": 4, "max_w": 9,
+     "seeds": ["fathers day printable", "fathers day card printable", "gift for dad printable"],
      "match": ["father's day", "fathers day", "dad gift", "gift for dad"]},
     {"key": "back_to_school", "name": "Back to school", "date": lambda y: date(y, 9, 1),
      "keyword": "back to school printable", "min_w": 4, "max_w": 10,
+     "seeds": ["back to school printable", "teacher appreciation printable", "classroom printable"],
      "match": ["back to school", "classroom", "teacher appreciation", "school planner"]},
     {"key": "halloween", "name": "Halloween", "date": lambda y: date(y, 10, 31),
      "keyword": "halloween printable", "min_w": 4, "max_w": 9,
+     "seeds": ["halloween printable", "halloween coloring page", "spooky printable"],
      "match": ["halloween", "spooky", "pumpkin", "trick or treat"]},
     {"key": "thanksgiving", "name": "Thanksgiving", "date": lambda y: nth_weekday(y, 11, 3, 4),
      "keyword": "thanksgiving printable", "min_w": 4, "max_w": 9,
+     "seeds": ["thanksgiving printable", "gratitude printable", "friendsgiving printable"],
      "match": ["thanksgiving", "turkey day", "friendsgiving", "gratitude"]},
     {"key": "christmas", "name": "Christmas / holidays", "date": lambda y: date(y, 12, 25),
      "keyword": "christmas printable", "min_w": 6, "max_w": 14,
+     "seeds": ["christmas printable", "christmas gift tags printable", "christmas coloring page"],
      "match": ["christmas", "xmas", "santa", "holiday gift", "advent"]},
 ]
 
@@ -114,9 +129,23 @@ def _in_window(ev: dict, today: date) -> bool:
     return ev["min_w"] * 7 <= days <= ev["max_w"] * 7
 
 
-def seasonal_seed_keywords(today: date = None) -> list:
-    """1-2 in-season seed keywords to fold into the trend pull."""
-    return [o["keyword"] for o in upcoming_occasions(today)][:2]
+def seasonal_seed_keywords(today: date = None, max_seeds: int = 6) -> list:
+    """7-3: fold each IN-WINDOW occasion's 2-3 proven Etsy search phrases into
+    the trend pull (soonest occasion first), so research reflects what buyers
+    are actually shopping for this season — not just one generic term. Bounded
+    by max_seeds because each phrase is a separate pytrends fetch (rate-limit /
+    429 risk). Falls back to the single generic keyword for events with no
+    curated seeds."""
+    out = []
+    for o in upcoming_occasions(today):
+        ev = next((e for e in _EVENTS if e["key"] == o["key"]), None)
+        seeds = (ev or {}).get("seeds") or [o["keyword"]]
+        for s in seeds:
+            if s not in out:
+                out.append(s)
+            if len(out) >= max_seeds:
+                return out
+    return out
 
 
 def occasion_for(name: str, description: str = "") -> str:
