@@ -909,6 +909,15 @@ class PipelineOrchestrator:
         delivery_resolution = "2K" if delivery_aspect == "1:1" else "4K"
         expected_ratio = aspect_to_ratio(delivery_aspect)
 
+        # B-3: steer seamless_pattern generation toward a tileable result.
+        if task_type == "seamless_pattern":
+            visual_brief = (
+                f"{visual_brief}. IMPORTANT: a SEAMLESS repeating tileable pattern — the "
+                "design must continue smoothly across all four edges so it tiles with no "
+                "visible seam. Even, all-over motif; no borders, no framing, no single "
+                "centered subject."
+            )
+
         try:
             result = PODPipelineService().build_product_record(
                 task_id=task_id,
@@ -939,6 +948,18 @@ class PipelineOrchestrator:
                 from app.services.text_overlay_service import TextOverlayService
                 if TextOverlayService().overlay(str(design_path), display_text):
                     report["stages"]["text_overlay"] = {"ok": True, "text": display_text[:60]}
+
+            # B-3: report the seamless-tiling quality of a seamless_pattern (soft
+            # signal — logged, not blocking, since image models rarely tile perfectly).
+            if task_type == "seamless_pattern":
+                try:
+                    from app.core.seamless import edge_mismatch, is_seamless
+                    mismatch = edge_mismatch(str(design_path))
+                    report["stages"]["seamless_check"] = {"edge_mismatch": round(mismatch, 1), "seamless": is_seamless(str(design_path))}
+                    if mismatch > 22.0:
+                        logger.warning(f"PipelineOrchestrator: seamless_pattern {task_id} edge mismatch {mismatch:.1f} (not perfectly tileable)")
+                except Exception:
+                    pass
 
             try:
                 ImageValidationService().validate(design_path, use_case="delivery", expected_ratio=expected_ratio)

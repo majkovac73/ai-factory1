@@ -74,6 +74,9 @@ PRODUCT_FORMATS = {
     "greeting_card_design": {"category": "digital", "delivery": "single_image", "taxonomy_id": 1280, "price_band": (3.00, 6.00),  "delivery_aspect": "3:4"},
     "phone_wallpaper":      {"category": "digital", "delivery": "single_image", "taxonomy_id": 2078, "price_band": (2.00, 4.00),  "delivery_aspect": "9:16"},
     "sticker_sheet_design": {"category": "digital", "delivery": "single_image", "taxonomy_id": 1326, "price_band": (3.00, 6.00),  "delivery_aspect": "1:1"},
+    # B-3: digital paper / seamless repeating pattern (crafters, print shops). One
+    # square tileable image; seamlessness is checkable in code.
+    "seamless_pattern":     {"category": "digital", "delivery": "single_image", "taxonomy_id": 2078, "price_band": (3.00, 6.00),  "delivery_aspect": "1:1"},
     "pdf_planner_or_guide": {"category": "digital", "delivery": "pdf",          "taxonomy_id": 354,  "price_band": (5.00, 12.00), "delivery_aspect": "3:4"},
     "pod_apparel_design":   {"category": "pod",     "delivery": "single_image", "taxonomy_id": 482,  "price_band": (24.00, 40.00), "delivery_aspect": "1:1"},
 }
@@ -123,6 +126,7 @@ _MATERIALS = {
     "sticker_sheet_design": ["digital download", "printable stickers"],
     "pdf_planner_or_guide": ["digital download", "printable planner", "PDF"],
     "pod_apparel_design":   ["cotton", "unisex t-shirt", "DTG print"],
+    "seamless_pattern":     ["digital download", "seamless pattern", "digital paper"],
 }
 
 
@@ -147,6 +151,7 @@ def description_blocks(product_format: str, page_count: int = None) -> str:
         "sticker_sheet_design": "• 1 printable sticker sheet (high-resolution PNG) — print onto sticker paper and cut out.",
         "pdf_planner_or_guide": f"• 1 printable PDF{f' with {page_count} pages' if page_count else ''} — print at home or use on a tablet.",
         "pod_apparel_design": "• 1 made-to-order apparel item, printed just for you (see the size/variant note above).",
+        "seamless_pattern": "• 1 high-resolution SEAMLESS repeating pattern tile (digital paper) — tiles edge-to-edge with no visible seams, for fabric, scrapbooking, packaging, and print projects.",
     }.get(product_format, "• 1 digital file.")
 
     if is_pod:
