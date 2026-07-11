@@ -13,6 +13,8 @@ A new file is created each UTC day; yesterday's file is left for audit.
 """
 import json
 import logging
+import os
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -23,7 +25,22 @@ from config import settings
 logger = logging.getLogger("ai-factory")
 
 
+class SpendCapExceeded(RuntimeError):
+    """5-2: raised by a provider when the day's spend has blown past the hard
+    ceiling (MAX_DAILY_SPEND_USD * SPEND_CIRCUIT_BREAKER_MULT). A can_spend()
+    check is advisory and can be raced by concurrent calls; this is the
+    last-resort circuit breaker that actually stops money going out."""
+
+
 class AutonomyService:
+    # 5-1: the daily ledger is a read-modify-write on a single JSON file. A new
+    # AutonomyService() is constructed per call, so the lock MUST be shared at
+    # class scope (an instance lock would protect nothing). This serializes
+    # concurrent in-process spend/task recording so updates can't clobber each
+    # other; the write itself is atomic (os.replace) so a crash mid-write can't
+    # leave a truncated ledger that reads back as $0 and re-opens the spend gate.
+    _lock = threading.Lock()
+
     def __init__(self):
         self._state_dir = get_data_dir()
         self._state_dir.mkdir(parents=True, exist_ok=True)
@@ -46,7 +63,13 @@ class AutonomyService:
         return {"tasks_created": 0, "spend_usd": 0.0}
 
     def _save(self, state: dict):
-        self._state_path().write_text(json.dumps(state), encoding="utf-8")
+        # 5-1: atomic write — serialize to a temp file in the same directory,
+        # fsync-free but atomically renamed into place, so a reader never sees a
+        # half-written ledger.
+        p = self._state_path()
+        tmp = p.with_name(f"{p.name}.tmp.{os.getpid()}.{threading.get_ident()}")
+        tmp.write_text(json.dumps(state), encoding="utf-8")
+        os.replace(tmp, p)
 
     # ── Task cap ───────────────────────────────────────────────────────────────
 
@@ -55,9 +78,10 @@ class AutonomyService:
         return state["tasks_created"] < settings.MAX_TASKS_PER_DAY
 
     def record_task_created(self):
-        state = self._load()
-        state["tasks_created"] += 1
-        self._save(state)
+        with self._lock:
+            state = self._load()
+            state["tasks_created"] += 1
+            self._save(state)
         logger.info(
             f"AutonomyService: task recorded ({state['tasks_created']}/{settings.MAX_TASKS_PER_DAY} today)"
         )
@@ -72,9 +96,10 @@ class AutonomyService:
         return (state["spend_usd"] + amount_usd) <= settings.MAX_DAILY_SPEND_USD
 
     def record_spend(self, amount_usd: float, description: str = ""):
-        state = self._load()
-        state["spend_usd"] = round(state["spend_usd"] + amount_usd, 6)
-        self._save(state)
+        with self._lock:
+            state = self._load()
+            state["spend_usd"] = round(state["spend_usd"] + amount_usd, 6)
+            self._save(state)
         logger.info(
             f"AutonomyService: ${amount_usd:.4f} recorded ({description}). "
             f"Daily total: ${state['spend_usd']:.4f}/${settings.MAX_DAILY_SPEND_USD:.2f}"
@@ -83,6 +108,26 @@ class AutonomyService:
         if state["spend_usd"] >= settings.MAX_DAILY_SPEND_USD:
             self._alert_cap_hit("spend", state["spend_usd"], settings.MAX_DAILY_SPEND_USD)
 
+    def spend_today(self) -> float:
+        """5-2: today's recorded spend (for the provider circuit breaker)."""
+        return float(self._load().get("spend_usd", 0.0) or 0.0)
+
+    def assert_within_circuit_breaker(self):
+        """5-2: hard stop. can_spend() is advisory and racy; this raises
+        SpendCapExceeded once the day's spend is past the ceiling so a provider
+        physically refuses to make one more paid call. The multiplier gives
+        headroom for in-flight calls that each individually passed can_spend()."""
+        mult = float(getattr(settings, "SPEND_CIRCUIT_BREAKER_MULT", 1.5))
+        ceiling = settings.MAX_DAILY_SPEND_USD * mult
+        spent = self.spend_today()
+        if spent >= ceiling:
+            self._alert_cap_hit("spend-circuit-breaker", round(spent, 4), round(ceiling, 4))
+            raise SpendCapExceeded(
+                f"Daily spend ${spent:.2f} has exceeded the circuit-breaker ceiling "
+                f"${ceiling:.2f} (MAX_DAILY_SPEND_USD ${settings.MAX_DAILY_SPEND_USD:.2f} "
+                f"x {mult}). Refusing further paid API calls today."
+            )
+
     # ── Winner-variant cap (A-1) ────────────────────────────────────────────────
 
     def can_create_winner_variant(self) -> bool:
@@ -90,9 +135,10 @@ class AutonomyService:
         return state.get("winner_variants", 0) < settings.WINNER_VARIANTS_PER_DAY
 
     def record_winner_variant(self):
-        state = self._load()
-        state["winner_variants"] = state.get("winner_variants", 0) + 1
-        self._save(state)
+        with self._lock:
+            state = self._load()
+            state["winner_variants"] = state.get("winner_variants", 0) + 1
+            self._save(state)
         logger.info(
             f"AutonomyService: winner-variant recorded "
             f"({state['winner_variants']}/{settings.WINNER_VARIANTS_PER_DAY} today)"

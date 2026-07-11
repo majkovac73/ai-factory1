@@ -66,6 +66,16 @@ class OpenRouterImageProvider(BaseImageProvider):
         """
         model_name = model or self._model
 
+        # 5-2: hard circuit breaker. can_spend() checks upstream are advisory and
+        # can be raced by concurrent generations; this physically refuses to make
+        # the paid call once the day's spend is past the ceiling, so a runaway
+        # loop can't burn unbounded money before a human notices.
+        try:
+            from app.services.autonomy_service import AutonomyService
+            AutonomyService().assert_within_circuit_breaker()
+        except ImportError:
+            pass
+
         payload = {
             "model": model_name,
             "prompt": prompt,

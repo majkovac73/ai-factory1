@@ -182,7 +182,7 @@ def _patch_common(tmp):
 
 def _fake_eis():
     m = MagicMock()
-    async def _attach(listing_id, listing_image_paths, digital_file_path=None):
+    async def _attach(listing_id, listing_image_paths, digital_file_path=None, **kwargs):
         return {"listing_id": listing_id,
                 "uploaded_images": [{"path": p, "result": {"ok": True}} for p in listing_image_paths],
                 "digital_upload": {"ok": True} if digital_file_path else None,

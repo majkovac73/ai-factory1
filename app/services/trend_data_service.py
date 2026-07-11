@@ -250,6 +250,49 @@ class TrendDataService:
         except Exception:
             pass
 
+    def canary(self) -> dict:
+        """5-3: weekly health check for the pytrends path. pytrends is an
+        UNOFFICIAL scraper of an undocumented Google endpoint — a Google-side
+        HTML/JSON change can silently break it (distinct from a transient 429).
+        This does one tiny live fetch for a stable keyword and, on hard failure,
+        alerts once so the breakage is caught proactively instead of only when
+        product creation notices stale data. Returns a status dict."""
+        kw = "wall art"
+        try:
+            self._pytrends.build_payload([kw], timeframe="today 3-m", geo="US")
+            df = self._pytrends.interest_over_time()
+            ok = df is not None and not df.empty and kw in getattr(df, "columns", [])
+            if ok:
+                return {"ok": True, "keyword": kw, "points": int(len(df))}
+            self._alert_canary(f"pytrends returned no data for '{kw}' (empty/oddly-shaped frame)")
+            return {"ok": False, "keyword": kw, "reason": "empty"}
+        except Exception as e:
+            self._alert_canary(f"pytrends raised {type(e).__name__}: {str(e)[:200]}")
+            return {"ok": False, "keyword": kw, "reason": str(e)[:200]}
+
+    def _alert_canary(self, detail: str):
+        """5-3: alert at most once per day that the pytrends canary is failing."""
+        import json
+        import time as _t
+        try:
+            marker = self._cache_path().parent / "trend_canary_alert.json"
+            last = 0
+            if marker.exists():
+                last = json.loads(marker.read_text(encoding="utf-8")).get("at", 0)
+            if _t.time() - last < 86400:
+                return
+            from app.services.alert_service import AlertService
+            AlertService().send_alert_sync(
+                "Trend CANARY failing — pytrends may be broken",
+                f"The weekly Google-Trends canary could not fetch data: {detail}. "
+                "If this persists it is likely a pytrends library break (Google changed "
+                "their endpoint), not a 429 — check for a pytrends update.",
+                level="warning",
+            )
+            marker.write_text(json.dumps({"at": _t.time()}), encoding="utf-8")
+        except Exception:
+            pass
+
     def _alert_ban_once_per_day(self, err: str):
         """1-6: past the stale bound, the factory is halted — alert Maj at most
         once per day (today no alert fires at all)."""

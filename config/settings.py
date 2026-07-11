@@ -164,6 +164,10 @@ class Settings(BaseSettings):
 
     MAX_TASKS_PER_DAY: int = 10
     MAX_DAILY_SPEND_USD: float = 5.00
+    # 5-2: hard circuit-breaker ceiling = MAX_DAILY_SPEND_USD * this multiplier.
+    # can_spend() is advisory (racy under concurrency); past this ceiling a
+    # provider raises SpendCapExceeded and refuses further paid calls.
+    SPEND_CIRCUIT_BREAKER_MULT: float = 1.5
 
     # P0-13: honest per-unit costs for the daily-spend ledger. Every image goes
     # through OpenRouterImageProvider.generate_image (flat-rate Seedream), so

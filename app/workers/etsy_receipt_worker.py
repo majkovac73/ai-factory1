@@ -652,6 +652,16 @@ class EtsyReceiptWorker:
             state["last_prune_report_at"] = now
             self._save_state(state)
             logger.info(f"EtsyReceiptWorker: monthly prune report — candidates={len(rep.get('candidates', []))}")
+        if now - state.get("last_trend_canary_at", 0) >= 7 * 24 * 3600:
+            # 5-3: proactively catch a pytrends library break (vs a 429) weekly.
+            try:
+                from app.services.trend_data_service import TrendDataService
+                res = TrendDataService().canary()
+                logger.info(f"EtsyReceiptWorker: trend canary — {res}")
+            except Exception as e:
+                logger.warning(f"EtsyReceiptWorker: trend canary errored — {e}")
+            state["last_trend_canary_at"] = now
+            self._save_state(state)
 
     def _maybe_cleanup_images(self):
         """Once per day, prune old generated images so the volume doesn't fill."""
