@@ -39,11 +39,12 @@ logger = logging.getLogger("ai-factory")
 
 
 class MarketingRefreshCandidate:
-    def __init__(self, task: Task, listing_id: str, last_marketed_at: Optional[datetime]):
+    def __init__(self, task: Task, listing_id: str, last_marketed_at: Optional[datetime], engagement: float = 0.0):
         self.task = task
         self.task_id = task.id
         self.listing_id = listing_id
         self.last_marketed_at = last_marketed_at
+        self.engagement = engagement  # D-6: views + 10*favorites (A-10)
 
 
 class MarketingRefreshService:
@@ -118,12 +119,24 @@ class MarketingRefreshService:
             last = self.last_marketed_at(task.id)
             if last is not None and last > cutoff:
                 continue  # marketed too recently
-            candidates.append(MarketingRefreshCandidate(task, listing_id, last))
+            candidates.append(MarketingRefreshCandidate(task, listing_id, last, self._engagement(task.id)))
 
-        # Oldest-first: never-marketed (None) sort before any real timestamp,
-        # then by how long ago they were last marketed.
-        candidates.sort(key=lambda c: (c.last_marketed_at is not None, c.last_marketed_at or datetime.min))
+        # D-6: never-marketed (None) first, then WEIGHT toward products with the
+        # most engagement (views + 10*favorites from A-10) — re-promote proven
+        # products harder — then oldest-marketed as the tiebreaker.
+        candidates.sort(key=lambda c: (c.last_marketed_at is not None, -c.engagement, c.last_marketed_at or datetime.min))
         return candidates[:limit]
+
+    def _engagement(self, task_id: str) -> float:
+        """Latest listing_stats value (views + 10*favorites) for a task, or 0."""
+        try:
+            from app.services.analytics_service import AnalyticsService
+            events = AnalyticsService().get_events(
+                event_type="listing_stats", entity_type="task", entity_id=task_id, limit=1
+            )
+            return float(events[0].value or 0) if events else 0.0
+        except Exception:
+            return 0.0
 
     # ── Refresh a single product on a channel ─────────────────────────────────
 

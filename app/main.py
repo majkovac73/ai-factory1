@@ -36,8 +36,13 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
+    # D-6: allow_origins=["*"] WITH allow_credentials=True is invalid per the CORS
+    # spec (browsers reject it). This API authenticates via the X-Factory-Key
+    # HEADER, not cookies, so credentials aren't needed — set False to make the
+    # wildcard valid. Tighten allow_origins to the Railway domain if cookies are
+    # ever introduced.
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

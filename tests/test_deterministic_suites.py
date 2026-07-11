@@ -73,6 +73,7 @@ DETERMINISTIC = [
     "test_step103_tierd.py",
     "test_step103_text_overlay.py",
     "test_step103_seamless.py",
+    "test_step103_d2b_d6.py",
 ]
 
 

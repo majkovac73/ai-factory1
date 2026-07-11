@@ -1093,15 +1093,22 @@ class PipelineOrchestrator:
         band_lo, band_hi = price_band_for(task_type)
 
         try:
-            product = {
+            # D-2b: build the listing directly from the executor's output_data +
+            # deterministic tag derivation — NO ListingGeneratorAgent LLM call.
+            # That call produced price/category/quantity/shipping which are ALL
+            # overridden below for product formats, so it was pure wasted spend
+            # and an extra JSON-parse failure mode per task.
+            gen = ListingGeneratorAgent()
+            listing = {
                 "product_name": product_name,
-                "concept": product_name,
+                "title": output_data.get("title", ""),
+                "description": output_data.get("description", ""),
+                "tags": gen._derive_tags(output_data.get("keywords", []), product_name=product_name),
+                "sections": output_data.get("sections", []),
                 "materials": [],
-                # P0-11: per-format band instead of the old blanket "$10-25".
-                "estimated_price_range": f"${band_lo:.2f}-{band_hi:.2f}",
-                "target_audience": "",
+                "currency": "USD",
+                "price": None,  # clamped/grounded below
             }
-            listing = ListingGeneratorAgent().generate_listing(product, output_data)
             listing["taxonomy_id"] = intended_taxonomy_id
             listing["when_made"] = intended_when_made
             # B-7: route the listing into its shop section when mapped.
