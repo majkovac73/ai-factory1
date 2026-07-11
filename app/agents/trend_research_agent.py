@@ -411,6 +411,14 @@ Return ONLY valid JSON with this structure:
                 "legal/IP risk and must be avoided; propose a wholly original concept with "
                 "no brand, character, celebrity, franchise, or sports references"
             )
+
+        # 1-3: reject out-of-season occasion concepts (built too early or too late
+        # to ever rank before the occasion) — the mechanical cause of Maj's
+        # "seasonal products way too early or too late" complaint.
+        from app.core.seasonality import occasion_mismatch
+        season_err = occasion_mismatch(name, description)
+        if season_err:
+            return season_err
         lowered_desc = description.lower()
         for marker in _MULTI_ITEM_MARKERS:
             if marker in lowered_desc:

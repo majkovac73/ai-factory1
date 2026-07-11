@@ -37,13 +37,27 @@ class ResearchAgent(BaseAgent):
                 "no real data was available."
             )
 
+        # 1-3: give the analyst a calendar so it reads TRAILING Google Trends data
+        # with today's date in hand (July still shows graduation/Father's-Day
+        # risers; January still shows Christmas — those are PAST, not opportunities).
+        try:
+            from app.core.seasonality import seasonal_prompt_block
+            season_block = seasonal_prompt_block()
+        except Exception:
+            season_block = ""
+
         prompt = f"""
 You are a market research analyst.
 
 Topic: {topic}
 Scope: {scope}
+{season_block}
 
 {data_block}
+
+Note: Google Trends is a TRAILING window — a query can be a top riser because its
+occasion just PASSED. Treat any occasion that has passed or is outside its
+buying window (per the seasonal timing above) as NOT an opportunity.
 
 Using ONLY the real data above (if present), provide:
 - Key findings grounded specifically in the rising queries / interest

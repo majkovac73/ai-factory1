@@ -909,6 +909,17 @@ class PipelineOrchestrator:
         delivery_resolution = "2K" if delivery_aspect == "1:1" else "4K"
         expected_ratio = aspect_to_ratio(delivery_aspect)
 
+        # 1-8: a coloring page must be UNCOLORED — pure black line art on white.
+        # There is no point selling a coloring page that's already half-colored.
+        if task_type == "coloring_page":
+            visual_brief = (
+                f"{visual_brief}. STRICT COLORING-PAGE RULES: pure black OUTLINE line art on a "
+                "COMPLETELY WHITE background. Absolutely NO colour, NO grey shading, NO gradients, "
+                "NO filled/shaded areas, and NO pre-colored sections anywhere — only clean black "
+                "outlines that a person colors in themselves. The whole page is white except the "
+                "black line work."
+            )
+
         # B-3: steer seamless_pattern generation toward a tileable result.
         if task_type == "seamless_pattern":
             visual_brief = (

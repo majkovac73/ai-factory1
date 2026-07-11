@@ -42,11 +42,26 @@ class ProductViabilityCriticAgent(BaseAgent):
             makes it work, on fail it's specific and actionable (usable as
             retry feedback).
         """
+        # 1-3 (belt-and-braces): tell the critic today's date and which occasions
+        # are actually in their buying window, so it can down-score a mistimed
+        # seasonal product it happens to see.
+        try:
+            from datetime import date
+            from app.core.seasonality import upcoming_occasions
+            _today = date.today().isoformat()
+            _in_window = ", ".join(o["occasion"] for o in upcoming_occasions()) or "none"
+        except Exception:
+            _today, _in_window = "", "unknown"
+
         prompt = f"""
 You are an experienced Etsy seller and buyer with no stake in this
 product. Your job is to score, honestly, how likely a real stranger
 browsing Etsy would be to actually buy this specific item. You are NOT
 checking format rules or schema; assume those are handled elsewhere.
+
+Today is {_today}. Occasions currently in their Etsy buying window: {_in_window}.
+If this concept is tied to a holiday/occasion that is NOT in that list (it
+already passed, or is too far out to rank in time), score it 1-2 and say so.
 
 Product concept:
 {json.dumps(concept, indent=2)}
