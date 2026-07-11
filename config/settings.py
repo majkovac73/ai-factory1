@@ -176,6 +176,9 @@ class Settings(BaseSettings):
     SEO_REFRESH_MAX_VIEWS: int = 5
     SEO_REFRESH_MAX_PER_RUN: int = 5
     SEO_REFRESH_ENABLED: bool = True
+    # 3-4: attach a deterministic ken-burns listing video on publish. Off by
+    # default (encoding adds CPU/time per publish); flip on when ready.
+    LISTING_VIDEO_ENABLED: bool = False
 
     # P0-13: honest per-unit costs for the daily-spend ledger. Every image goes
     # through OpenRouterImageProvider.generate_image (flat-rate Seedream), so

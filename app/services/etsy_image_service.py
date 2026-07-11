@@ -132,6 +132,35 @@ class EtsyImageService:
                 )
             return response.json()
 
+    async def upload_listing_video(
+        self, listing_id: str, video_path: str, name: str = None
+    ) -> dict:
+        """3-4: upload a short MP4 as the listing video. Etsy endpoint:
+        POST /shops/{shop_id}/listings/{listing_id}/videos (multipart, field
+        name `video`). Best-effort — the caller never fails a publish over it."""
+        access_token = await get_valid_access_token()
+        filename = name or (str(video_path).split("\\")[-1].split("/")[-1])
+        with open(video_path, "rb") as f:
+            video_bytes = f.read()
+        files = {"video": (filename, video_bytes, "video/mp4")}
+        data = {"name": filename[:255]}
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(
+                f"{ETSY_API_BASE}/shops/{settings.ETSY_SHOP_ID}/listings/{listing_id}/videos",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "x-api-key": self._api_key_header(),
+                },
+                files=files,
+                data=data,
+            )
+            if response.status_code >= 400:
+                raise RuntimeError(
+                    f"Etsy video upload error {response.status_code}: {response.text}"
+                )
+            return response.json()
+
     async def upload_digital_file(
         self, listing_id: str, file_path: str, display_name: str = None
     ) -> dict:

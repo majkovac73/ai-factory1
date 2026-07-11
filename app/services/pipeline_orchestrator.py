@@ -273,6 +273,11 @@ class PipelineOrchestrator:
         if report.get("blocked"):
             return report
 
+        # 6b — 3-4: attach a short ken-burns video of the real design (free,
+        # deterministic; boosts Etsy ranking + conversion). Best-effort.
+        if listing_id and not report.get("blocked"):
+            self._stage_listing_video(task_id, listing_id, report)
+
         # 7 — link the precreated Printify product to the now-real listing
         if is_pod and listing_id and pod_product:
             self._stage_link_printify_listing(pod_product, listing_id, report)
@@ -1443,6 +1448,41 @@ class PipelineOrchestrator:
         except Exception as e:
             logger.warning(f"PipelineOrchestrator: pin-from-mockup failed for {task_id}: {e}")
             return None
+
+    def _mockup_source(self, task_id: str) -> Optional[str]:
+        """The best existing listing mockup path for this task (shared by the
+        pin and the video), or None."""
+        assets = self.catalog.get_listing_assets(task_id)
+        return next((a.local_path for a in (assets or [])
+                     if a.local_path and Path(a.local_path).exists()), None)
+
+    def _stage_listing_video(self, task_id: str, listing_id: str, report: dict):
+        """3-4: render a ken-burns MP4 from the verified design and upload it as
+        the listing video. Gated by LISTING_VIDEO_ENABLED (off by default —
+        encoding adds CPU/time to every publish; flip it on when ready). Fully
+        best-effort: never fails a publish, never spends money."""
+        from config import settings
+        if not getattr(settings, "LISTING_VIDEO_ENABLED", False):
+            report["stages"]["listing_video"] = {"skipped": "LISTING_VIDEO_ENABLED off"}
+            return
+        try:
+            src = self._mockup_source(task_id)
+            if not src:
+                report["stages"]["listing_video"] = {"skipped": "no mockup source"}
+                return
+            from app.services.listing_video_service import ListingVideoService
+            from app.services.image_file_service import ImageFileService
+            ifs = ImageFileService()
+            ifs.listing_dir(task_id).mkdir(parents=True, exist_ok=True)
+            out_path = str(ifs.listing_dir(task_id) / "video.mp4")
+            ListingVideoService().render(src, out_path)
+            import asyncio
+            asyncio.run(EtsyImageService().upload_listing_video(listing_id, out_path))
+            report["stages"]["listing_video"] = {"uploaded": True, "path": out_path}
+            logger.info(f"PipelineOrchestrator: listing video uploaded for {listing_id}")
+        except Exception as e:
+            logger.warning(f"PipelineOrchestrator: listing video failed for {task_id}: {e}")
+            report["stages"]["listing_video"] = {"error": str(e)[:200]}
 
     def _stage_pinterest(self, task_id: str, product_name: str, visual_brief: str, output_data: dict, report: dict, task_type: str = None):
         from config import settings
