@@ -68,6 +68,11 @@ class _PassCQ96:
     def review_asset_bytes(self, *a, **k): return _mock96.Mock(passed=True, specific_issues=[])
     def check_marketing_consistency(self, *a, **k): return _mock96.Mock(passed=True, specific_issues=[])
 _mock96.patch("app.services.content_quality_service.ContentQualityService", _PassCQ96).start()
+# A-6 renders planner interiors deterministically, so an image-gen failure on an
+# interior page can't happen. This pre-A-6 suite exercises the all-image-generated
+# PDF path (incl. its partial-failure behavior), so force that path here.
+from config import settings as _s91
+_s91.PLANNER_RENDER_INTERIOR = False
 
 from PIL import Image as PILImage
 

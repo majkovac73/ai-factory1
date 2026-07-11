@@ -186,9 +186,16 @@ class Settings(BaseSettings):
     MARKETING_REFRESH_MIN_INTERVAL_DAYS: int = 7      # don't re-promote same product+channel more often
     MARKETING_REFRESH_MAX_POSTS_PER_CYCLE: int = 3    # hard cap per cycle
 
-    # Hard cap on pages for a multi-page PDF product (step 91). Each page is a
-    # real, billable image-generation call — this must never be unbounded.
-    MAX_PDF_PAGES: int = 6
+    # Hard cap on pages for a multi-page PDF product. With A-6 code-rendering,
+    # interior pages are ~free and always legible, so a competitive 20-30 page
+    # planner is viable (was 6 when every page was a billable image call).
+    MAX_PDF_PAGES: int = 30
+
+    # A-6: render planner/guide INTERIOR pages deterministically (Pillow) instead
+    # of image-generating them — legible grids/lines/checkboxes at ~$0, no
+    # garbled-text QA failures. Page 1 stays an image-generated decorative cover.
+    # Set False to fall back to the all-image-generated path (6-page era).
+    PLANNER_RENDER_INTERIOR: bool = True
 
     # Content-quality gate (step 96): a VISION-capable model inspects the
     # actual generated delivery asset for legibility/coherence/correctness —

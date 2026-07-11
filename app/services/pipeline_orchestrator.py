@@ -959,6 +959,7 @@ class PipelineOrchestrator:
                 product_name=product_name,
                 visual_brief=visual_brief,
                 page_briefs=page_briefs,
+                render_interior=getattr(settings, "PLANNER_RENDER_INTERIOR", True),
             )
             # PDFs aren't images — ImageValidationService's pixel/ratio checks
             # don't apply. PDFGenerationService already performed its own

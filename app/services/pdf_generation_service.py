@@ -84,6 +84,7 @@ class PDFGenerationService:
         visual_brief: str,
         page_briefs: List[str],
         filename: str = "design.pdf",
+        render_interior: bool = False,
     ) -> Path:
         """
         Args:
@@ -118,6 +119,22 @@ class PDFGenerationService:
 
         pages: List[PILImage.Image] = []
         for i, brief in enumerate(page_briefs, start=1):
+            # A-6: code-render interior pages (i>1) deterministically with
+            # Pillow — always-legible grids/lines/checkboxes at ~$0, no garbled
+            # text, no vision QA needed. Page 1 stays an image-generated cover.
+            if render_interior and i > 1:
+                try:
+                    from app.services.planner_page_renderer import PlannerPageRenderer
+                    spec = PlannerPageRenderer.derive_spec(brief)
+                    pages.append(PlannerPageRenderer().render(spec).convert("RGB"))
+                    logger.info(f"PDFGenerationService: page {i}/{page_count} rendered ({spec['layout']})")
+                    continue
+                except Exception as e:
+                    logger.warning(
+                        f"PDFGenerationService: planner render failed for page {i} "
+                        f"({e}); falling back to image generation"
+                    )
+
             prompt = self._build_page_prompt(product_name, visual_brief, brief, i, page_count)
             page_img = None
             last_issues = None
