@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, audit-step102-fixes]
+    # Tier 6: all STEP 103/104/105 work is now on main; the working branch was
+    # dropped from the trigger list.
+    branches: [main]
   pull_request:
 
 jobs:

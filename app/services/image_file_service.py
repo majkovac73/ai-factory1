@@ -3,7 +3,8 @@ Image file service — local filesystem storage for generated image assets.
 
 Storage layout (all paths relative to project root):
   data/images/listing/{task_id}/{filename}   — listing/preview variant
-      Shown publicly on Etsy and Pinterest. Smaller or watermarked later.
+      Shown publicly on Etsy and Pinterest (scene-composited; watermarked for
+      WATERMARK_FORMATS such as coloring pages / wallpapers — see MockupService).
   data/images/delivery/{task_id}/{filename}  — delivery/print-ready variant
       The actual file a paying customer receives (digital download), or
       that a future POD service (step 81) will submit for printing.

@@ -1168,7 +1168,7 @@ class PipelineOrchestrator:
                 if f and f not in seen:
                     seen.add(f); files.append(f)
 
-            # listing photos: the gallery-wall view (watermarked previews) + each
+            # listing photos: the gallery-wall scene view (perspective previews) + each
             # individual piece as its own mockup.
             mockups = self._build_listing_mockups(task_id, Path(triptych), report) or []
 
@@ -1793,8 +1793,8 @@ class PipelineOrchestrator:
         only posted to Pinterest, so a newly-created listing never got a Tumblr
         post — Tumblr was only ever posted by the recurring marketing-refresh
         worker (default OFF), so in practice new products were never shared on
-        Tumblr. This posts on creation using the attractive WATERMARKED listing
-        mockup (never the raw deliverable) + the Etsy listing URL. Best-effort;
+        Tumblr. This posts on creation using the attractive scene-composited
+        listing mockup (never the raw deliverable) + the Etsy listing URL. Best-effort;
         skipped cleanly when Tumblr isn't configured/connected."""
         from config import settings
 
@@ -1819,7 +1819,7 @@ class PipelineOrchestrator:
                 report["stages"]["tumblr"] = {"skipped": "already posted successfully"}
                 return
 
-            # An attractive, watermarked listing photo — NEVER the raw delivery.
+            # An attractive scene-composited listing photo — NEVER the raw delivery.
             asset_path = None
             for a in self.catalog.get_listing_assets(task_id):
                 if a.use_case == "listing" and Path(a.local_path).exists():
