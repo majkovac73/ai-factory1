@@ -119,6 +119,8 @@ class ProductScoreService:
         ev = next((e for e in _EVENTS if e["key"] == occ), None)
         if not ev:
             return 5, "evergreen"
+        if ev.get("match_only"):  # 1-6: year-round occasion (e.g. weddings)
+            return 5, f"{occ} (year-round)"
         d = _next_occurrence(ev, today)
         weeks_out = (d - today).days / 7.0
         # weeks of window remaining = how long until we hit the min_w (close) edge

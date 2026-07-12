@@ -44,6 +44,36 @@ def nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
     return d + timedelta(days=offset + (n - 1) * 7)
 
 
+# 1-6: Hanukkah's first night falls on the Hebrew calendar, which needs a full
+# Hebrew-date table to compute. A hardcoded {year: first-night} map for the years
+# that matter is honest and correct (Gregorian dates of the first full day).
+_HANUKKAH = {
+    2025: date(2025, 12, 15),
+    2026: date(2026, 12, 5),
+    2027: date(2027, 12, 25),
+    2028: date(2028, 12, 13),
+    2029: date(2029, 12, 2),
+    2030: date(2030, 12, 21),
+}
+
+
+def hanukkah(year: int) -> date:
+    """First night of Hanukkah for `year` (from a hardcoded 2025-2030 table);
+    falls back to ~Dec 10 for years outside the table so the gate still works."""
+    return _HANUKKAH.get(year, date(year, 12, 10))
+
+
+# 1-6: Diwali also follows a lunar calendar — hardcoded main-day dates.
+_DIWALI = {
+    2025: date(2025, 10, 21),
+    2026: date(2026, 11, 8),
+    2027: date(2027, 10, 29),
+    2028: date(2028, 10, 17),
+    2029: date(2029, 11, 5),
+    2030: date(2030, 10, 26),
+}
+
+
 # ── event table (1-1 dates + 1-2 per-event windows + 1-3 match keywords) ────
 # Each event: key, name, date_fn(year)->date, seed keyword, lead window (weeks),
 # and the keywords used to detect that a concept is FOR this occasion.
@@ -52,6 +82,13 @@ def nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
 # pull (seasonal_seed_keywords) so research reflects what buyers are actually
 # typing this season, not just the single generic "<occasion> printable".
 _EVENTS = [
+    # 1-6: New Year's EVE party goods (distinct from the New Year planning season).
+    # MUST precede new_year so the more-specific "new year's eve" match wins over
+    # new_year's broad "new year" substring.
+    {"key": "nye_party", "name": "New Year's Eve party", "date": lambda y: date(y, 12, 31),
+     "keyword": "new years eve party printable", "min_w": 2, "max_w": 7,
+     "seeds": ["new years eve party printable", "nye party printable"],
+     "match": ["new year's eve", "new years eve", "nye party", "nye printable"]},
     {"key": "new_year", "name": "New Year / planning season", "date": lambda y: date(y, 1, 1),
      "keyword": "new year planner", "min_w": 2, "max_w": 8,
      "seeds": ["new year planner printable", "goal planner printable", "vision board printable"],
@@ -64,6 +101,14 @@ _EVENTS = [
      "keyword": "st patricks day printable", "min_w": 4, "max_w": 9,
      "seeds": ["st patricks day printable", "shamrock printable"],
      "match": ["st patrick", "st. patrick", "saint patrick", "shamrock", "leprechaun"]},
+    {"key": "cinco_de_mayo", "name": "Cinco de Mayo", "date": lambda y: date(y, 5, 5),
+     "keyword": "cinco de mayo printable", "min_w": 4, "max_w": 9,
+     "seeds": ["cinco de mayo printable", "fiesta printable"],
+     "match": ["cinco de mayo", "fiesta", "papel picado"]},
+    {"key": "july_4th", "name": "4th of July / Independence Day", "date": lambda y: date(y, 7, 4),
+     "keyword": "4th of july printable", "min_w": 4, "max_w": 9,
+     "seeds": ["4th of july printable", "patriotic printable"],
+     "match": ["4th of july", "fourth of july", "independence day", "stars and stripes", "patriotic"]},
     {"key": "easter", "name": "Easter / spring", "date": lambda y: easter(y),
      "keyword": "easter printable", "min_w": 4, "max_w": 9,
      "seeds": ["easter printable", "easter coloring page", "easter basket tags"],
@@ -92,10 +137,27 @@ _EVENTS = [
      "keyword": "thanksgiving printable", "min_w": 4, "max_w": 9,
      "seeds": ["thanksgiving printable", "gratitude printable", "friendsgiving printable"],
      "match": ["thanksgiving", "turkey day", "friendsgiving", "gratitude"]},
+    {"key": "hanukkah", "name": "Hanukkah", "date": lambda y: hanukkah(y),
+     "keyword": "hanukkah printable", "min_w": 4, "max_w": 9,
+     "seeds": ["hanukkah printable", "menorah printable"],
+     "match": ["hanukkah", "chanukah", "menorah", "dreidel"]},
     {"key": "christmas", "name": "Christmas / holidays", "date": lambda y: date(y, 12, 25),
      "keyword": "christmas printable", "min_w": 6, "max_w": 14,
      "seeds": ["christmas printable", "christmas gift tags printable", "christmas coloring page"],
      "match": ["christmas", "xmas", "santa", "holiday gift", "advent"]},
+    # 1-6: weddings sell YEAR-ROUND — a match-only event with a full-year window so
+    # occasion_for() can stamp/track them (and the lifecycle leaves them active)
+    # but occasion_mismatch() never rejects a wedding concept as "out of season",
+    # and they are never seeded for timed building. "match_only" excludes them
+    # from the seed pool and the "shop now" prompt list.
+    {"key": "weddings", "name": "Wedding season", "date": lambda y: date(y, 5, 1),
+     "keyword": "wedding printable", "min_w": 0, "max_w": 52, "match_only": True,
+     "match": ["wedding", "bridal shower", "bachelorette", "bride to be", "save the date"]},
+    # 1-6: Diwali (movable — small hardcoded table, honest for the years we run).
+    {"key": "diwali", "name": "Diwali", "date": lambda y: _DIWALI.get(y, date(y, 11, 1)),
+     "keyword": "diwali printable", "min_w": 3, "max_w": 8,
+     "seeds": ["diwali printable", "rangoli printable"],
+     "match": ["diwali", "deepavali", "rangoli"]},
 ]
 
 
@@ -113,6 +175,10 @@ def upcoming_occasions(today: date = None, min_weeks: int = None, max_weeks: int
     today = today or date.today()
     out = []
     for ev in _EVENTS:
+        # 1-6: match-only events (e.g. weddings) are year-round; they exist for
+        # the gate to recognize/stamp them, not to advertise as a timed "shop now".
+        if ev.get("match_only"):
+            continue
         d = _next_occurrence(ev, today)
         days = (d - today).days
         lo = (min_weeks if min_weeks is not None else ev["min_w"]) * 7

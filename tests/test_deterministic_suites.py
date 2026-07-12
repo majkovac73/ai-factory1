@@ -88,6 +88,7 @@ DETERMINISTIC = [
     "test_step104_pod_variants.py",
     "test_step105_pipeline_correctness.py",
     "test_step105_product_score.py",
+    "test_step105_seasonality_backfill.py",
 ]
 
 

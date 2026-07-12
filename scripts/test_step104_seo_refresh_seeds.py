@@ -28,7 +28,9 @@ Base.metadata.create_all(bind=engine)
 from app.core.seasonality import seasonal_seed_keywords, _EVENTS
 
 # every event carries 1-3 proven seeds
-check("7-3 every event has seeds", all(e.get("seeds") for e in _EVENTS))
+# 1-6: match-only events (e.g. weddings) are intentionally never seeded.
+check("7-3 every non-match-only event has seeds",
+      all(e.get("seeds") for e in _EVENTS if not e.get("match_only")))
 
 # ~5 weeks before Christmas (Dec 25) → in christmas window (6-14w? no, 5w is inside)
 # christmas min_w=6 max_w=14, so 8 weeks before = Oct 30 is in window.
