@@ -452,7 +452,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # Simulate mockup generation failing entirely (returns none). The prepended
     # delivery design must still stand as the listing photo and the pipeline
     # must continue.
-    def _failing_mockups(task_id, delivery_path, report):
+    def _failing_mockups(task_id, delivery_path, report, product_format=None):
         report["stages"]["listing_images"] = {"ok": False, "count": 0, "source": "delivery_mockup"}
         return []
     orch7._build_listing_mockups = _failing_mockups
