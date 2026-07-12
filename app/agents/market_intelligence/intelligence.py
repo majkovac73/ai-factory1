@@ -6,22 +6,25 @@ from app.core.utils.json_sanitizer import JSONSanitizer
 class IntelligenceAgent(BaseAgent):
     """
     Market Intelligence: Intelligence Agent
-    
-    Synthesizes market research and analysis into actionable intelligence reports.
+
+    Synthesizes market research into actionable intelligence reports.
+
+    2-3: the old AnalysisAgent was dead code — the loop always called
+    synthesize(research, "") with an empty analysis. That agent + parameter are
+    gone; synthesize takes research only.
     """
 
     def __init__(self, provider=None, model: str = None):
         super().__init__(provider, model)
         self.sanitizer = JSONSanitizer()
 
-    def synthesize(self, research: str, analysis: str) -> dict:
+    def synthesize(self, research: str) -> dict:
         """
-        Synthesize research and analysis into a structured intelligence report.
-        
+        Synthesize research into a structured intelligence report.
+
         Args:
             research: Research findings
-            analysis: Strategic analysis
-        
+
         Returns:
             Dict with keys: summary, opportunities, threats, recommendations
         """
@@ -29,13 +32,10 @@ class IntelligenceAgent(BaseAgent):
         prompt = f"""
 You are a market intelligence director.
 
-Synthesize the following research and analysis into a concise intelligence report.
+Synthesize the following research into a concise intelligence report.
 
 Research:
 {research}
-
-Analysis:
-{analysis}
 
 Return ONLY valid JSON with this structure:
 {{
@@ -68,9 +68,7 @@ Be concise and actionable.
 
     def run(self, task: dict) -> dict:
         """
-        Standardized entry point. Expects a task dict with 'research'
-        and 'analysis' keys.
+        Standardized entry point. Expects a task dict with a 'research' key.
         """
         research = task.get("research", "")
-        analysis = task.get("analysis", "")
-        return self.synthesize(research, analysis)
+        return self.synthesize(research)

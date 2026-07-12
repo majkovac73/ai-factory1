@@ -27,7 +27,10 @@ from config import settings
 
 logger = logging.getLogger("ai-factory")
 
-_RESEARCH_TOPIC = "Etsy digital download and print-on-demand trending products"
+# 2-4: the research topic must reflect what's actually BUILDABLE right now — with
+# POD paused, "print-on-demand" steered research toward unbuildable apparel.
+_RESEARCH_TOPIC_DIGITAL = "Etsy digital download printables and wall-art trending products"
+_RESEARCH_TOPIC_WITH_POD = "Etsy digital download and print-on-demand trending products"
 _RESEARCH_SCOPE = "trends"
 
 # Strategy/category language markers — a real product_name never reads like
@@ -109,7 +112,10 @@ class TrendResearchAgent(BaseAgent):
         # its buying window, research that occasion directly instead of the same
         # fixed sentence every time — combats the attractor-concept problem that
         # A-3 dedup only fights as a symptom.
-        research_topic = _RESEARCH_TOPIC
+        # 2-4: reflect the currently-proposable formats (POD paused → digital only).
+        research_topic = (_RESEARCH_TOPIC_WITH_POD
+                          if getattr(settings, "POD_APPAREL_ENABLED", False)
+                          else _RESEARCH_TOPIC_DIGITAL)
         try:
             from app.core.seasonality import upcoming_occasions
             in_window = upcoming_occasions()
@@ -127,7 +133,7 @@ class TrendResearchAgent(BaseAgent):
             return None
 
         try:
-            intel = self._intelligence.synthesize(research, "")
+            intel = self._intelligence.synthesize(research)
         except Exception as e:
             logger.error(f"TrendResearchAgent: intelligence step failed: {e}")
             return None
@@ -317,6 +323,8 @@ produce products in these exact formats — nothing else is buildable:
     - coloring_page
     - greeting_card_design
     - phone_wallpaper
+    - seamless_pattern (a square, edge-to-edge TILEABLE repeating pattern —
+      "digital paper" for crafters: scrapbooking, fabric, packaging, gift wrap)
 
   Multi-image digital:
     - pdf_planner_or_guide (a real multi-page PDF — must set page_count,

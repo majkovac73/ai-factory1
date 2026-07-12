@@ -615,6 +615,33 @@ class EtsyReceiptWorker:
             if not parent or parent.type not in PRODUCT_FORMATS:
                 return
             title = (parent.output_data or {}).get("title") or (parent.metadata_ or {}).get("product_name") or "a proven seller"
+            pmeta = parent.metadata_ or {}
+            desc = (parent.output_data or {}).get("description") or ""
+
+            # 2-1(a): the winner-variant path is the one that creates products from
+            # the strongest signal (a real sale) yet had the WEAKEST gate — none.
+            # A leftover Halloween printable bought in July would spawn a NEW
+            # Halloween product in July. If the parent is tied to an occasion whose
+            # buying window is NOT open now, do not clone it.
+            from app.core.seasonality import occasion_in_window, occasion_for, occasion_mismatch
+            occ = pmeta.get("occasion") or occasion_for(title, desc)
+            if occ and not occasion_in_window(occ):
+                logger.info(f"EtsyReceiptWorker: winner variant skipped — parent occasion '{occ}' is out of its buying window")
+                return
+            # 2-1(b): deterministic hard gates the variant would otherwise bypass —
+            # an out-of-season theme or a trademarked parent must not be cloned.
+            season_err = occasion_mismatch(title, desc)
+            if season_err:
+                logger.info(f"EtsyReceiptWorker: winner variant skipped — {season_err}")
+                return
+            try:
+                from app.core.trademark_screen import screen as _tm_screen
+                if _tm_screen(title, desc):
+                    logger.info(f"EtsyReceiptWorker: winner variant skipped — parent references a trademarked term")
+                    return
+            except Exception:
+                pass
+
             prompt = (
                 f"Create a {parent.type.replace('_', ' ')} product that is a FRESH variation on a proven "
                 f"seller ('{title}'): keep the appealing theme and style that made it sell, but make it a "
@@ -623,7 +650,6 @@ class EtsyReceiptWorker:
             # 2-3: carry the parent's grounding so the variant isn't a blind guess —
             # market data, SEO context, and (for PDF planners) page_count, without
             # which _resolve_pdf_page_briefs would silently make a 1-page planner.
-            pmeta = parent.metadata_ or {}
             vmeta = {"source": "winner_variant", "parent_task_id": task_id,
                      "product_name": f"{title} variation"}
             for k in ("market", "seo_context", "page_count", "occasion"):

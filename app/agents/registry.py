@@ -19,7 +19,6 @@ def _get_registry():
     from app.core.agents.fixer import FixerAgent
     from app.core.agents.qa import QAAgent
     from app.agents.market_intelligence.research import ResearchAgent
-    from app.agents.market_intelligence.analysis import AnalysisAgent
     from app.agents.market_intelligence.intelligence import IntelligenceAgent
     from app.agents.product_development.design import DesignAgent
     from app.agents.product_development.optimization import OptimizationAgent
@@ -42,7 +41,6 @@ def _get_registry():
         "fixer": FixerAgent,
         "qa": QAAgent,
         "research": ResearchAgent,
-        "analysis": AnalysisAgent,
         "intelligence": IntelligenceAgent,
         "design": DesignAgent,
         "optimization": OptimizationAgent,
