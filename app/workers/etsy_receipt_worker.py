@@ -24,6 +24,7 @@ Etsy ShopReceipt field names used (from Open API v3 spec):
 import asyncio
 import json
 import logging
+import os
 import threading
 import time
 from datetime import datetime, timezone
@@ -750,5 +751,11 @@ class EtsyReceiptWorker:
         return {}
 
     def _save_state(self, state: dict):
+        # 5-2: atomic write (same pattern as the STEP104 5-1 spend ledger). A crash
+        # mid-write must not corrupt the state file — a corrupt file loads as {},
+        # which re-fetches the whole receipt history and loses failed_receipts
+        # retry counts + every daily-tick timestamp (all ticks re-fire at once).
         STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        STATE_FILE.write_text(json.dumps(state), encoding="utf-8")
+        tmp = STATE_FILE.with_name(f"{STATE_FILE.name}.tmp.{os.getpid()}.{threading.get_ident()}")
+        tmp.write_text(json.dumps(state), encoding="utf-8")
+        os.replace(tmp, STATE_FILE)

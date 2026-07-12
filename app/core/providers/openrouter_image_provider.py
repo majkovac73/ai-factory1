@@ -70,11 +70,21 @@ class OpenRouterImageProvider(BaseImageProvider):
         # can be raced by concurrent generations; this physically refuses to make
         # the paid call once the day's spend is past the ceiling, so a runaway
         # loop can't burn unbounded money before a human notices.
+        # 5-3: let SpendCapExceeded propagate (that's the point), but a DIFFERENT
+        # failure in the ledger (disk full, corrupt JSON, permissions) must NOT
+        # take down every image generation — the wallet guard must not become a
+        # single point of failure. Swallow those, loudly.
+        from app.services.autonomy_service import AutonomyService, SpendCapExceeded
         try:
-            from app.services.autonomy_service import AutonomyService
             AutonomyService().assert_within_circuit_breaker()
-        except ImportError:
-            pass
+        except SpendCapExceeded:
+            raise
+        except Exception as e:
+            import logging
+            logging.getLogger("ai-factory").warning(
+                f"OpenRouterImageProvider: spend circuit-breaker check failed soft "
+                f"(proceeding): {e}"
+            )
 
         payload = {
             "model": model_name,

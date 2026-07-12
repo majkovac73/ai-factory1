@@ -359,6 +359,19 @@
     const API = window.location.origin;
     const POLL = 7000;
 
+    // 5-5: once FACTORY_API_KEY is set in Railway, every mutating request (POST/
+    // PUT/PATCH/DELETE) needs an X-Factory-Key header or it 401s. Read tiles stay
+    // open. We store the key in localStorage and attach it to EVERY fetch so any
+    // current or future UI button keeps working the moment the key is enabled.
+    const FKEY_STORAGE = 'factoryApiKey';
+    const getFactoryKey = () => { try { return localStorage.getItem(FKEY_STORAGE) || ''; } catch (e) { return ''; } };
+    const apiFetch = (path, opts = {}) => {
+      const key = getFactoryKey();
+      const headers = Object.assign({}, opts.headers || {});
+      if (key) headers['X-Factory-Key'] = key;
+      return fetch(path, Object.assign({}, opts, { headers }));
+    };
+
     const ROOM_CFG = {
       research:     { icon: '🔭', color: '#a78bfa', glow: 'rgba(167,139,250,0.13)' },
       planning:     { icon: '📋', color: '#60a5fa', glow: 'rgba(96,165,250,0.13)' },
@@ -469,6 +482,38 @@
       if (rkey === 'qa')        return Math.max(0, (c.QA || 0) - 1);  // 1 validated at a time
       if (rkey === 'marketing') return c.pending || 0;               // posts awaiting send
       return 0;
+    }
+
+    // 5-5: unobtrusive API-key field. Lets an operator paste the FACTORY_API_KEY
+    // once (stored in localStorage) so mutating actions keep working after the
+    // key is enabled in Railway. Shows a lock that turns green when a key is set.
+    function KeyField() {
+      const [open, setOpen] = useState(false);
+      const [val, setVal] = useState(getFactoryKey());
+      const has = !!getFactoryKey();
+      const save = () => { try { localStorage.setItem(FKEY_STORAGE, val.trim()); } catch (e) {} setOpen(false); };
+      return (
+        <span className="keyfield">
+          <span title={has ? 'API key set' : 'No API key set (needed for actions once FACTORY_API_KEY is enabled)'}
+                style={{ cursor: 'pointer', color: has ? '#5bd97a' : '#9fb8cf' }}
+                onClick={() => setOpen(o => !o)}>
+            {has ? '🔑' : '🔒'}
+          </span>
+          {open && (
+            <span style={{ marginLeft: 6 }}>
+              <input type="password" defaultValue={val} placeholder="X-Factory-Key"
+                     onChange={e => setVal(e.target.value)}
+                     style={{ fontSize: 11, padding: '2px 4px', width: 130,
+                              background: '#0d1520', color: '#cfe', border: '1px solid #2b3a4d', borderRadius: 3 }} />
+              <button onClick={save}
+                      style={{ fontSize: 11, marginLeft: 4, cursor: 'pointer',
+                               background: '#1f2d3d', color: '#cfe', border: '1px solid #2b3a4d', borderRadius: 3 }}>
+                save
+              </button>
+            </span>
+          )}
+        </span>
+      );
     }
 
     function Badge({ status }) {
@@ -895,7 +940,7 @@
 
       const fetch_ = useCallback(async () => {
         try {
-          const res = await fetch(`${API}/dashboard/rooms/status`);
+          const res = await apiFetch(`${API}/dashboard/rooms/status`);
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           setData(await res.json());
           setLastTs(new Date());
@@ -915,7 +960,7 @@
       useEffect(() => {
         const loadPnl = async () => {
           try {
-            const r = await fetch(`${API}/dashboard/pnl`);
+            const r = await apiFetch(`${API}/dashboard/pnl`);
             if (r.ok) setPnl(await r.json());
           } catch (e) { /* non-fatal */ }
         };
@@ -950,6 +995,7 @@
                 POLL {lastTs ? lastTs.toLocaleTimeString() : '—'}
                 {err && <span className="stale-warn"> (stale)</span>}
               </span>
+              <KeyField />
             </span>
           </header>
 

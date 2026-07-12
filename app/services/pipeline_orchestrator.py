@@ -287,7 +287,16 @@ class PipelineOrchestrator:
         _market = (task.metadata_ or {}).get("market") or {}
         market_price = _market.get("price_p50")
         market_titles = _market.get("top_titles")  # 2-4: proven-ranking title phrases
-        listing_id = self._stage_create_listing(task_id, product_name, output_data, task_type, is_pod, report, pod_product=pod_product, pdf_page_count=pdf_page_count, market_price=market_price, bundle_note=bundle_note, market_titles=market_titles)
+        # 5-1: if a previous (crashed) run already created a readback-verified
+        # listing for this task, reuse it instead of creating a second one.
+        existing_listing_id = (output_data or {}).get("listing_id")
+        if existing_listing_id:
+            listing_id = str(existing_listing_id)
+            report["stages"]["create_listing"] = {"ok": True, "listing_id": listing_id,
+                                                  "reused": "resumed — listing already existed"}
+            logger.info(f"PipelineOrchestrator: resuming task {task_id} against existing listing {listing_id} (no re-create)")
+        else:
+            listing_id = self._stage_create_listing(task_id, product_name, output_data, task_type, is_pod, report, pod_product=pod_product, pdf_page_count=pdf_page_count, market_price=market_price, bundle_note=bundle_note, market_titles=market_titles)
 
         # 6 — attach images / digital file, then publish; readback-verify both
         if listing_id:
@@ -1482,6 +1491,9 @@ class PipelineOrchestrator:
 
         report["stages"]["create_listing"]["taxonomy_id"] = real_taxonomy_id
         report["stages"]["create_listing"]["when_made"] = real_when_made
+        # 5-1: persist the verified listing_id NOW so a crash before the final
+        # COMPLETED stamp can't make resume create a duplicate listing.
+        self.task_service.record_created_listing(task_id, listing_id)
         return listing_id
 
     def _stage_attach_publish(self, task_id: str, listing_id: str, image_paths: list, design_path: Optional[Path], digital_required: bool, report: dict, digital_files: Optional[list] = None, alt_text_base: str = None):
@@ -1635,6 +1647,27 @@ class PipelineOrchestrator:
                 self._cleanup_unbacked_listing(listing_id, report)
                 self._block_task(task_id, f"attach/publish failed for required digital product: {e}", report, pre_listing=False)
 
+    # 5-4: derived marketing assets (pin.png / video.mp4) can land back in the
+    # catalog on a re-run/resume; picking the FIRST asset could then feed a pin
+    # BACK into itself. Only ever source from a real listing PHOTO of the design.
+    _DERIVED_ASSET_NAMES = ("pin.png", "video.mp4", "set_triptych.png")
+
+    def _mockup_source(self, task_id: str) -> Optional[str]:
+        """The best existing listing PHOTO for this task (shared by the pin and
+        the video). Filters to use_case=='listing' and excludes derived marketing
+        assets so a re-run can't source a pin/video from a previous pin/video."""
+        assets = self.catalog.get_listing_assets(task_id) or []
+        for a in assets:
+            lp = a.local_path
+            if not lp or not Path(lp).exists():
+                continue
+            if getattr(a, "use_case", None) not in (None, "listing"):
+                continue
+            if Path(lp).name in self._DERIVED_ASSET_NAMES:
+                continue
+            return lp
+        return None
+
     def _pin_from_mockup(self, task_id: str) -> Optional[str]:
         """3-3: render a free 2:3 (1000x1500) Pinterest pin from an existing
         listing mockup of the real design. Returns a path, or None if no mockup."""
@@ -1642,8 +1675,7 @@ class PipelineOrchestrator:
             from PIL import Image, ImageOps
             from app.services.image_file_service import ImageFileService
             from io import BytesIO
-            assets = self.catalog.get_listing_assets(task_id)
-            src = next((a.local_path for a in (assets or []) if a.local_path and Path(a.local_path).exists()), None)
+            src = self._mockup_source(task_id)  # 5-4: real listing photo only
             if not src:
                 return None
             img = Image.open(src).convert("RGB")
@@ -1654,13 +1686,6 @@ class PipelineOrchestrator:
         except Exception as e:
             logger.warning(f"PipelineOrchestrator: pin-from-mockup failed for {task_id}: {e}")
             return None
-
-    def _mockup_source(self, task_id: str) -> Optional[str]:
-        """The best existing listing mockup path for this task (shared by the
-        pin and the video), or None."""
-        assets = self.catalog.get_listing_assets(task_id)
-        return next((a.local_path for a in (assets or [])
-                     if a.local_path and Path(a.local_path).exists()), None)
 
     def _stage_listing_video(self, task_id: str, listing_id: str, report: dict):
         """3-4: render a ken-burns MP4 from the verified design and upload it as

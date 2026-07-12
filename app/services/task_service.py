@@ -236,6 +236,28 @@ class TaskService:
         finally:
             db.close()
 
+    def record_created_listing(self, task_id: str, listing_id: str):
+        """5-1: stamp output_data['listing_id'] the moment a readback-verified
+        Etsy listing exists — BEFORE the rest of the pipeline (attach/publish/
+        marketing) runs. A crash between create and the final COMPLETED stamp
+        would otherwise make the resume scan create a SECOND listing; with this
+        stamp, resume finds the existing listing and skips creation."""
+        db = SessionLocal()
+        try:
+            task = db.query(Task).filter(Task.id == task_id).first()
+            if not task:
+                return
+            merged = dict(task.output_data or {})
+            if not merged.get("listing_id"):
+                merged["listing_id"] = str(listing_id)
+                task.output_data = merged
+                db.commit()
+        except Exception as e:
+            db.rollback()
+            logger.warning(f"TaskService: failed to record created listing for {task_id}: {e}")
+        finally:
+            db.close()
+
     def enqueue_new_tasks(self) -> int:
         """P0-9: the TaskQueue is in-memory, so any task still in NEW at crash
         time is stranded on restart. Re-enqueue every NEW task at startup."""

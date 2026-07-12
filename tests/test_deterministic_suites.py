@@ -91,6 +91,7 @@ DETERMINISTIC = [
     "test_step105_seasonality_backfill.py",
     "test_step105_shop_cleanup.py",
     "test_step105_concept_path.py",
+    "test_step105_robustness.py",
 ]
 
 
