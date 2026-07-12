@@ -82,10 +82,15 @@ class PODPipelineService:
         product_type: str = "digital_download",
         aspect_ratio: str = "1:1",
         resolution: str = "2K",
+        filename: str = "design.png",
     ) -> dict:
         """
         High-level entry point: generate the design and return a product record
         that downstream steps (73, 81) can use.
+
+        `filename` (105 1-3) lets a caller store the design under a distinct
+        name — the wall-art set generates 3 pieces for ONE task and must not have
+        each overwrite `design.png`.
 
         Returns:
             Dict with task_id, product_type, design_path (str or None),
@@ -98,6 +103,7 @@ class PODPipelineService:
             product_type=product_type,
             aspect_ratio=aspect_ratio,
             resolution=resolution,
+            filename=filename,
         )
         return {
             "task_id": task_id,

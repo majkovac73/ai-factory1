@@ -255,6 +255,9 @@ class Settings(BaseSettings):
     # here if QA accuracy needs improving.
     CONTENT_QA_MODEL: str = "openai/gpt-4o-mini"
     CONTENT_QA_MAX_ATTEMPTS: int = 2  # regenerate-and-recheck attempts before blocking
+    # 1-5: max fraction of a coloring page that may be colored/grey-shaded before
+    # it's rejected as "pre-colored" and regenerated (clean line art is ~0%).
+    COLORING_PAGE_MAX_COLOR_FRACTION: float = 0.03
 
     # Product-viability critic (step 102): an independent LLM judgment step that
     # scores a schema-valid concept 1-10 on whether a real stranger would

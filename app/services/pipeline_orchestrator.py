@@ -55,6 +55,7 @@ Stage order:
 """
 import asyncio
 import logging
+import os  # 1-3: was missing; any bare os.* use previously raised NameError
 from pathlib import Path
 from typing import Optional
 
@@ -136,6 +137,11 @@ class PipelineOrchestrator:
 
         # 2 — delivery asset (single image, multi-page PDF, or 3-piece set)
         set_result = None
+        # 1-4: defined up front so the content-QA regen re-uses the SAME text-led
+        # brief + overlay text (a text-led product regenerated with the plain
+        # brief loses its words or bakes garbled model text in).
+        display_text = None
+        design_brief = visual_brief
         if is_pdf:
             design_path = self._stage_pdf_design(task, task_id, product_name, visual_brief, output_data, report)
         elif is_set:
@@ -150,7 +156,6 @@ class PipelineOrchestrator:
             # B-4: for text-led concepts, render the words deterministically —
             # generate a TEXT-FREE background, then overlay the exact text (Pillow).
             display_text = (task.metadata_ or {}).get("display_text") if (task.metadata_ or {}).get("text_led") else None
-            design_brief = visual_brief
             if display_text:
                 design_brief = (
                     f"{visual_brief}. IMPORTANT: create a purely DECORATIVE background with NO text, "
@@ -166,7 +171,9 @@ class PipelineOrchestrator:
         # PDFs are content-QA'd per-page inside PDFGenerationService during
         # generation, so only single-image formats are reviewed here.
         if design_path and not is_pdf and not is_set:
-            design_path = self._stage_content_quality(task_id, design_path, product_name, visual_brief, task_type, report)
+            design_path = self._stage_content_quality(
+                task_id, design_path, product_name, visual_brief, task_type, report,
+                design_brief=design_brief, display_text=display_text)
             if report.get("blocked"):
                 return report
 
@@ -377,13 +384,19 @@ class PipelineOrchestrator:
 
     # ── Content-quality gate (step 96) ────────────────────────────────────────
 
-    def _stage_content_quality(self, task_id, design_path, product_name, visual_brief, task_type, report):
+    def _stage_content_quality(self, task_id, design_path, product_name, visual_brief, task_type, report,
+                               design_brief=None, display_text=None):
         """
         Vision-model review of the delivered single-image asset for legible,
         coherent, correct, sellable content. On failure, REGENERATE the
         delivery asset and re-review up to CONTENT_QA_MAX_ATTEMPTS times, then
         block the task (same as every other gate failure). Returns the
         content-verified design path, or None if blocked.
+
+        1-4: `design_brief` (the possibly text-free-background brief) and
+        `display_text` are threaded so the regeneration re-applies B-4 exactly
+        like the initial generation — a text-led product must keep its overlaid
+        words on every retry, not lose them or bake in garbled model text.
         """
         from config import settings
         from app.services.content_quality_service import ContentQualityService
@@ -393,7 +406,33 @@ class PipelineOrchestrator:
         current = design_path
         last_issues = ["content quality check did not pass"]
 
+        max_color = float(getattr(settings, "COLORING_PAGE_MAX_COLOR_FRACTION", 0.03))
+
         for attempt in range(1, attempts + 1):
+            # 1-5: deterministic pre-check for coloring pages — a pre-colored /
+            # grey-shaded page is trivially detectable and must not rely on the
+            # vision model noticing. If it's colored, fail this attempt (regen).
+            if task_type == "coloring_page":
+                try:
+                    from app.core.coloring_page import color_fraction
+                    frac = color_fraction(str(current))
+                    if frac > max_color:
+                        result = None
+                        last_issues = [f"page is pre-colored — {frac*100:.1f}% of pixels are colored/shaded "
+                                       f"(a coloring page must be clean black line art on white, <{max_color*100:.0f}%)"]
+                        logger.warning(f"PipelineOrchestrator: coloring-page whiteness check failed for {task_id} "
+                                       f"(attempt {attempt}): {frac*100:.1f}% colored")
+                        report["stages"]["coloring_page_whiteness"] = {"colored_fraction": round(frac, 4), "attempt": attempt}
+                        if attempt < attempts:
+                            current = self._stage_pod_design(
+                                task_id, product_name, design_brief or visual_brief, task_type, report,
+                                display_text=display_text)
+                            if not current:
+                                break
+                        continue
+                except Exception as e:
+                    logger.warning(f"PipelineOrchestrator: coloring-page whiteness check raised for {task_id}: {e}")
+
             try:
                 result = svc.review_asset_file(current, product_name, task_type, visual_brief)
             except Exception as e:
@@ -414,7 +453,11 @@ class PipelineOrchestrator:
 
             if attempt < attempts:
                 # Regenerate the delivery asset (overwrites design.png) and re-review.
-                current = self._stage_pod_design(task_id, product_name, visual_brief, task_type, report)
+                # 1-4: reuse the SAME brief the initial call used (text-free
+                # background for text-led products) and re-apply the text overlay.
+                current = self._stage_pod_design(
+                    task_id, product_name, design_brief or visual_brief, task_type, report,
+                    display_text=display_text)
                 if not current:
                     break
 
@@ -1042,6 +1085,9 @@ class PipelineOrchestrator:
         pieces = []
         try:
             for i, brief in enumerate(briefs, start=1):
+                # 1-3: generate each piece straight to a DISTINCT filename so the
+                # three pieces never overwrite each other (they share one task_id
+                # and would all land on design.png otherwise). No rename needed.
                 res = PODPipelineService().build_product_record(
                     task_id=task_id,
                     product_name=f"{product_name} (piece {i} of {SET_SIZE})",
@@ -1049,21 +1095,19 @@ class PipelineOrchestrator:
                     product_type="digital_download",
                     aspect_ratio="1:1",
                     resolution="2K",
+                    filename=f"set_piece_{i}.png",
                 )
-                # note: PODDesignAgent writes filename=design.png by default; give
-                # each piece a distinct name so they don't clobber each other.
                 piece_str = res.get("design_path")
                 if not piece_str:
                     report["stages"]["wall_art_set"] = {"ok": False, "error": f"piece {i} did not generate"}
                     return None
                 piece_path = Path(piece_str)
-                distinct = piece_path.with_name(f"set_piece_{i}.png")
-                if distinct != piece_path:
-                    try:
-                        os.replace(str(piece_path), str(distinct))
-                        piece_path = distinct
-                    except Exception:
-                        pass
+                # sanity: each piece must be its own file (guards against any
+                # future regression that silently reuses one path for all three).
+                if piece_path in pieces:
+                    self._block_task(task_id, f"wall-art set piece {i} reused an earlier piece's path {piece_path} — refusing to ship a duplicate set", report, pre_listing=True)
+                    report["stages"]["wall_art_set"] = {"ok": False, "error": f"piece {i} path collision"}
+                    return None
                 # content-QA each piece (block the whole set if any is garbage)
                 try:
                     result = cq.review_asset_file(str(piece_path), product_name, "single_print", brief)
