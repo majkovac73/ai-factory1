@@ -87,6 +87,7 @@ DETERMINISTIC = [
     "test_step104_wall_art_set.py",
     "test_step104_pod_variants.py",
     "test_step105_pipeline_correctness.py",
+    "test_step105_product_score.py",
 ]
 
 

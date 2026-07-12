@@ -269,6 +269,14 @@ class Settings(BaseSettings):
     # so genuinely sellable products pass and generic/low-effort ones fail.
     VIABILITY_CRITIC_MIN_SCORE: int = 6
 
+    # STEP 105 1-1: the composite 0-100 product-quality gate (ProductScoreService).
+    # PRODUCT_MIN_SCORE is the hard bar; PRODUCT_SCORE_ENFORCE=false runs it in
+    # SHADOW MODE (compute + record concept_scored events while the old 6/10
+    # critic still decides). Flip to true after ~5 days of event data confirm the
+    # distribution is sane. A 95 bar means expect 0-3 products/day, by design.
+    PRODUCT_MIN_SCORE: int = 95
+    PRODUCT_SCORE_ENFORCE: bool = False
+
     # STEP 103 C-1: extra trademark/brand terms to block beyond the built-in
     # list, as a JSON array env, e.g. TRADEMARK_BLOCKLIST_EXTRA='["acme","foo"]'.
     # Screened against concept name/description, tags, and trend queries.

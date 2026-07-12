@@ -65,7 +65,8 @@ _FORMAT_LIST = sorted(PRODUCT_FORMATS.keys())
 
 class TrendResearchAgent(BaseAgent):
 
-    MAX_CONCEPT_ATTEMPTS = 3
+    # 1-1: a 95-point bar needs more shots than the old 6/10 bar (was 3).
+    MAX_CONCEPT_ATTEMPTS = 5
 
     def __init__(self, provider=None, model: str = None):
         # B-5: concept generation uses CONCEPT_MODEL when configured.
@@ -74,10 +75,15 @@ class TrendResearchAgent(BaseAgent):
         self._research = ResearchAgent(provider, model)
         self._intelligence = IntelligenceAgent(provider, model)
         self._critic = ProductViabilityCriticAgent(provider, model)
+        # 1-1: the composite 0-100 score gate.
+        from app.services.product_score_service import ProductScoreService
+        self._score_service = ProductScoreService()
         self.sanitizer = JSONSanitizer()
         # A-3: recent shop products, loaded per run() for dedup. Empty by default
         # so direct _propose_product() calls (tests) don't dedup against the DB.
         self._recent_products: list = []
+        # 1-1: the cycle's real trend data (for the deterministic demand subscore).
+        self._trend_data: dict = {}
         # A-1: learning-loop insight block injected into the concept prompt.
         self._insights_block: str = ""
 
@@ -91,6 +97,7 @@ class TrendResearchAgent(BaseAgent):
 
         try:
             trend_data = TrendDataService().get_real_trend_signals()
+            self._trend_data = trend_data or {}  # 1-1: for the demand subscore
         except TrendDataFetchError as e:
             logger.error(
                 f"TrendResearchAgent: real trend data fetch failed, aborting "
@@ -201,9 +208,34 @@ class TrendResearchAgent(BaseAgent):
                 # saturation signal and the listing stage can ground price/SEO.
                 self._attach_market(data)
 
+                # 1-1: composite 0-100 quality score (deterministic evidence +
+                # two independent LLM judges). Always computed + recorded as a
+                # concept_scored event (the calibration dataset).
+                recent_titles = [t for t, _ in (self._recent_products or [])]
+                score = self._score_service.score(
+                    data, trend_data=self._trend_data, recent_titles=recent_titles)
+                enforce = getattr(settings, "PRODUCT_SCORE_ENFORCE", False)
+                _j = score.get("judges") or {}
+                _js = f"{(_j.get('concept_model') or {}).get('score', '?')}/{(_j.get('default_model') or {}).get('score', '?')}" if _j else "gated"
+                logger.info(
+                    f"TrendResearchAgent: product score={score['total']}/100 "
+                    f"passed={score['passed']} (enforce={enforce}) judges={_js} "
+                    f"for '{data.get('product_name')}'"
+                )
+
+                if enforce:
+                    # 1-1D: the 95 gate decides.
+                    if score["passed"]:
+                        return data
+                    feedback = score["retry_feedback"]
+                    logger.warning(f"TrendResearchAgent: attempt {attempt} below the {score['min_score']} bar: {feedback}")
+                    continue
+
+                # Shadow mode (1-1E): the old 6/10 critic still decides while we
+                # gather concept_scored data.
                 critique = self._critic.critique(data)
                 logger.info(
-                    f"TrendResearchAgent: viability critique score={critique['score']} "
+                    f"TrendResearchAgent: [shadow] viability critique score={critique['score']} "
                     f"passed={critique['passed']} for '{data.get('product_name')}'"
                 )
                 if critique["passed"]:

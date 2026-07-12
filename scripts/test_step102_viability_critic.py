@@ -95,7 +95,12 @@ critique_results = [
     {"passed": True, "score": 8, "reason": "Solid recurring-task planner."},
 ]
 
+# STEP105 1-1: shadow mode (default) — the score service is computed but the old
+# critic still decides; stub score() so it doesn't make real judge LLM calls.
+_shadow_score = {"total": 70, "passed": False, "min_score": 95, "retry_feedback": "shadow"}
 with patch.object(agent, "_generate", side_effect=fake_generate), \
+     patch.object(agent, "_attach_market", lambda d: None), \
+     patch.object(agent._score_service, "score", return_value=_shadow_score), \
      patch.object(agent._critic, "critique", side_effect=critique_results):
     result = agent._propose_product("houseplant care insight", "low")
 
@@ -110,6 +115,8 @@ agent2 = make_agent()
 attempts = []
 
 with patch.object(agent2, "_generate", side_effect=lambda p: attempts.append(p) or valid_concept_json), \
+     patch.object(agent2, "_attach_market", lambda d: None), \
+     patch.object(agent2._score_service, "score", return_value=_shadow_score), \
      patch.object(agent2._critic, "critique",
                   return_value={"passed": False, "score": 1, "reason": "Not viable."}):
     result2 = agent2._propose_product("weak insight", "low")
