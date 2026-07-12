@@ -276,6 +276,9 @@ class Settings(BaseSettings):
     # distribution is sane. A 95 bar means expect 0-3 products/day, by design.
     PRODUCT_MIN_SCORE: int = 95
     PRODUCT_SCORE_ENFORCE: bool = False
+    # 1-2: listings scoring <= this in an audit report are deactivated by the
+    # shop-cleanup script / monthly dry-run tick (the critic's "erodes trust" band).
+    SHOP_CLEANUP_MAX_SCORE: int = 3
 
     # STEP 103 C-1: extra trademark/brand terms to block beyond the built-in
     # list, as a JSON array env, e.g. TRADEMARK_BLOCKLIST_EXTRA='["acme","foo"]'.

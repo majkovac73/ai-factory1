@@ -649,6 +649,17 @@ class EtsyReceiptWorker:
         if now - state.get("last_prune_report_at", 0) >= 30 * 24 * 3600:
             from app.services.listing_prune_service import ListingPruneService
             rep = ListingPruneService().run(apply=False)  # dry-run report → Discord
+            # 1-2: monthly DRY-RUN low-score cleanup against the newest committed
+            # audit report — alerts Maj with the deactivation candidates (never
+            # auto-applies; Maj runs cleanup_low_score_listings.py --apply).
+            try:
+                from app.services.low_score_cleanup_service import LowScoreCleanupService
+                lc = LowScoreCleanupService().run(apply=False)
+                if lc.get("ok"):
+                    logger.info(f"EtsyReceiptWorker: monthly low-score cleanup dry-run — "
+                                f"deactivate={len(lc.get('deactivate', []))}, seo_retry={len(lc.get('seo_retry', []))}")
+            except Exception as e:
+                logger.warning(f"EtsyReceiptWorker: low-score cleanup dry-run errored — {e}")
             state["last_prune_report_at"] = now
             self._save_state(state)
             logger.info(f"EtsyReceiptWorker: monthly prune report — candidates={len(rep.get('candidates', []))}")
