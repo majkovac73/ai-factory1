@@ -117,14 +117,48 @@ class RevenueService:
         )
         return fee
 
-    def get_total_fees(self, task_id: Optional[str] = None) -> dict:
-        """4-1: total estimated Etsy fees (transaction + payment processing)."""
-        events = self.analytics_service.get_events(
+    def record_renewal_fee_estimate(self, active_listing_count: int) -> float:
+        """105 4-1: Etsy charges $0.20 to auto-renew each active listing every ~4
+        months — invisible in the per-sale fee estimate. Called from the monthly
+        tick, this records the amortized monthly renewal cost
+        (active x $0.20 / 4) as a `fee_estimate` event (basis 'renewal') so the
+        P&L's net includes it. 28 listings ~= $17/yr today, growing with the
+        catalog. Idempotent by cadence: the caller runs it once per ~30 days."""
+        from config import settings
+        if not active_listing_count or active_listing_count <= 0:
+            return 0.0
+        per = float(getattr(settings, "ETSY_LISTING_RENEWAL_FEE", 0.20))
+        months = float(getattr(settings, "ETSY_LISTING_RENEWAL_MONTHS", 4))
+        fee = round(active_listing_count * per / months, 4)
+        self.analytics_service.record_event(
             event_type="fee_estimate",
-            entity_type="task",
-            entity_id=task_id,
-            limit=10000,
+            entity_type="shop",
+            entity_id="renewals",
+            value=fee,
+            payload={
+                "basis": "renewal",
+                "active_listings": int(active_listing_count),
+                "per_listing": per,
+                "renewal_months": months,
+                "detail": f"{active_listing_count} active x ${per}/{months:.0f}mo amortized monthly",
+            },
         )
+        return fee
+
+    def get_total_fees(self, task_id: Optional[str] = None) -> dict:
+        """4-1: total estimated Etsy fees. Per-sale fees are entity_type='task';
+        renewal fees (105 4-1) are entity_type='shop'. For the shop-wide P&L
+        (task_id=None) sum ALL fee_estimate events regardless of entity_type;
+        for a single task, only that task's per-sale fees."""
+        if task_id is not None:
+            events = self.analytics_service.get_events(
+                event_type="fee_estimate", entity_type="task",
+                entity_id=task_id, limit=10000,
+            )
+        else:
+            events = self.analytics_service.get_events(
+                event_type="fee_estimate", limit=10000,
+            )
         return {
             "total_fees": round(sum(e.value or 0 for e in events), 4),
             "fee_count": len(events),

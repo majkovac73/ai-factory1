@@ -178,16 +178,17 @@ class PipelineOrchestrator:
                 return report
 
         # 2.6 — For DIGITAL single-image products, build the listing photos FROM
-        # the now-content-verified delivery design as WATERMARKED previews. Every
-        # listing photo honestly depicts the exact delivered design, but is
-        # unusable as the product (watermarked), so buyers must purchase to get
-        # the clean file. CRUCIALLY the raw deliverable is NOT added as a public
-        # listing photo — it is uploaded only as the buyer-gated digital FILE in
-        # _stage_attach_publish (digital_file_path=design_path). Uploading the
-        # clean file as a listing photo would let anyone download the product for
-        # free from the preview.
+        # the now-content-verified delivery design as PERSPECTIVE-composited scene
+        # previews (framed on a wall / on a desk). Each honestly depicts the exact
+        # delivered design but is foreshortened so a screenshot isn't a clean flat
+        # copy; formats where the preview IS the product (3-2 WATERMARK_FORMATS)
+        # also get a tiled watermark baked in. CRUCIALLY the raw deliverable is
+        # NOT added as a public listing photo — it is uploaded only as the buyer-
+        # gated digital FILE in _stage_attach_publish (digital_file_path=
+        # design_path). Uploading the clean file as a listing photo would let
+        # anyone download the product for free from the preview.
         if design_path and derive_listing_from_delivery and not is_set:
-            image_paths = self._build_listing_mockups(task_id, design_path, report)
+            image_paths = self._build_listing_mockups(task_id, design_path, report, product_format=task_type)
         elif is_set and set_result:
             # 7-1: the set already built its gallery-wall mockups.
             image_paths = set_result.get("mockups") or []
@@ -753,7 +754,7 @@ class PipelineOrchestrator:
         briefs = [str(s).strip() for s in sections if str(s).strip()]
         return "; ".join(briefs[:8])
 
-    def _build_listing_mockups(self, task_id: str, delivery_path, report: dict) -> list:
+    def _build_listing_mockups(self, task_id: str, delivery_path, report: dict, product_format: str = None) -> list:
         """Build attractive listing/ad PREVIEW photos from the real delivery design
         (digital single-image formats): the actual delivered design composited into
         realistic scenes (a framed print on a wall, a print in a desk flat-lay) via
@@ -789,18 +790,19 @@ class PipelineOrchestrator:
                 report["stages"]["listing_images"] = {"ok": False, "error": "no extractable pdf pages", "source": "delivery_mockup"}
                 return []
             builders = [
-                ("hero.png", "pdf_page", lambda: mockups.build_mockup_bytes(str(page_pngs[0]), role="flatlay", size=1024)),
-                ("lifestyle.png", "pdf_fan", lambda: mockups.build_flatlay_bytes([str(p) for p in page_pngs], size=1024)),
+                ("hero.png", "pdf_page", lambda: mockups.build_mockup_bytes(str(page_pngs[0]), role="flatlay", size=1024, product_format=product_format)),
+                ("lifestyle.png", "pdf_fan", lambda: mockups.build_flatlay_bytes([str(p) for p in page_pngs], size=1024, product_format=product_format)),
             ]
         else:
             # A-8: more listing photos convert better; all are free PIL composites
             # of the already-verified design, and the P3-6 scene cache gives each
-            # a different background for variety.
+            # a different background for variety. 3-2: watermarked for formats
+            # where the preview IS the product (see WATERMARK_FORMATS).
             builders = [
-                ("hero.png", "framed", lambda: mockups.build_mockup_bytes(str(delivery_path), role="framed", size=1024)),
-                ("lifestyle.png", "flatlay", lambda: mockups.build_mockup_bytes(str(delivery_path), role="flatlay", size=1024)),
-                ("styled.png", "framed", lambda: mockups.build_mockup_bytes(str(delivery_path), role="framed", size=1024)),
-                ("desk.png", "flatlay", lambda: mockups.build_mockup_bytes(str(delivery_path), role="flatlay", size=1024)),
+                ("hero.png", "framed", lambda: mockups.build_mockup_bytes(str(delivery_path), role="framed", size=1024, product_format=product_format)),
+                ("lifestyle.png", "flatlay", lambda: mockups.build_mockup_bytes(str(delivery_path), role="flatlay", size=1024, product_format=product_format)),
+                ("styled.png", "framed", lambda: mockups.build_mockup_bytes(str(delivery_path), role="framed", size=1024, product_format=product_format)),
+                ("desk.png", "flatlay", lambda: mockups.build_mockup_bytes(str(delivery_path), role="flatlay", size=1024, product_format=product_format)),
             ]
 
         for fname, role, build in builders:

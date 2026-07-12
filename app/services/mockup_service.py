@@ -47,9 +47,17 @@ _MAX_CACHED_SCENES = 5
 
 
 class MockupService:
-    """Composites the real delivered design into an attractive, watermarked
-    listing/ad image. Text-to-image is used ONLY for the empty background scene;
-    the product itself is the real design, composited with PIL."""
+    """Composites the real delivered design into an attractive listing/ad image.
+    Text-to-image is used ONLY for the empty background scene; the product itself
+    is the real design, composited with PIL.
+
+    3-2: the perspective foreshortening is the FIRST line of copy-protection (a
+    screenshot isn't a clean flat file), but for formats where the preview IS
+    essentially the product (coloring pages, phone wallpapers) it's weak — a
+    crop/un-warp yields a usable file. For those formats (settings.WATERMARK_FORMATS)
+    a tiled semi-transparent shop-name watermark is baked into the DESIGN LAYER
+    before compositing, so it follows the perspective and can't be trivially
+    cropped out. Delivery files stay clean — only the public preview is marked."""
 
     # Empty-scene prompts. They deliberately demand blank negative space so the
     # composited framed print / print sits cleanly, with no competing artwork.
@@ -83,13 +91,15 @@ class MockupService:
         design_path,
         role: str = "framed",
         size: int = 1024,
+        product_format: str = None,
     ) -> bytes:
         """Return PNG bytes of a `size`x`size` mockup of the real design in a
         `role` scene ('framed' or 'flatlay'). The design is composited at a
-        PERSPECTIVE ANGLE (foreshortened) so the preview shows what the buyer
-        gets but a screenshot isn't a clean, flat, usable copy of the product —
-        no watermark needed."""
+        PERSPECTIVE ANGLE (foreshortened); for `product_format` in
+        settings.WATERMARK_FORMATS a tiled watermark is also baked into the
+        design layer (3-2)."""
         design = Image.open(design_path).convert("RGB")
+        design = self._maybe_watermark(design, product_format)
 
         scene = self._scene(role, size)
 
@@ -118,7 +128,7 @@ class MockupService:
         out.save(buf, format="PNG")
         return buf.getvalue()
 
-    def build_flatlay_bytes(self, page_paths, size: int = 1024) -> bytes:
+    def build_flatlay_bytes(self, page_paths, size: int = 1024, product_format: str = None) -> bytes:
         """Return PNG bytes of several REAL pages (e.g. a multi-page PDF planner)
         fanned out on a desk scene, each foreshortened + rotated so the preview
         shows the actual pages the buyer gets but isn't a usable flat copy. A
@@ -127,7 +137,7 @@ class MockupService:
         if not pages:
             raise ValueError("no pages to compose a flat-lay")
         if len(pages) == 1:
-            return self.build_mockup_bytes(pages[0], role="flatlay", size=size)
+            return self.build_mockup_bytes(pages[0], role="flatlay", size=size, product_format=product_format)
 
         base = self._scene("flatlay", size).convert("RGBA")
         angles = [-9, 6, -3, 8]
@@ -136,6 +146,7 @@ class MockupService:
         target_w = int(size * 0.50)
         for i, pp in enumerate(pages):
             design = Image.open(pp).convert("RGB")
+            design = self._maybe_watermark(design, product_format)
             card = self._flat_print(design, rotate=0)            # paper + shadow, no baked tilt
             card = self._perspective(card, squeeze=0.12, axis="y")
             scale = target_w / card.width
@@ -148,6 +159,45 @@ class MockupService:
         buf = BytesIO()
         out.save(buf, format="PNG")
         return buf.getvalue()
+
+    # ── Watermark (3-2) ────────────────────────────────────────────────────────
+    def _maybe_watermark(self, design: Image.Image, product_format: str) -> Image.Image:
+        """Bake a tiled, diagonal, semi-transparent shop-name watermark into the
+        design IF this format is in settings.WATERMARK_FORMATS (formats where the
+        preview is basically the product — coloring pages, phone wallpapers).
+        Applied to the design layer so it foreshortens with the perspective and
+        can't be cropped off. Delivery files are never touched."""
+        fmts = getattr(settings, "WATERMARK_FORMATS", []) or []
+        if not product_format or product_format not in fmts:
+            return design
+        try:
+            text = (getattr(settings, "WATERMARK_TEXT", None) or getattr(settings, "SHOP_NAME", None) or "Products For All")
+            w, h = design.size
+            layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(layer)
+            # scale the font to the image; PIL default font is fine (no font files in prod)
+            try:
+                from PIL import ImageFont
+                font = ImageFont.truetype("arial.ttf", max(16, w // 22))
+            except Exception:
+                from PIL import ImageFont
+                font = ImageFont.load_default()
+            try:
+                tw = draw.textlength(text, font=font)
+            except Exception:
+                tw = len(text) * 10
+            step_x = max(120, int(tw) + w // 8)
+            step_y = max(90, h // 7)
+            alpha = int(getattr(settings, "WATERMARK_ALPHA", 55))
+            for yy in range(-step_y, h + step_y, step_y):
+                for xx in range(-step_x, w + step_x, step_x):
+                    draw.text((xx, yy), text, fill=(255, 255, 255, alpha), font=font)
+                    draw.text((xx + 1, yy + 1), text, fill=(0, 0, 0, max(20, alpha - 25)), font=font)
+            layer = layer.rotate(30, expand=False)
+            return Image.alpha_composite(design.convert("RGBA"), layer).convert("RGB")
+        except Exception as e:
+            logger.warning(f"MockupService: watermark failed (proceeding unwatermarked): {e}")
+            return design
 
     # ── Perspective tilt (pure-Python, no numpy — not available in prod) ───────
 

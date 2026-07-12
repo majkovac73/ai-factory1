@@ -86,6 +86,9 @@ class Settings(BaseSettings):
     ETSY_TRANSACTION_FEE_PCT: float = 0.065
     ETSY_PAYMENT_FEE_PCT: float = 0.03
     ETSY_PAYMENT_FEE_FLAT: float = 0.25
+    # 105 4-1: $0.20 auto-renew per active listing every ~4 months (amortized).
+    ETSY_LISTING_RENEWAL_FEE: float = 0.20
+    ETSY_LISTING_RENEWAL_MONTHS: float = 4
 
     POD_TARGET_PROFIT_USD: float = 6.00
     POD_SHIPPING_ESTIMATE_USD: float = 5.00
@@ -279,6 +282,12 @@ class Settings(BaseSettings):
     # 1-2: listings scoring <= this in an audit report are deactivated by the
     # shop-cleanup script / monthly dry-run tick (the critic's "erodes trust" band).
     SHOP_CLEANUP_MAX_SCORE: int = 3
+    # 3-2: formats where the listing PREVIEW is basically the product get a tiled
+    # watermark baked into the mockup's design layer (delivery files stay clean).
+    WATERMARK_FORMATS: list = ["coloring_page", "phone_wallpaper"]
+    WATERMARK_TEXT: str | None = None   # falls back to SHOP_NAME, then a default
+    WATERMARK_ALPHA: int = 55           # 0-255 opacity of the tiled text
+    SHOP_NAME: str | None = None
 
     # STEP 103 C-1: extra trademark/brand terms to block beyond the built-in
     # list, as a JSON array env, e.g. TRADEMARK_BLOCKLIST_EXTRA='["acme","foo"]'.

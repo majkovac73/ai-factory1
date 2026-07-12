@@ -121,12 +121,32 @@ class AutonomyService:
         ceiling = settings.MAX_DAILY_SPEND_USD * mult
         spent = self.spend_today()
         if spent >= ceiling:
-            self._alert_cap_hit("spend-circuit-breaker", round(spent, 4), round(ceiling, 4))
+            # 4-2: a retry loop past the ceiling would fire one Discord alert PER
+            # refused call. Alert at most once per day (marker file), then just
+            # raise silently on subsequent hits.
+            if self._breaker_alert_once_per_day():
+                self._alert_cap_hit("spend-circuit-breaker", round(spent, 4), round(ceiling, 4))
             raise SpendCapExceeded(
                 f"Daily spend ${spent:.2f} has exceeded the circuit-breaker ceiling "
                 f"${ceiling:.2f} (MAX_DAILY_SPEND_USD ${settings.MAX_DAILY_SPEND_USD:.2f} "
                 f"x {mult}). Refusing further paid API calls today."
             )
+
+    def _breaker_alert_once_per_day(self) -> bool:
+        """4-2: True at most once per UTC day (marker file), so the circuit-breaker
+        alert can't spam Discord on every refused call in a retry loop."""
+        import time as _t
+        try:
+            marker = self._state_dir / "breaker_alert.json"
+            last = 0
+            if marker.exists():
+                last = json.loads(marker.read_text(encoding="utf-8")).get("at", 0)
+            if _t.time() - last < 86400:
+                return False
+            marker.write_text(json.dumps({"at": _t.time()}), encoding="utf-8")
+            return True
+        except Exception:
+            return True  # if the marker can't be read/written, err toward alerting
 
     # ── Winner-variant cap (A-1) ────────────────────────────────────────────────
 

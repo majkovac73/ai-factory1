@@ -676,6 +676,16 @@ class EtsyReceiptWorker:
         if now - state.get("last_prune_report_at", 0) >= 30 * 24 * 3600:
             from app.services.listing_prune_service import ListingPruneService
             rep = ListingPruneService().run(apply=False)  # dry-run report → Discord
+            # 105 4-1: record the amortized monthly renewal-fee estimate so the
+            # P&L's net reflects the $0.20/listing/4mo auto-renew cost.
+            try:
+                active = int(rep.get("active", 0) or 0)
+                if active:
+                    from app.services.revenue_service import RevenueService
+                    rf = RevenueService().record_renewal_fee_estimate(active)
+                    logger.info(f"EtsyReceiptWorker: monthly renewal-fee estimate ${rf:.2f} ({active} active)")
+            except Exception as e:
+                logger.warning(f"EtsyReceiptWorker: renewal-fee estimate errored — {e}")
             # 1-2: monthly DRY-RUN low-score cleanup against the newest committed
             # audit report — alerts Maj with the deactivation candidates (never
             # auto-applies; Maj runs cleanup_low_score_listings.py --apply).
