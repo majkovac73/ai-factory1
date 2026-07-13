@@ -35,6 +35,35 @@ def is_connected() -> bool:
         db.close()
 
 
+PINTEREST_API_BASE = "https://api.pinterest.com/v5"
+
+
+async def list_boards() -> list:
+    """List the connected account's boards (id + name + privacy) so an operator
+    can copy the board id into PINTEREST_BOARD_ID. Uses the stored OAuth token
+    (needs the boards:read scope). Returns [] if not connected."""
+    token = await get_valid_access_token()
+    boards, bookmark = [], None
+    async with httpx.AsyncClient(timeout=30) as client:
+        while True:
+            params = {"page_size": 100}
+            if bookmark:
+                params["bookmark"] = bookmark
+            r = await client.get(
+                f"{PINTEREST_API_BASE}/boards",
+                headers={"Authorization": f"Bearer {token}"},
+                params=params,
+            )
+            r.raise_for_status()
+            data = r.json()
+            for b in data.get("items", []) or []:
+                boards.append({"id": b.get("id"), "name": b.get("name"), "privacy": b.get("privacy")})
+            bookmark = data.get("bookmark")
+            if not bookmark:
+                break
+    return boards
+
+
 def disconnect() -> dict:
     """Disconnect the Pinterest account and delete ALL Pinterest-derived data
     from our systems, immediately. This backs the privacy-policy promise (see

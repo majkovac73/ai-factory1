@@ -4,6 +4,7 @@ from app.services.pinterest_oauth import (
     build_authorization_url,
     exchange_code_for_token,
     disconnect as pinterest_disconnect,
+    list_boards as pinterest_list_boards,
 )
 
 router = APIRouter()
@@ -13,6 +14,18 @@ router = APIRouter()
 def pinterest_oauth_login():
     url = build_authorization_url()
     return {"authorization_url": url}
+
+
+@router.get("/boards")
+async def pinterest_boards():
+    """List the connected account's boards + ids — copy the id you want into the
+    PINTEREST_BOARD_ID env var. Requires an OAuth token (connect via
+    /pinterest/oauth/login first)."""
+    try:
+        boards = await pinterest_list_boards()
+        return {"connected": True, "count": len(boards), "boards": boards}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not list boards (is Pinterest connected?): {e}")
 
 
 @router.get("/oauth/callback")

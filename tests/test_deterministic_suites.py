@@ -101,6 +101,7 @@ DETERMINISTIC = [
     "test_step106_money_growth.py",
     "test_step106_nits.py",
     "test_pinterest_public_site.py",
+    "test_pinterest_backfill.py",
 ]
 
 
