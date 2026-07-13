@@ -37,6 +37,26 @@ async def pinterest_oauth_callback(code: str, state: str):
         raise HTTPException(status_code=400, detail=f"OAuth exchange failed: {e}")
 
 
+@router.post("/set-token")
+def pinterest_set_token(body: dict):
+    """Store a manually-generated Pinterest access token (from the app dashboard's
+    "generate token" — an alternative to the full OAuth flow). The token MUST be a
+    PRODUCTION token (not sandbox) and MUST include the boards:read, boards:write,
+    pins:read, pins:write scopes, or pin creation will 401. Optional refresh_token
+    + expires_in; without a refresh token it simply stops working when it expires
+    (re-paste a new one). Mutating -> protected by FACTORY_API_KEY."""
+    from app.services.pinterest_oauth import save_token
+    access_token = (body or {}).get("access_token")
+    if not access_token:
+        raise HTTPException(status_code=400, detail="access_token is required")
+    save_token({
+        "access_token": access_token,
+        "refresh_token": (body or {}).get("refresh_token", ""),
+        "expires_in": int((body or {}).get("expires_in", 30 * 24 * 3600)),  # default 30d
+    })
+    return {"status": "token stored", "has_refresh_token": bool((body or {}).get("refresh_token"))}
+
+
 @router.post("/disconnect")
 def pinterest_disconnect_route():
     """Disconnect Pinterest and permanently delete all Pinterest-derived data

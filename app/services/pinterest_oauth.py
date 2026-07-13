@@ -87,7 +87,14 @@ def disconnect() -> dict:
         db.close()
 
 
-def build_authorization_url(scopes: str = "boards:read,pins:read,pins:write") -> str:
+def build_authorization_url(
+    scopes: str = "boards:read,boards:write,pins:read,pins:write,user_accounts:read",
+) -> str:
+    # NOTE: creating a Pin (POST /v5/pins) requires boards:write — Pinterest treats
+    # adding a pin as writing to a board. The original scope set omitted it, so
+    # tokens could read boards but every pin-create returned 401
+    # "Missing: ['boards:write']". user_accounts:read is included for account
+    # reads / diagnostics. After changing scopes you MUST re-consent (reconnect).
     state = secrets.token_urlsafe(16)
     _pending_states.add(state)
 
