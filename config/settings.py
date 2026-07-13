@@ -303,6 +303,8 @@ class Settings(BaseSettings):
     # were metered, text never was). Strong models (sonnet/gpt-4o/opus) cost more.
     TEXT_LLM_COST_USD: float = 0.002
     TEXT_LLM_COST_USD_STRONG: float = 0.01
+    # 106 5-1: cap the prompt/output persisted per LLM call (log volume + secrets).
+    LLM_LOG_MAX_CHARS: int = 2000
     # 1-2: listings scoring <= this in an audit report are deactivated by the
     # shop-cleanup script / monthly dry-run tick (the critic's "erodes trust" band).
     SHOP_CLEANUP_MAX_SCORE: int = 3

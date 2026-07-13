@@ -197,7 +197,10 @@ class ProductScoreService:
     # ── C: dual independent LLM judgment (0-60) ──────────────────────────────
     def _judge(self, concept: dict, model: str) -> dict:
         from app.agents.product_viability_critic import ProductViabilityCriticAgent
-        critic = ProductViabilityCriticAgent(model=model)
+        # 5-2: pass an explicit min_score so the critic's own (unused-here) `passed`
+        # can't mislead a future reader — the composite gate uses the raw 1-10
+        # score + floors, never the critic's internal pass.
+        critic = ProductViabilityCriticAgent(model=model, min_score=getattr(settings, "PRODUCT_JUDGE_FLOOR", 9))
         try:
             return critic.critique(concept)
         except Exception as e:

@@ -100,6 +100,19 @@ class TrendResearchAgent(BaseAgent):
         """
         from app.services.trend_data_service import TrendDataService, TrendDataFetchError
 
+        # 5-4: load recent shop products (for dedup + the insights block) BEFORE
+        # the paid research/intel calls — if the DB is unreachable the cycle would
+        # fail anyway, so failing early saves two LLM calls.
+        try:
+            from app.services.task_service import TaskService
+            self._recent_products = TaskService().recent_product_titles(50)
+        except Exception as e:
+            logger.warning(f"TrendResearchAgent: could not load recent products for dedup: {e}")
+            self._recent_products = []
+        # A-1: close the learning loop — bias new concepts toward what actually
+        # earned / got engagement, away from formats piling up unsold.
+        self._insights_block = self._load_insights_block()
+
         try:
             trend_data = TrendDataService().get_real_trend_signals()
             self._trend_data = trend_data or {}  # 1-1: for the demand subscore
@@ -144,20 +157,7 @@ class TrendResearchAgent(BaseAgent):
         if not opportunities:
             logger.info("TrendResearchAgent: no opportunities returned by intelligence agent")
             return None
-
-        # A-3: load recent shop products so the concept generator avoids
-        # proposing near-duplicates (which cannibalize Etsy search and waste the
-        # full build cost).
-        try:
-            from app.services.task_service import TaskService
-            self._recent_products = TaskService().recent_product_titles(50)
-        except Exception as e:
-            logger.warning(f"TrendResearchAgent: could not load recent products for dedup: {e}")
-            self._recent_products = []
-
-        # A-1: close the learning loop — bias new concepts toward what actually
-        # earned / got engagement, away from formats piling up unsold.
-        self._insights_block = self._load_insights_block()
+        # (recent products + insights block already loaded above — 5-4)
 
         # 1-2: PERSISTENT search — try EVERY opportunity (not one at random), and
         # if none produce a passer within budget, do ONE fresh research pass on a

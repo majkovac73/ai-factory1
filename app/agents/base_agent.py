@@ -65,7 +65,7 @@ class BaseAgent:
                 message="LLM generation failed",
                 payload={
                     "model": self.model,
-                    "prompt": prompt,
+                    "prompt": (prompt or "")[:int(getattr(settings, "LLM_LOG_MAX_CHARS", 2000))],  # 5-1
                     "error": str(e),
                 },
             )
@@ -80,13 +80,17 @@ class BaseAgent:
         except Exception:
             pass
 
+        # 5-1: truncate prompt/output before persisting — LogService writes every
+        # call to the DB; full payloads bloat the volume and can persist secrets
+        # that happen to be in context. 2k chars is plenty to debug with.
+        cap = int(getattr(settings, "LLM_LOG_MAX_CHARS", 2000))
         self.log_service.info(
             source=self.__class__.__name__,
             message="LLM generation completed",
             payload={
                 "model": self.model,
-                "prompt": prompt,
-                "output": output,
+                "prompt": (prompt or "")[:cap],
+                "output": (output or "")[:cap],
                 "usage": usage,
             },
         )
