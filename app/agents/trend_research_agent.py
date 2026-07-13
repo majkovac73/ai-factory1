@@ -89,6 +89,8 @@ class TrendResearchAgent(BaseAgent):
         self._trend_data: dict = {}
         # A-1: learning-loop insight block injected into the concept prompt.
         self._insights_block: str = ""
+        # 1-2/1-9/1-10: last cycle's persistent-search state (best failed concept).
+        self._last_search: dict | None = None
 
     def run(self) -> dict | None:
         """
@@ -157,29 +159,149 @@ class TrendResearchAgent(BaseAgent):
         # earned / got engagement, away from formats piling up unsold.
         self._insights_block = self._load_insights_block()
 
-        # 1-7: randomize among the top 3 opportunities instead of always [0].
-        idx = random.randrange(min(3, len(opportunities)))
-        insight = opportunities[idx]
-        logger.info(f"TrendResearchAgent: using opportunity index {idx} of {len(opportunities)}")
-        product = self._propose_product(insight, intel.get("confidence", "low"))
+        # 1-2: PERSISTENT search — try EVERY opportunity (not one at random), and
+        # if none produce a passer within budget, do ONE fresh research pass on a
+        # different topic. 1-3: best-of-pool — build the highest-scoring passer of
+        # the whole cycle, not just the first.
+        confidence = intel.get("confidence", "low")
+        state = self._new_search_state()
+        product = self._persistent_search(opportunities, confidence, state)
+
         if not product:
-            logger.error(
-                "TrendResearchAgent: could not produce a specific, valid, buildable "
-                f"product concept after {self.MAX_CONCEPT_ATTEMPTS} attempts"
+            # ONE fresh research pass (a different topic) before giving up.
+            budget = int(getattr(settings, "CONCEPT_SEARCH_MAX_ATTEMPTS_PER_CYCLE", 15))
+            if state["scored"] < budget:
+                alt_topic = self._alt_research_topic(research_topic)
+                alt_opps = self._research_opportunities(alt_topic, trend_data)
+                if alt_opps:
+                    logger.info(f"TrendResearchAgent: fresh research pass on {alt_topic!r} ({len(alt_opps)} opportunities)")
+                    product = self._persistent_search(alt_opps, confidence, state)
+
+        # 1-9/1-10: stash the cycle's search outcome (best failed concept) for the
+        # zero-production alert + near-miss approval queue.
+        self._last_search = state
+
+        if not product:
+            logger.info(
+                f"TrendResearchAgent: cycle exhausted {state['scored']} scored / "
+                f"{state['raw']} raw attempts across {state['insights']} insights; "
+                f"best total {state['best_total']} "
+                f"('{(state.get('best_concept') or {}).get('product_name', '—')}')"
             )
+            self._persist_best_failed(state)
             return None
 
         return product
 
+    # ── 1-2 persistent search ────────────────────────────────────────────────
+    @staticmethod
+    def _new_search_state() -> dict:
+        return {"scored": 0, "raw": 0, "insights": 0, "passers": [],
+                "best_total": -1, "best_concept": None, "best_score": None,
+                "rejected": []}
+
+    def _persistent_search(self, opportunities: list, confidence: str, state: dict) -> dict | None:
+        """1-2: try each opportunity (shuffled top 3) in turn against a SHARED
+        cycle budget; 1-3: return the best passer once the pool is built (or a
+        clear winner short-circuits)."""
+        budget = int(getattr(settings, "CONCEPT_SEARCH_MAX_ATTEMPTS_PER_CYCLE", 15))
+        top = list(opportunities[:3])
+        random.shuffle(top)
+        for insight in top:
+            if state["scored"] >= budget:
+                break
+            state["insights"] += 1
+            winner = self._propose_from_insight(insight, confidence, state)
+            if winner is not None:
+                return winner  # shadow-mode critic pass, or enforce ≥ min+5
+        # 1-3: no clear short-circuit winner — build the best passer of the pool.
+        if state["passers"]:
+            best = max(state["passers"], key=lambda p: p["score"]["total"])
+            logger.info(f"TrendResearchAgent: best-of-pool selected '{best['concept'].get('product_name')}' "
+                        f"(total {best['score']['total']}) from {len(state['passers'])} passer(s)")
+            return best["concept"]
+        return None
+
+    @staticmethod
+    def _alt_research_topic(prev_topic: str) -> str:
+        """A different research topic for the fresh pass — prefer an in-window
+        occasion if the first pass was generic, else the reverse."""
+        try:
+            from app.core.seasonality import upcoming_occasions
+            in_window = upcoming_occasions()
+            generic = "printable" in (prev_topic or "").lower() and "right now" not in (prev_topic or "").lower()
+            if in_window and generic:
+                occ = random.choice(in_window)["occasion"]
+                return f"Etsy {occ} printable products buyers are searching for right now"
+        except Exception:
+            pass
+        return "underserved Etsy digital printable niches with rising demand and low competition"
+
+    def _research_opportunities(self, topic: str, trend_data: dict) -> list:
+        """Run research + intelligence for a topic and return its opportunities."""
+        try:
+            research = self._research.research(topic, _RESEARCH_SCOPE, real_trend_data=trend_data)
+            intel = self._intelligence.synthesize(research)
+            return intel.get("opportunities", []) or []
+        except Exception as e:
+            logger.warning(f"TrendResearchAgent: fresh research pass failed: {e}")
+            return []
+
+    def _persist_best_failed(self, state: dict):
+        """1-10: record the cycle's best FAILED concept (near-miss) as an analytics
+        event so the daily alert can surface it and it can be manually approved."""
+        best = state.get("best_concept")
+        best_score = state.get("best_score")
+        if not best or not best_score:
+            return
+        try:
+            from app.services.analytics_service import AnalyticsService
+            min_score = int(getattr(settings, "PRODUCT_MIN_SCORE", 90))
+            if state["best_total"] < min_score - 5:
+                return  # not a near-miss, don't clutter
+            AnalyticsService().record_event(
+                event_type="concept_near_miss",
+                entity_type="concept",
+                entity_id=(best.get("product_name") or "unknown")[:120],
+                value=float(state["best_total"]),
+                payload={"concept": best, "score_total": state["best_total"],
+                         "floors": best_score.get("floors"),
+                         "retry_feedback": best_score.get("retry_feedback")},
+            )
+        except Exception as e:
+            logger.warning(f"TrendResearchAgent: could not record near-miss: {e}")
+
     def _propose_product(self, insight: str, fallback_confidence: str) -> dict | None:
-        """
-        Translate a broad market insight into one specific, nameable,
-        buildable product tied to a real product_format. Retries with the
-        rejection reason fed back to the model, up to MAX_CONCEPT_ATTEMPTS
-        times.
-        """
+        """Backward-compatible single-insight entry point: run the search for ONE
+        insight with a fresh budget and return a winner (or the best passer)."""
+        state = self._new_search_state()
+        state["insights"] += 1
+        winner = self._propose_from_insight(insight, fallback_confidence, state)
+        if winner is not None:
+            return winner
+        if state["passers"]:
+            return max(state["passers"], key=lambda p: p["score"]["total"])["concept"]
+        return None
+
+    def _propose_from_insight(self, insight: str, fallback_confidence: str, state: dict) -> dict | None:
+        """Translate ONE market insight into concept attempts, updating the SHARED
+        cycle `state` (scored/raw counters, passer pool, best-so-far, rejected
+        list). Returns a concept ONLY on a short-circuit win (shadow critic pass,
+        or enforce-mode total >= PRODUCT_MIN_SCORE+5); otherwise None (passers,
+        if any, are left in state for best-of-pool selection).
+
+        1-2: JSON/schema/dedup rejects consume a CHEAP `raw` budget (2x scored),
+        NOT a scored attempt, so a bad-JSON model can't burn the real budget."""
+        enforce = getattr(settings, "PRODUCT_SCORE_ENFORCE", False)
+        min_score = int(getattr(settings, "PRODUCT_MIN_SCORE", 90))
+        budget = int(getattr(settings, "CONCEPT_SEARCH_MAX_ATTEMPTS_PER_CYCLE", 15))
+        raw_cap = budget * 2
+        per_insight = self.MAX_CONCEPT_ATTEMPTS  # scored attempts per insight
+        short_circuit = min_score + 5
+
         feedback = ""
-        for attempt in range(1, self.MAX_CONCEPT_ATTEMPTS + 1):
+        insight_scored = 0
+        while state["scored"] < budget and state["raw"] < raw_cap and insight_scored < per_insight:
             prompt = self._build_concept_prompt(insight, feedback)
             try:
                 response = self._generate(prompt)
@@ -193,78 +315,104 @@ class TrendResearchAgent(BaseAgent):
                 try:
                     data = self.sanitizer.extract(response)
                 except Exception as e:
-                    logger.warning(f"TrendResearchAgent: attempt {attempt} produced invalid JSON: {e}")
+                    state["raw"] += 1
+                    logger.warning(f"TrendResearchAgent: raw attempt produced invalid JSON: {e}")
                     feedback = f"Your last response was not valid JSON ({e}). Return ONLY the JSON object."
                     continue
 
             error = self._validate_product(data)
-            if not error:
-                # A-3: reject near-duplicates of existing shop products BEFORE the
-                # (paid) critic call — consumes a retry with dedup feedback.
-                dup = self._dedup_error(data)
-                if dup:
-                    logger.warning(f"TrendResearchAgent: concept attempt {attempt} rejected as duplicate: {dup}")
-                    feedback = f"{dup} Propose a clearly different product — different theme AND different wording."
-                    continue
-
-                data["confidence"] = data.get("confidence") or fallback_confidence
-
-                # A-2: validate against REAL Etsy buyer data (competition + real
-                # prices + winning titles). Attach it so the critic sees the
-                # saturation signal and the listing stage can ground price/SEO.
-                self._attach_market(data)
-
-                # 1-1: composite 0-100 quality score (deterministic evidence +
-                # two independent LLM judges). Always computed + recorded as a
-                # concept_scored event (the calibration dataset).
-                recent_titles = [t for t, _ in (self._recent_products or [])]
-                score = self._score_service.score(
-                    data, trend_data=self._trend_data, recent_titles=recent_titles)
-                enforce = getattr(settings, "PRODUCT_SCORE_ENFORCE", False)
-                _j = score.get("judges") or {}
-                _js = f"{(_j.get('concept_model') or {}).get('score', '?')}/{(_j.get('default_model') or {}).get('score', '?')}" if _j else "gated"
-                logger.info(
-                    f"TrendResearchAgent: product score={score['total']}/100 "
-                    f"passed={score['passed']} (enforce={enforce}) judges={_js} "
-                    f"for '{data.get('product_name')}'"
-                )
-
-                if enforce:
-                    # 1-1D: the 95 gate decides.
-                    if score["passed"]:
-                        return data
-                    feedback = score["retry_feedback"]
-                    logger.warning(f"TrendResearchAgent: attempt {attempt} below the {score['min_score']} bar: {feedback}")
-                    continue
-
-                # Shadow mode (1-1E): the old 6/10 critic still decides while we
-                # gather concept_scored data.
-                critique = self._critic.critique(data)
-                logger.info(
-                    f"TrendResearchAgent: [shadow] viability critique score={critique['score']} "
-                    f"passed={critique['passed']} for '{data.get('product_name')}'"
-                )
-                if critique["passed"]:
-                    return data
-
-                logger.warning(
-                    f"TrendResearchAgent: concept attempt {attempt} failed viability "
-                    f"critique: {critique['reason']}"
-                )
-                feedback = (
-                    f"Your previous concept was schema-valid but rejected as not "
-                    f"commercially viable: {critique['reason']}. Propose a genuinely "
-                    f"different, more compelling concept that addresses this."
-                )
+            if error:
+                state["raw"] += 1
+                logger.warning(f"TrendResearchAgent: raw attempt rejected: {error}")
+                feedback = self._retry_feedback_with_history(
+                    state, f"Your previous answer was rejected: {error}. "
+                           "Propose a different, more specific product that fixes this.")
                 continue
 
-            logger.warning(f"TrendResearchAgent: concept attempt {attempt} rejected: {error}")
-            feedback = (
-                f"Your previous answer was rejected: {error}. "
-                "Propose a different, more specific product that fixes this."
+            # A-3: reject near-duplicates BEFORE the (paid) score — cheap retry.
+            dup = self._dedup_error(data)
+            if dup:
+                state["raw"] += 1
+                logger.warning(f"TrendResearchAgent: raw attempt rejected as duplicate: {dup}")
+                feedback = self._retry_feedback_with_history(
+                    state, f"{dup} Propose a clearly different product — different theme AND different wording.")
+                continue
+
+            data["confidence"] = data.get("confidence") or fallback_confidence
+            # A-2: real Etsy market data (competition + prices + winning titles).
+            self._attach_market(data)
+
+            # 1-1: composite 0-100 quality score (2 judge LLM calls).
+            recent_titles = [t for t, _ in (self._recent_products or [])]
+            score = self._score_service.score(
+                data, trend_data=self._trend_data, recent_titles=recent_titles)
+            state["scored"] += 1
+            insight_scored += 1
+
+            # track the cycle's best-so-far (for best-of-pool + near-miss).
+            if score["total"] > state["best_total"]:
+                state["best_total"] = score["total"]
+                state["best_concept"] = data
+                state["best_score"] = score
+
+            enforce_now = enforce
+            _j = score.get("judges") or {}
+            _js = f"{(_j.get('concept_model') or {}).get('score', '?')}/{(_j.get('default_model') or {}).get('score', '?')}" if _j else "gated"
+            logger.info(
+                f"TrendResearchAgent: product score={score['total']}/100 "
+                f"passed={score['passed']} (enforce={enforce_now}) judges={_js} "
+                f"floors={score.get('floors')} for '{data.get('product_name')}'"
             )
 
+            if enforce_now:
+                if score["passed"]:
+                    state["passers"].append({"concept": data, "score": score})
+                    if score["total"] >= short_circuit:
+                        return data  # 1-3: clear winner, stop early
+                    feedback = self._retry_feedback_with_history(state, score["retry_feedback"], data, score)
+                    continue
+                feedback = self._retry_feedback_with_history(state, score["retry_feedback"], data, score)
+                state["rejected"].append({"name": data.get("product_name"), "total": score["total"]})
+                logger.warning(f"TrendResearchAgent: below the {min_score} bar: {score['retry_feedback']}")
+                continue
+
+            # Shadow mode: the old 6/10 critic still decides while we gather data.
+            critique = self._critic.critique(data)
+            logger.info(
+                f"TrendResearchAgent: [shadow] viability critique score={critique['score']} "
+                f"passed={critique['passed']} for '{data.get('product_name')}'"
+            )
+            if critique["passed"]:
+                return data
+            state["rejected"].append({"name": data.get("product_name"), "total": score["total"]})
+            feedback = self._retry_feedback_with_history(
+                state,
+                f"Your previous concept was schema-valid but rejected as not commercially "
+                f"viable: {critique['reason']}. Propose a genuinely different, more "
+                f"compelling concept that addresses this.",
+                data, score)
+
         return None
+
+    @staticmethod
+    def _retry_feedback_with_history(state: dict, base: str, data: dict = None, score: dict = None) -> str:
+        """1-7: append this cycle's already-rejected concept names so the model
+        doesn't re-propose near-variations of things already scored/rejected."""
+        rejected = list(state.get("rejected") or [])
+        # include the just-rejected concept too (deduped by name)
+        if data is not None and data.get("product_name"):
+            entry = {"name": data.get("product_name"), "total": (score or {}).get("total")}
+            if all(r.get("name") != entry["name"] for r in rejected):
+                rejected = rejected + [entry]
+        if not rejected:
+            return base
+        lines = []
+        for r in rejected[-8:]:  # cap at 8 lines
+            t = r.get("total")
+            lines.append(f"- {r.get('name')}" + (f" (scored {t})" if t is not None else ""))
+        block = ("\n\nAlready rejected THIS cycle (do NOT propose these or close "
+                 "variations of them):\n" + "\n".join(lines))
+        return base + block
 
     @staticmethod
     def _seasonal_block() -> str:

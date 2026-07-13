@@ -29,25 +29,23 @@ from app.services.task_service import TaskService
 
 def run_once():
     seen = {}
+    # STEP106 1-2: run() now calls _persistent_search over ALL opportunities
+    # instead of picking one random index. Capture what it receives.
     with patch.object(tds.TrendDataService, "get_real_trend_signals",
                       return_value={"keywords": [], "rising_queries": {}, "interest_snapshot": {}}), \
          patch.object(agent._research, "research", side_effect=lambda t, s, real_trend_data=None: seen.update(topic=t) or "r"), \
          patch.object(agent._intelligence, "synthesize",
                       return_value={"opportunities": ["OppA", "OppB", "OppC"], "confidence": "low"}), \
-         patch.object(agent, "_propose_product", side_effect=lambda insight, c: seen.update(insight=insight) or {"product_name": "x"}), \
+         patch.object(agent, "_persistent_search", side_effect=lambda opps, c, st: seen.update(opps=list(opps)) or {"product_name": "x"}), \
          patch.object(agent, "_load_insights_block", return_value=""), \
          patch.object(TaskService, "recent_product_titles", return_value=[]):
         agent.run()
     return seen
 
 
-# opportunity index is randomized among the top 3
-with patch("app.agents.trend_research_agent.random.randrange", return_value=2):
-    s = run_once()
-check("1-7 uses the randomized opportunity index (2 -> OppC)", s.get("insight") == "OppC")
-with patch("app.agents.trend_research_agent.random.randrange", return_value=0):
-    s0 = run_once()
-check("1-7 index 0 -> OppA", s0.get("insight") == "OppA")
+# 1-2: persistent search receives ALL opportunities (not a single random index)
+s = run_once()
+check("1-2 persistent search gets all 3 opportunities", set(s.get("opps") or []) == {"OppA", "OppB", "OppC"})
 
 # topic rotates to an in-window occasion when the dice say so
 with patch("app.agents.trend_research_agent.random.random", return_value=0.1), \

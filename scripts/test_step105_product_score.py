@@ -134,7 +134,8 @@ with patch("app.agents.product_viability_critic.ProductViabilityCriticAgent", Fa
 
 # ── shadow mode: PRODUCT_SCORE_ENFORCE default false ──
 check("1-1E PRODUCT_SCORE_ENFORCE defaults false (shadow)", getattr(settings, "PRODUCT_SCORE_ENFORCE") is False)
-check("1-1 PRODUCT_MIN_SCORE default 95", getattr(settings, "PRODUCT_MIN_SCORE") == 95)
+# STEP106 1-1: 95 was mathematically unreachable; the floors-based rule uses 90.
+check("1-1 PRODUCT_MIN_SCORE default 90 (106 recalibration)", getattr(settings, "PRODUCT_MIN_SCORE") == 90)
 
 # ── MAX_CONCEPT_ATTEMPTS bumped to 5 ──
 from app.agents.trend_research_agent import TrendResearchAgent

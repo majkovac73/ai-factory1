@@ -93,6 +93,7 @@ DETERMINISTIC = [
     "test_step105_concept_path.py",
     "test_step105_robustness.py",
     "test_step105_watermark_money.py",
+    "test_step106_gate_and_search.py",
 ]
 
 

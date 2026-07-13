@@ -225,13 +225,36 @@ class ProductScoreService:
         llm_points = 6 * harsher  # 0-60, harsher judge
 
         total = det["total"] + llm_points
-        passed = total >= min_score
+
+        # 1-1: the OLD rule (total >= 95) was mathematically unreachable — 95 needs
+        # both judges at 10/10 with a perfect B, which LLM judges essentially never
+        # emit, so the factory built nothing forever. The new rule keeps the
+        # "excellent on EVERY axis" intent but expresses it as explicit floors,
+        # which is arguably STRICTER (a high blended number can't hide a weak axis)
+        # AND reachable (B=36 + dual 9s = 90 passes; B=40 + judges 8/9 does not).
+        judge_floor = int(getattr(settings, "PRODUCT_JUDGE_FLOOR", 9))
+        det_floor = int(getattr(settings, "PRODUCT_DET_FLOOR", 30))
+        d_axes = det if isinstance(det, dict) else {}
+        floors = {
+            "total": total >= min_score,
+            # both judges in the "distinctive and clearly compelling" band
+            "judge": harsher >= judge_floor,
+            # evidence must be strong, not just judges enthusiastic
+            "det": det["total"] >= det_floor,
+            # no deterministic axis sitting at its rock-bottom value
+            "axis": (d_axes.get("demand", {}).get("points", 0) > 0          # not falling
+                     and d_axes.get("competition", {}).get("points", 0) > 2  # not >50k saturated
+                     and d_axes.get("originality", {}).get("points", 0) > 1),  # not a near-dupe
+        }
+        passed = all(floors.values())
 
         result = {
             "total": total,
             "max": 100,
             "passed": passed,
             "min_score": min_score,
+            "floors": floors,
+            "rule_version": 2,  # 5-8: floors-based rule (STEP 106 1-1)
             "deterministic": det,
             "judges": {
                 "concept_model": {"model": self._concept_model, "score": j1.get("score", 0), "reason": j1.get("reason", "")},
@@ -239,14 +262,14 @@ class ProductScoreService:
                 "harsher": harsher,
                 "llm_points": llm_points,
             },
-            "retry_feedback": self._retry_feedback(total, det, j1, j2),
+            "retry_feedback": self._retry_feedback(total, det, j1, j2, floors),
         }
         if record:
             self._record(concept, result)
         return result
 
     @staticmethod
-    def _retry_feedback(total: int, det: dict, j1: dict, j2: dict) -> str:
+    def _retry_feedback(total: int, det: dict, j1: dict, j2: dict, floors: dict = None) -> str:
         """Name the WEAKEST axes so the concept LLM's next attempt fixes the real
         weakness, not a random one."""
         axes = [(k, v["points"], v["max"], v["why"]) for k, v in det.items()
@@ -258,9 +281,14 @@ class ProductScoreService:
         for k, pts, mx, why in weak:
             parts.append(f"{k} {pts}/{mx} — {why}")
         harsher = min(j1.get("score", 0), j2.get("score", 0))
-        if harsher < 8:
+        if harsher < 9:
             harsher_reason = j1.get("reason", "") if j1.get("score", 10) <= j2.get("score", 10) else j2.get("reason", "")
             parts.append(f"harsher judge {harsher}/10: {harsher_reason}")
+        # 1-1: name which floor failed so the retry targets the binding constraint.
+        if floors:
+            failed = [k for k, ok in floors.items() if not ok]
+            if failed:
+                parts.append("failed floors: " + ", ".join(failed))
         return "; ".join(parts) + ". Propose a genuinely stronger concept that fixes the weakest axes."
 
     @staticmethod
@@ -276,6 +304,9 @@ class ProductScoreService:
                     "product_format": concept.get("product_format"),
                     "passed": result["passed"],
                     "min_score": result["min_score"],
+                    "floors": result.get("floors"),          # 1-1 / 5-8
+                    "rule_version": result.get("rule_version", 2),
+                    "hard_gate": result.get("hard_gate"),
                     "deterministic": result["deterministic"],
                     "judges": result["judges"],
                 },

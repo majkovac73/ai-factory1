@@ -277,8 +277,19 @@ class Settings(BaseSettings):
     # SHADOW MODE (compute + record concept_scored events while the old 6/10
     # critic still decides). Flip to true after ~5 days of event data confirm the
     # distribution is sane. A 95 bar means expect 0-3 products/day, by design.
-    PRODUCT_MIN_SCORE: int = 95
+    # 106 1-1: the old 95 bar was mathematically unreachable (needed dual 10/10
+    # judges), so the factory built nothing. The rule is now floors-based: total
+    # >= PRODUCT_MIN_SCORE AND harsher judge >= PRODUCT_JUDGE_FLOOR AND
+    # deterministic >= PRODUCT_DET_FLOOR AND no axis at rock bottom. Reachable
+    # (B=36 + dual 9s = 90) yet strict (a weak axis can't be blended away).
+    PRODUCT_MIN_SCORE: int = 90
+    PRODUCT_JUDGE_FLOOR: int = 9      # both judges in the "distinctive/compelling" band
+    PRODUCT_DET_FLOOR: int = 30       # of 40 — evidence must be strong
     PRODUCT_SCORE_ENFORCE: bool = False
+    # 106 1-2: cycle-wide budget of fully-scored concept attempts (each ~2 judge
+    # LLM calls). The persistent search tries every opportunity + one fresh
+    # research pass until this many scored attempts, then stops for the hour.
+    CONCEPT_SEARCH_MAX_ATTEMPTS_PER_CYCLE: int = 15
     # 1-2: listings scoring <= this in an audit report are deactivated by the
     # shop-cleanup script / monthly dry-run tick (the critic's "erodes trust" band).
     SHOP_CLEANUP_MAX_SCORE: int = 3
