@@ -98,6 +98,7 @@ DETERMINISTIC = [
     "test_step106_judges_metering.py",
     "test_step106_production_monitor.py",
     "test_step106_quality_pass.py",
+    "test_step106_money_growth.py",
 ]
 
 

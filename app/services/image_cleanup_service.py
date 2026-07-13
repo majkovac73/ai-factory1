@@ -33,19 +33,46 @@ class ImageCleanupService:
         listing_max_age = getattr(settings, "IMAGE_CLEANUP_LISTING_MAX_AGE_HOURS", 6) * 3600
         delivery_max_age = getattr(settings, "IMAGE_CLEANUP_DELIVERY_MAX_AGE_DAYS", 3) * 86400
 
+        # 3-2: keep ONE representative listing photo (hero.png) per PUBLISHED
+        # product forever, so the marketing-refresh loop (and SEO/video reuse)
+        # always has a local asset to re-promote — otherwise every product older
+        # than ~3 days had no image left and refresh posts no-op'd. ~1 img/product.
+        published = self._published_task_ids()
+        keep_name = getattr(settings, "IMAGE_CLEANUP_KEEP_PER_LISTING", "hero.png")
+
         deleted = 0
         freed = 0
         for sub, max_age in (("listing", listing_max_age), ("delivery", delivery_max_age)):
-            d, f = self._prune(self.images_dir / sub, max_age)
+            exempt = (published, keep_name) if sub == "listing" else (None, None)
+            d, f = self._prune(self.images_dir / sub, max_age, exempt[0], exempt[1])
             deleted += d
             freed += f
 
-        report = {"ok": True, "deleted_files": deleted, "freed_bytes": freed}
+        report = {"ok": True, "deleted_files": deleted, "freed_bytes": freed, "exempt_published": len(published)}
         logger.info(f"ImageCleanupService: {report}")
         return report
 
     @staticmethod
-    def _prune(root: Path, max_age_seconds: float):
+    def _published_task_ids() -> set:
+        """task_ids that have a real Etsy listing (output_data.listing_id) — their
+        hero mockup is kept for re-promotion."""
+        try:
+            from app.db.database import SessionLocal
+            from app.models.task import Task
+            db = SessionLocal()
+            try:
+                out = set()
+                for t in db.query(Task).all():
+                    if (t.output_data or {}).get("listing_id"):
+                        out.add(t.id)
+                return out
+            finally:
+                db.close()
+        except Exception:
+            return set()
+
+    @staticmethod
+    def _prune(root: Path, max_age_seconds: float, exempt_task_ids: set = None, exempt_name: str = None):
         if not root.exists():
             return 0, 0
         now = time.time()
@@ -53,6 +80,9 @@ class ImageCleanupService:
         freed = 0
         for p in root.rglob("*"):
             if not p.is_file():
+                continue
+            # 3-2: keep the exempt filename for published tasks (parent dir = task_id).
+            if exempt_task_ids and exempt_name and p.name == exempt_name and p.parent.name in exempt_task_ids:
                 continue
             try:
                 if now - p.stat().st_mtime > max_age_seconds:

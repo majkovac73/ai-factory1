@@ -123,6 +123,12 @@ class EtsyReceiptWorker:
                 except Exception as e:
                     logger.error(f"EtsyReceiptWorker: production-check tick failed: {e}")
 
+                # 3-10: daily engagement-triggered winner variant (pre-sale signal).
+                try:
+                    self._maybe_engagement_variants()
+                except Exception as e:
+                    logger.error(f"EtsyReceiptWorker: engagement-variant tick failed: {e}")
+
                 # Disk hygiene: prune old generated images so the volume doesn't fill.
                 try:
                     self._maybe_cleanup_images()
@@ -599,7 +605,7 @@ class EtsyReceiptWorker:
         self._save_state(state)
         logger.info(f"EtsyReceiptWorker: backup tick done — {report}")
 
-    def _maybe_spawn_winner_variant(self, task_id):
+    def _maybe_spawn_winner_variant(self, task_id, source="winner_variant"):
         """A-1: create ONE follow-up variant concept task seeded from a product
         that just sold. Capped per day, respects AUTONOMY_ENABLED."""
         try:
@@ -657,16 +663,70 @@ class EtsyReceiptWorker:
             # 2-3: carry the parent's grounding so the variant isn't a blind guess —
             # market data, SEO context, and (for PDF planners) page_count, without
             # which _resolve_pdf_page_briefs would silently make a 1-page planner.
-            vmeta = {"source": "winner_variant", "parent_task_id": task_id,
+            vmeta = {"source": source, "parent_task_id": task_id,
                      "product_name": f"{title} variation"}
             for k in ("market", "seo_context", "page_count", "occasion"):
                 if pmeta.get(k) is not None:
                     vmeta[k] = pmeta[k]
             new_task = ts.create_task(TaskCreate(prompt=prompt, type=parent.type, metadata=vmeta))
             auto.record_winner_variant()
-            logger.info(f"EtsyReceiptWorker: spawned winner-variant task {new_task.id} from sold task {task_id}")
+            logger.info(f"EtsyReceiptWorker: spawned {source} task {new_task.id} from task {task_id}")
         except Exception as e:
-            logger.error(f"EtsyReceiptWorker: winner-variant spawn failed for {task_id}: {e}")
+            logger.error(f"EtsyReceiptWorker: {source} spawn failed for {task_id}: {e}")
+
+    def _variant_spawned_recently(self, parent_task_id: str, days: int = 7) -> bool:
+        """3-10: has a variant already been spawned from this listing recently?"""
+        from datetime import timedelta
+        from app.db.database import SessionLocal
+        from app.models.task import Task
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        db = SessionLocal()
+        try:
+            for t in db.query(Task).filter(Task.created_at >= cutoff).all():
+                if (t.metadata_ or {}).get("parent_task_id") == parent_task_id:
+                    return True
+            return False
+        finally:
+            db.close()
+
+    def _maybe_engagement_variants(self):
+        """3-10: with few sales, view/favorite VELOCITY is the strongest available
+        signal. A listing doing >= ENGAGEMENT_VARIANT_MIN_VELOCITY engagement/day
+        is a pre-sale winner — spawn ONE variant/day from the best such listing
+        (reuses the winner-variant path: seasonal/trademark gates + spend caps)."""
+        from config import settings as _s
+        min_v = float(getattr(_s, "ENGAGEMENT_VARIANT_MIN_VELOCITY", 10) or 0)
+        if not getattr(_s, "AUTONOMY_ENABLED", False) or min_v <= 0:
+            return
+        state = self._load_state()
+        now = int(datetime.now(timezone.utc).timestamp())
+        if now - state.get("last_engagement_variant_at", 0) < 24 * 3600:
+            return
+        from app.services.analytics_service import AnalyticsService
+        from app.services.performance_service import PerformanceService
+        perf = PerformanceService()
+        evs = AnalyticsService().get_events(event_type="listing_stats", entity_type="task", limit=2000)
+        task_ids, seen = [], set()
+        for e in evs:
+            if e.entity_id and e.entity_id not in seen:
+                seen.add(e.entity_id)
+                task_ids.append(e.entity_id)
+        # rank by velocity, spawn from the single best over threshold not yet varied
+        ranked = sorted(((tid, perf.engagement_velocity(tid)) for tid in task_ids),
+                        key=lambda kv: kv[1], reverse=True)
+        for tid, vel in ranked:
+            if vel < min_v:
+                break
+            if self._variant_spawned_recently(tid):
+                continue
+            logger.info(f"EtsyReceiptWorker: engagement variant — task {tid} velocity {vel} >= {min_v}")
+            self._maybe_spawn_winner_variant(tid, source="engagement_variant")
+            state["last_engagement_variant_at"] = now
+            self._save_state(state)
+            return
+        # nothing qualified — still stamp the tick so we don't rescan every poll
+        state["last_engagement_variant_at"] = now
+        self._save_state(state)
 
     def _maybe_seasonal_lifecycle(self):
         """1-4: weekly — deactivate out-of-window seasonal listings and reactivate

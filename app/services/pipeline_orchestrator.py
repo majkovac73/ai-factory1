@@ -1472,6 +1472,24 @@ class PipelineOrchestrator:
             # below, still overrides this to protect margin.)
             if market_price and band_lo <= float(market_price) <= band_hi:
                 listing["price"] = round(float(market_price), 2)
+            elif market_price:
+                # 3-3: the real market median exists but is OUTSIDE the band, so
+                # it's silently discarded (likely underpricing). Record a
+                # price_band_clamp event — after a few weeks these say exactly
+                # which bands need recalibrating with data.
+                try:
+                    from app.services.analytics_service import AnalyticsService
+                    AnalyticsService().record_event(
+                        event_type="price_band_clamp", entity_type="task", entity_id=task_id,
+                        value=round(float(market_price), 2),
+                        payload={"product_format": task_type, "market_p50": round(float(market_price), 2),
+                                 "band": [band_lo, band_hi],
+                                 "direction": "above" if float(market_price) > band_hi else "below"},
+                    )
+                    logger.info(f"PipelineOrchestrator: price_band_clamp {task_type} p50={market_price} "
+                                f"outside band [{band_lo},{band_hi}]")
+                except Exception:
+                    pass
 
             # P0-4: for POD, the cost-based margin-safe price WINS over the band
             # clamp (a sale must never lose money, even if it exceeds the band).

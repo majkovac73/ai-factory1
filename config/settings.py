@@ -89,6 +89,12 @@ class Settings(BaseSettings):
     # 105 4-1: $0.20 auto-renew per active listing every ~4 months (amortized).
     ETSY_LISTING_RENEWAL_FEE: float = 0.20
     ETSY_LISTING_RENEWAL_MONTHS: float = 4
+    # 106 3-4: assumed fraction of sales attributed to Etsy Offsite Ads (×15% fee).
+    # Attribution isn't in the receipt payload, so this keeps net P&L honest.
+    OFFSITE_ADS_ASSUMED_ATTRIBUTION_PCT: float = 0.10
+    # 106 3-10: a listing with >= this engagement (views + 10*favs) PER DAY is a
+    # pre-sale winner → spawn one variant/day from it. 0 disables.
+    ENGAGEMENT_VARIANT_MIN_VELOCITY: float = 10
 
     POD_TARGET_PROFIT_USD: float = 6.00
     POD_SHIPPING_ESTIMATE_USD: float = 5.00

@@ -96,10 +96,17 @@ class RevenueService:
         from config import settings
         if sale_amount <= 0:
             return 0.0
+        # 3-4: Etsy Offsite Ads takes 15% when a sale is attributed to it.
+        # Attribution isn't in the receipt payload, so estimate it as
+        # OFFSITE_ADS_ASSUMED_ATTRIBUTION_PCT of sales × 15% — otherwise net P&L
+        # is systematically optimistic (POD pricing already reserves for this).
+        offsite_attrib = float(getattr(settings, "OFFSITE_ADS_ASSUMED_ATTRIBUTION_PCT", 0.10))
+        offsite_fee = round(sale_amount * offsite_attrib * 0.15, 4)
         fee = round(
             sale_amount * float(getattr(settings, "ETSY_TRANSACTION_FEE_PCT", 0.065))
             + sale_amount * float(getattr(settings, "ETSY_PAYMENT_FEE_PCT", 0.03))
-            + float(getattr(settings, "ETSY_PAYMENT_FEE_FLAT", 0.25)),
+            + float(getattr(settings, "ETSY_PAYMENT_FEE_FLAT", 0.25))
+            + offsite_fee,
             4,
         )
         self.analytics_service.record_event(
@@ -112,7 +119,9 @@ class RevenueService:
                 "currency": currency,
                 "sale_amount": sale_amount,
                 "transaction_id": str(transaction_id) if transaction_id else None,
-                "basis": "6.5% transaction + 3% payment + $0.25 flat (estimate)",
+                "offsite_ads_estimate": offsite_fee,
+                "basis": f"6.5% transaction + 3% payment + $0.25 flat + "
+                         f"{offsite_attrib*100:.0f}%×15% offsite-ads (estimate)",
             },
         )
         return fee
@@ -194,3 +203,43 @@ class RevenueService:
             breakdown[e.entity_id] += e.value or 0
 
         return breakdown
+
+    def profit_by_format(self) -> dict:
+        """3-5: per-format {sales, revenue, fees, net, avg_price} so the learning
+        loop can bias by DOLLARS (a $12 planner ~ 4 coloring-page sales), not just
+        counts/themes. Maps sale/fee events to each task's product_format."""
+        sales = self.analytics_service.get_events(event_type="sale_recorded", entity_type="task", limit=10000)
+        fees = self.analytics_service.get_events(event_type="fee_estimate", entity_type="task", limit=10000)
+        task_ids = {e.entity_id for e in sales} | {e.entity_id for e in fees}
+        if not task_ids:
+            return {}
+        # resolve task_id -> product_format
+        fmt_of = {}
+        try:
+            from app.db.database import SessionLocal
+            from app.models.task import Task
+            db = SessionLocal()
+            try:
+                for t in db.query(Task).filter(Task.id.in_(list(task_ids))).all():
+                    fmt_of[t.id] = t.type or "unknown"
+            finally:
+                db.close()
+        except Exception:
+            pass
+
+        agg: dict = {}
+        for e in sales:
+            fmt = fmt_of.get(e.entity_id, "unknown")
+            a = agg.setdefault(fmt, {"sales": 0, "revenue": 0.0, "fees": 0.0})
+            a["sales"] += 1
+            a["revenue"] += e.value or 0
+        for e in fees:
+            fmt = fmt_of.get(e.entity_id, "unknown")
+            a = agg.setdefault(fmt, {"sales": 0, "revenue": 0.0, "fees": 0.0})
+            a["fees"] += e.value or 0
+        for fmt, a in agg.items():
+            a["net"] = round(a["revenue"] - a["fees"], 2)
+            a["revenue"] = round(a["revenue"], 2)
+            a["fees"] = round(a["fees"], 2)
+            a["avg_price"] = round(a["revenue"] / a["sales"], 2) if a["sales"] else 0.0
+        return agg

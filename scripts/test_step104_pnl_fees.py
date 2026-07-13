@@ -27,23 +27,25 @@ Base.metadata.create_all(bind=engine)
 rs = RevenueService()
 
 # A $10 sale: fee = 10*0.065 + 10*0.03 + 0.25 = 0.65 + 0.30 + 0.25 = 1.20
+# STEP106 3-4: fee now also includes offsite-ads estimate (amount*0.10*0.15).
+# $10 sale: 0.65 + 0.30 + 0.25 + 0.15 = 1.35
 rs.record_sale(task_id="t1", amount=10.0, transaction_id="tx1")
 fee = rs.record_fee_estimate(task_id="t1", sale_amount=10.0, transaction_id="tx1")
-check("4-1 fee for $10 sale is $1.20", abs(fee - 1.20) < 1e-6)
+check("4-1 fee for $10 sale is $1.35 (incl. offsite ads)", abs(fee - 1.35) < 1e-6)
 
-# A $5 sale: fee = 5*0.065 + 5*0.03 + 0.25 = 0.325 + 0.15 + 0.25 = 0.725
+# A $5 sale: 0.325 + 0.15 + 0.25 + (5*0.10*0.15=0.075) = 0.80
 rs.record_sale(task_id="t2", amount=5.0, transaction_id="tx2")
 rs.record_fee_estimate(task_id="t2", sale_amount=5.0, transaction_id="tx2")
 
 totals = rs.get_total_fees()
-check("4-1 total fees = 1.20 + 0.725 = 1.925", abs(totals["total_fees"] - 1.925) < 1e-6)
+check("4-1 total fees = 1.35 + 0.80 = 2.15", abs(totals["total_fees"] - 2.15) < 1e-6)
 check("4-1 two fee events recorded", totals["fee_count"] == 2)
 
 rev = rs.get_total_revenue()
 gross = rev["total_revenue"]
 net = round(gross - totals["total_fees"], 2)
 check("4-1 gross is 15.00", abs(gross - 15.0) < 1e-6)
-check("4-1 net is 13.07 (gross - fees)", net == 13.07)
+check("4-1 net is 12.85 (gross - fees)", net == 12.85)
 
 # non-positive sale -> no fee
 check("4-1 zero sale records no fee", rs.record_fee_estimate("t3", 0.0) == 0.0)

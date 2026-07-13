@@ -542,6 +542,21 @@ Return ONLY valid JSON with this structure:
                     "proven themes/formats above — propose a NEW product in that vein, not a copy."
                 )
 
+            # 3-5: the bias signal should be DOLLARS, not counts — a $12 planner
+            # sale is worth ~4 coloring-page sales. Show per-format net + avg price.
+            try:
+                pbf = RevenueService().profit_by_format() or {}
+                earners = sorted(((f, a) for f, a in pbf.items() if a.get("sales")),
+                                 key=lambda kv: kv[1]["net"], reverse=True)
+                if earners:
+                    parts.append(
+                        "PROFIT by format (bias toward the most PROFITABLE, not just the most sold): "
+                        + "; ".join(f"{f}: ${a['net']:.2f} net from {a['sales']} sale(s) (avg ${a['avg_price']:.2f})"
+                                    for f, a in earners[:5])
+                    )
+            except Exception:
+                pass
+
             # 2-1 anti-signal: formats piling up listings with ZERO revenue.
             zero = insights.get("zero_revenue_formats") or []
             if zero:

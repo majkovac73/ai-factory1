@@ -69,7 +69,7 @@ PRODUCT_FORMATS = {
     # it to portrait print ratios (2:3/3:4/4:5/A). A portrait master (A-5 pt 2)
     # would give crops more real estate but changes many delivery-validation
     # fixtures; tracked as a follow-up.
-    "single_print":         {"category": "digital", "delivery": "single_image", "taxonomy_id": 2078, "price_band": (3.50, 8.00),  "delivery_aspect": "1:1"},
+    "single_print":         {"category": "digital", "delivery": "single_image", "taxonomy_id": 2078, "price_band": (3.50, 10.00),  "delivery_aspect": "1:1"},
     "coloring_page":        {"category": "digital", "delivery": "single_image", "taxonomy_id": 339,  "price_band": (2.00, 4.50),  "delivery_aspect": "3:4"},
     "greeting_card_design": {"category": "digital", "delivery": "single_image", "taxonomy_id": 1280, "price_band": (3.00, 6.00),  "delivery_aspect": "3:4"},
     "phone_wallpaper":      {"category": "digital", "delivery": "single_image", "taxonomy_id": 2078, "price_band": (2.00, 4.00),  "delivery_aspect": "9:16"},
@@ -77,7 +77,7 @@ PRODUCT_FORMATS = {
     # B-3: digital paper / seamless repeating pattern (crafters, print shops). One
     # square tileable image; seamlessness is checkable in code.
     "seamless_pattern":     {"category": "digital", "delivery": "single_image", "taxonomy_id": 2078, "price_band": (3.00, 6.00),  "delivery_aspect": "1:1"},
-    "pdf_planner_or_guide": {"category": "digital", "delivery": "pdf",          "taxonomy_id": 354,  "price_band": (5.00, 12.00), "delivery_aspect": "3:4"},
+    "pdf_planner_or_guide": {"category": "digital", "delivery": "pdf",          "taxonomy_id": 354,  "price_band": (5.00, 16.00), "delivery_aspect": "3:4"},
     "pod_apparel_design":   {"category": "pod",     "delivery": "single_image", "taxonomy_id": 482,  "price_band": (24.00, 40.00), "delivery_aspect": "1:1"},
     # 7-1: a curated SET of 3 coordinated wall-art prints sharing one palette/
     # theme, sold as one listing. Highest-AOV digital format on Etsy ($8-15 vs
