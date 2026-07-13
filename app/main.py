@@ -146,6 +146,12 @@ async def shutdown_event():
 
 app.include_router(api_router)
 
+# Public marketing/legal site for the Pinterest app review (GET / and /privacy).
+# Included at ROOT with no prefix and no auth (the FACTORY_API_KEY guard only
+# gates mutating methods + /logs), so Pinterest's reviewer can load them cold.
+from app.api.routes import public_site
+app.include_router(public_site.router)
+
 _frontend_dir = Path(__file__).resolve().parents[1] / "frontend"
 app.mount("/ui", StaticFiles(directory=_frontend_dir, html=True), name="ui")
 

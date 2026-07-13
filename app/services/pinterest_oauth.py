@@ -35,6 +35,29 @@ def is_connected() -> bool:
         db.close()
 
 
+def disconnect() -> dict:
+    """Disconnect the Pinterest account and delete ALL Pinterest-derived data
+    from our systems, immediately. This backs the privacy-policy promise (see
+    /privacy): on disconnect we stop accessing Pinterest and purge what we stored.
+
+    Deletes:
+      - the stored OAuth token(s) (access + refresh) — after this we can no longer
+        call the Pinterest API for the account;
+      - every MarketingPost we recorded for the Pinterest channel (the only other
+        Pinterest-derived data the app persists — Pin ids/urls/payloads).
+    Returns a count of what was removed. Idempotent (safe to call when already
+    disconnected)."""
+    from app.models.marketing_post import MarketingPost
+    db = SessionLocal()
+    try:
+        tokens = db.query(PinterestToken).delete()
+        posts = db.query(MarketingPost).filter(MarketingPost.channel == "pinterest").delete()
+        db.commit()
+        return {"disconnected": True, "tokens_deleted": int(tokens), "pinterest_posts_deleted": int(posts)}
+    finally:
+        db.close()
+
+
 def build_authorization_url(scopes: str = "boards:read,pins:read,pins:write") -> str:
     state = secrets.token_urlsafe(16)
     _pending_states.add(state)
