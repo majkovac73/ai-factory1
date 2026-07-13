@@ -95,6 +95,7 @@ DETERMINISTIC = [
     "test_step105_watermark_money.py",
     "test_step106_gate_and_search.py",
     "test_step106_evidence.py",
+    "test_step106_judges_metering.py",
 ]
 
 

@@ -132,7 +132,9 @@ Return ONLY valid JSON with this structure:
              this is fed back to the concept generator as retry guidance."
 }}
 """
-        response = self._generate(prompt)
+        # 1-6: low temperature so re-scoring the same concept is stable (the
+        # 9-point judge floor is sensitive to sampling noise).
+        response = self._generate(prompt, temperature=0.2)
         try:
             data = json.loads(response)
         except Exception:

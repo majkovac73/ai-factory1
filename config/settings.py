@@ -290,6 +290,10 @@ class Settings(BaseSettings):
     # LLM calls). The persistent search tries every opportunity + one fresh
     # research pass until this many scored attempts, then stops for the hour.
     CONCEPT_SEARCH_MAX_ATTEMPTS_PER_CYCLE: int = 15
+    # 106 1-8: flat per-call text-LLM cost estimate for the spend ledger (images
+    # were metered, text never was). Strong models (sonnet/gpt-4o/opus) cost more.
+    TEXT_LLM_COST_USD: float = 0.002
+    TEXT_LLM_COST_USD_STRONG: float = 0.01
     # 1-2: listings scoring <= this in an audit report are deactivated by the
     # shop-cleanup script / monthly dry-run tick (the critic's "erodes trust" band).
     SHOP_CLEANUP_MAX_SCORE: int = 3

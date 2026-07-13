@@ -39,10 +39,21 @@ logger = logging.getLogger("ai-factory")
 
 
 class ProductScoreService:
+    _independence_warned = False  # 1-6: warn once, not per instance
+
     def __init__(self, concept_model: str = None, default_model: str = None):
         # Two independent judges: CONCEPT_MODEL (better model when set) + DEFAULT_MODEL.
         self._concept_model = concept_model or getattr(settings, "CONCEPT_MODEL", None) or getattr(settings, "DEFAULT_MODEL", None)
         self._default_model = default_model or getattr(settings, "DEFAULT_MODEL", None)
+        # 1-6: min() of two samples from the SAME model isn't independent judgment
+        # (it's a downward-biased single sample), which matters at a 9-point floor.
+        if self._concept_model == self._default_model and not ProductScoreService._independence_warned:
+            logger.warning(
+                "ProductScoreService: the two score judges are the SAME model "
+                f"({self._default_model}) — judgment is NOT independent. Set "
+                "CONCEPT_MODEL (e.g. anthropic/claude-sonnet-5) for a real second opinion."
+            )
+            ProductScoreService._independence_warned = True
 
     # ── B: deterministic evidence subscores (0-40) ───────────────────────────
     @staticmethod
