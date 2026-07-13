@@ -38,10 +38,13 @@ Schema:
 }}
 
 Field guidance:
-- title: an Etsy-optimized title of 120-140 characters. Front-load the main
-  keyword, then pack complementary long-tail keywords a buyer would search,
-  separated by commas or pipes. Etsy weights the title heavily in search, so
-  use most of the 140 characters (never fewer than 20).
+- title: a clean, human-readable Etsy title, 80-130 characters total. The FIRST
+  ~40 characters MUST be the primary buyer phrase, written naturally (a shopper
+  sees only the first ~40 chars in the search grid, and Etsy's 2026 ranking
+  weights them most and penalizes unreadable keyword soup). After that, add 2-3
+  complementary long-tail phrases separated by " | ". Do NOT keyword-stuff to 140
+  characters — that is the outdated 2020 meta and hurts click-through now.
+  Example: "Boho Sunset Wall Art Print | Terracotta Desert Decor | Printable".
 - description: open with a compelling hook sentence (<=160 chars, keyword-rich)
   that also reads well as a Google/Etsy snippet, then a short, specific
   paragraph. (Standard "what you get / how it works / terms" sections are added

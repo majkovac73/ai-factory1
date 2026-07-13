@@ -443,6 +443,32 @@ class PipelineOrchestrator:
                 except Exception as e:
                     logger.warning(f"PipelineOrchestrator: coloring-page whiteness check raised for {task_id}: {e}")
 
+            # 2-1: a "seamless" pattern that doesn't tile IS a broken product
+            # (refund/1-star generator). Enforce it deterministically like the
+            # coloring-page check: edge mismatch above threshold fails the attempt.
+            if task_type == "seamless_pattern":
+                try:
+                    from app.core.seamless import edge_mismatch
+                    thresh = float(getattr(settings, "SEAMLESS_MAX_EDGE_MISMATCH", 22.0))
+                    mism = edge_mismatch(str(current))
+                    report["stages"]["seamless_check"] = {"edge_mismatch": round(mism, 1), "attempt": attempt}
+                    if mism > thresh:
+                        last_issues = [f"pattern does not tile — edge mismatch {mism:.1f} > {thresh:.0f}; "
+                                       "a seamless pattern MUST continue smoothly across all four edges"]
+                        logger.warning(f"PipelineOrchestrator: seamless_pattern {task_id} edge mismatch {mism:.1f} "
+                                       f"(attempt {attempt}) — regenerating")
+                        if attempt < attempts:
+                            seam_brief = ((design_brief or visual_brief) +
+                                          ". CRITICAL: the pattern MUST tile PERFECTLY across all four edges "
+                                          "with no visible seam — edges must wrap continuously.")
+                            current = self._stage_pod_design(task_id, product_name, seam_brief, task_type, report,
+                                                             display_text=display_text)
+                            if not current:
+                                break
+                        continue
+                except Exception as e:
+                    logger.warning(f"PipelineOrchestrator: seamless check raised for {task_id}: {e}")
+
             try:
                 result = svc.review_asset_file(current, product_name, task_type, visual_brief)
             except Exception as e:
@@ -1130,13 +1156,39 @@ class PipelineOrchestrator:
                     logger.warning(f"PipelineOrchestrator: set piece {i} QA raised for {task_id}: {e}")
                 pieces.append(piece_path)
 
-            # do the 3 pieces actually share a palette? (a clashing set is a bad
-            # product) — soft signal, logged/reported, not a hard block.
+            # 2-2: do the 3 pieces actually share a palette? A clashing "coordinated
+            # set" is a bad product — no longer just a log line. Regenerate the
+            # single OUTLIER piece once, matched to the others' palette; if it still
+            # clashes, block the task.
             tol = float(getattr(settings, "WALL_ART_SET_PALETTE_TOL", 0.42))
             consistency = WallArtSetService.palette_consistent([str(p) for p in pieces], tol=tol)
             if not consistency["consistent"]:
                 logger.warning(f"PipelineOrchestrator: wall-art set {task_id} palette mismatch "
-                               f"(max_distance={consistency['max_distance']} > {tol})")
+                               f"(max_distance={consistency['max_distance']} > {tol}) — regenerating outlier")
+                if len(pieces) == 3:
+                    oi = self._palette_outlier(consistency.get("pairs") or [], len(pieces))
+                    good = [p for i, p in enumerate(pieces) if i != oi]
+                    try:
+                        palette = WallArtSetService.dominant_palette(str(good[0]))
+                        pal_str = ", ".join(f"rgb{tuple(c)}" for c in (palette or [])[:4])
+                        regen_brief = (f"{visual_brief}. CRITICAL: MATCH the exact color palette of the other "
+                                       f"prints in this set ({pal_str}) — same colors, style, and mood so all "
+                                       "three hang together as one gallery-wall set.")
+                        res = PODPipelineService().build_product_record(
+                            task_id=task_id, product_name=f"{product_name} (piece {oi+1} recolor)",
+                            visual_brief=regen_brief, product_type="digital_download",
+                            aspect_ratio="1:1", resolution="2K", filename=f"set_piece_{oi+1}.png")
+                        newp = res.get("design_path")
+                        if newp:
+                            pieces[oi] = Path(newp)
+                            consistency = WallArtSetService.palette_consistent([str(p) for p in pieces], tol=tol)
+                    except Exception as e:
+                        logger.warning(f"PipelineOrchestrator: outlier recolor failed for {task_id}: {e}")
+                if not consistency["consistent"]:
+                    self._block_task(task_id, f"wall-art set pieces clash (palette max_distance "
+                                     f"{consistency['max_distance']} > {tol}) after outlier regen", report, pre_listing=True)
+                    report["stages"]["wall_art_set"] = {"ok": False, "error": "palette mismatch after regen"}
+                    return None
 
             # gallery-wall listing photo, registered as the delivery asset so the
             # hard delivery gate is satisfied by a single representative artifact.
@@ -1184,6 +1236,18 @@ class PipelineOrchestrator:
             self._alert("Wall-art set generation failed", f"task_id={task_id}: {e}")
             report["stages"]["wall_art_set"] = {"ok": False, "error": str(e)}
             return None
+
+    @staticmethod
+    def _palette_outlier(pairs: list, n: int) -> int:
+        """2-2: the piece index with the greatest total palette distance to the
+        others (the one to regenerate)."""
+        totals = [0.0] * n
+        for pr in pairs or []:
+            a, b, d = pr.get("a"), pr.get("b"), pr.get("distance", 0.0)
+            if a is not None and b is not None:
+                totals[a] += d
+                totals[b] += d
+        return max(range(n), key=lambda i: totals[i]) if n else 0
 
     def _stage_pdf_design(self, task, task_id: str, product_name: str, visual_brief: str, output_data: dict, report: dict) -> Optional[Path]:
         from config import settings

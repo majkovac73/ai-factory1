@@ -216,12 +216,25 @@ def seasonal_seed_keywords(today: date = None, max_seeds: int = 6) -> list:
 
 def occasion_for(name: str, description: str = "") -> str:
     """1-4: the event KEY a concept is for (by keyword match), or None. Unlike
-    occasion_mismatch this is date-independent — it just labels the product."""
+    occasion_mismatch this is date-independent — it just labels the product.
+
+    2-7: match ALL events and prefer the LONGEST matched keyword (most specific)
+    so "Christmas gratitude planner" maps to christmas (matched 'christmas', 9
+    chars) not thanksgiving (matched 'gratitude', 9)/first-in-table — table
+    ordering no longer decides, specificity does."""
     text = f"{name or ''} {description or ''}".lower()
+    best_key, best_score = None, None
     for ev in _EVENTS:
-        if any(kw in text for kw in ev["match"]):
-            return ev["key"]
-    return None
+        for kw in ev["match"]:
+            pos = text.find(kw)
+            if pos < 0:
+                continue
+            # prefer the LONGEST match; break ties by the EARLIEST position in the
+            # text (a title usually leads with its true subject).
+            score = (len(kw), -pos)
+            if best_score is None or score > best_score:
+                best_key, best_score = ev["key"], score
+    return best_key
 
 
 def occasion_in_window(key: str, today: date = None) -> bool:

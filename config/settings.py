@@ -261,6 +261,9 @@ class Settings(BaseSettings):
     # 1-5: max fraction of a coloring page that may be colored/grey-shaded before
     # it's rejected as "pre-colored" and regenerated (clean line art is ~0%).
     COLORING_PAGE_MAX_COLOR_FRACTION: float = 0.03
+    # 106 2-1: a seamless pattern above this edge mismatch does not tile and is
+    # regenerated / blocked (was log-only).
+    SEAMLESS_MAX_EDGE_MISMATCH: float = 22.0
 
     # Product-viability critic (step 102): an independent LLM judgment step that
     # scores a schema-valid concept 1-10 on whether a real stranger would
@@ -297,9 +300,11 @@ class Settings(BaseSettings):
     # 1-2: listings scoring <= this in an audit report are deactivated by the
     # shop-cleanup script / monthly dry-run tick (the critic's "erodes trust" band).
     SHOP_CLEANUP_MAX_SCORE: int = 3
-    # 3-2: formats where the listing PREVIEW is basically the product get a tiled
-    # watermark baked into the mockup's design layer (delivery files stay clean).
-    WATERMARK_FORMATS: list = ["coloring_page", "phone_wallpaper"]
+    # 3-2 / 106 2-3: formats where the listing PREVIEW is basically the product
+    # get a tiled watermark baked into the mockup's design layer (delivery files
+    # stay clean). sticker_sheet_design + seamless_pattern also show ~the whole
+    # deliverable in the mockup, so a clean screenshot is a free copy.
+    WATERMARK_FORMATS: list = ["coloring_page", "phone_wallpaper", "sticker_sheet_design", "seamless_pattern"]
     WATERMARK_TEXT: str | None = None   # falls back to SHOP_NAME, then a default
     WATERMARK_ALPHA: int = 55           # 0-255 opacity of the tiled text
     SHOP_NAME: str | None = None

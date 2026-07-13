@@ -34,7 +34,9 @@ orch = PipelineOrchestrator()
 tmp = tempfile.mkdtemp()
 # stub PODPipelineService.build_product_record to honor the `filename` arg and
 # write a DISTINCT-colored image per piece (proves no clobber).
-colors = {"set_piece_1.png": (200, 60, 60), "set_piece_2.png": (60, 200, 60), "set_piece_3.png": (60, 60, 200)}
+# STEP106 2-2: the set now blocks on a palette clash, so use three CLOSE warm
+# tones — still distinct files/content (proving 1-3) but palette-consistent.
+colors = {"set_piece_1.png": (210, 120, 60), "set_piece_2.png": (205, 116, 55), "set_piece_3.png": (216, 126, 70)}
 made = []
 
 

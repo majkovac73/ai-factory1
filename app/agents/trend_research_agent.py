@@ -395,6 +395,15 @@ class TrendResearchAgent(BaseAgent):
         return None
 
     @staticmethod
+    def _tokens(text: str) -> set:
+        """2-5: significant lowercase tokens of a phrase (drops filler)."""
+        stop = {"the", "and", "for", "with", "your", "you", "our", "a", "an", "of",
+                "to", "in", "on", "printable", "digital", "instant", "download",
+                "set", "art", "print", "design"}
+        return {w for w in "".join(c if c.isalnum() or c.isspace() else " " for c in (text or "").lower()).split()
+                if len(w) > 2 and w not in stop}
+
+    @staticmethod
     def _retry_feedback_with_history(state: dict, base: str, data: dict = None, score: dict = None) -> str:
         """1-7: append this cycle's already-rejected concept names so the model
         doesn't re-propose near-variations of things already scored/rejected."""
@@ -654,8 +663,17 @@ Return ONLY valid JSON with this structure:
         description = (data.get("description") or "").strip()
         if not description:
             return "description is missing or empty"
-        if name.lower() not in description.lower():
-            return "description does not reference the specific product_name"
+        # 2-5: require the description to reference the product by its SIGNIFICANT
+        # tokens (>=2), not the exact verbatim name. Forcing the full name in led
+        # to awkward copy ("the Plant Parent Weekly Care Planner planner") and
+        # burned retries whenever the model paraphrased ("the Plant Parent planner").
+        name_toks = self._tokens(name)
+        if name_toks:
+            desc_toks = self._tokens(description)
+            overlap = len(name_toks & desc_toks)
+            need = min(2, len(name_toks))
+            if overlap < need:
+                return "description does not reference the product (needs >=2 of its key words)"
 
         # C-1: reject any concept that references a trademarked brand / character
         # / celebrity / franchise — an existential Etsy-suspension risk.
