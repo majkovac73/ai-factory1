@@ -54,12 +54,29 @@ class ProductScoreService:
 
     @classmethod
     def _demand(cls, concept: dict, trend_data: dict) -> tuple:
-        """0-10 from the matched trend keyword's direction. rising=10, flat=6,
-        falling=0; no matching keyword = 4 (unknown != good)."""
+        """0-10 from real Google-Trends signal. 1-4: FIRST check the specific
+        RISING QUERIES (a concept sparked by "capybara coloring page" rising under
+        "coloring pages" is genuine hot demand — 10). Only if no rising query
+        matches do we fall back to the matched seed keyword's direction. This
+        stops the demand axis from penalizing exactly the specific, original
+        concepts the judges reward.
+
+        Returns (points, why, matched_rising_query|None)."""
+        ctoks = cls._tokens(f"{concept.get('product_name','')} {concept.get('description','')}")
+        ctext = f"{concept.get('product_name','')} {concept.get('description','')}".lower()
+
+        # 1-4: rising queries first.
+        rq = (trend_data or {}).get("rising_queries") or {}
+        for seed, queries in rq.items():
+            for q in (queries or []):
+                ql = str(q).lower()
+                qtoks = cls._tokens(ql)
+                if ql in ctext or len(qtoks & ctoks) >= 2:
+                    return 10, f"matches rising query '{q}'", q
+
         it = (trend_data or {}).get("interest_trend") or {}
         if not it:
-            return 4, "no trend data"
-        ctoks = cls._tokens(f"{concept.get('product_name','')} {concept.get('description','')}")
+            return 4, "no trend data", None
         best_dir, best_kw = None, None
         rank = {"rising": 3, "flat": 2, "falling": 1}
         for kw, info in it.items():
@@ -68,9 +85,9 @@ class ProductScoreService:
                 if d and (best_dir is None or rank.get(d, 0) > rank.get(best_dir, 0)):
                     best_dir, best_kw = d, kw
         if best_dir is None:
-            return 4, "no matching trend keyword"
+            return 4, "no matching trend keyword", None
         pts = {"rising": 10, "flat": 6, "falling": 0}.get(best_dir, 4)
-        return pts, f"'{best_kw}' is {best_dir}"
+        return pts, f"'{best_kw}' is {best_dir}", None
 
     @staticmethod
     def _competition(concept: dict) -> tuple:
@@ -146,13 +163,19 @@ class ProductScoreService:
 
     def deterministic_breakdown(self, concept: dict, trend_data: dict,
                                recent_titles: list, today: date) -> dict:
-        d, d_why = self._demand(concept, trend_data)
+        d, d_why, rising_q = self._demand(concept, trend_data)
         c, c_why = self._competition(concept)
         p, p_why = self._price(concept)
         t, t_why = self._timing(concept, today)
         o, o_why = self._originality(concept, recent_titles)
+        # 1-4: feed the matched rising query forward so tags/title can use it.
+        if rising_q:
+            ctx = list(concept.get("seo_context") or [])
+            if rising_q not in ctx:
+                ctx.append(rising_q)
+                concept["seo_context"] = ctx
         return {
-            "demand": {"points": d, "max": 10, "why": d_why},
+            "demand": {"points": d, "max": 10, "why": d_why, "rising_query": rising_q},
             "competition": {"points": c, "max": 10, "why": c_why},
             "price": {"points": p, "max": 10, "why": p_why},
             "timing": {"points": t, "max": 5, "why": t_why},

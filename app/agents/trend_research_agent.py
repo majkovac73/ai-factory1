@@ -554,22 +554,43 @@ Return ONLY valid JSON with this structure:
             return ""
 
     def _attach_market(self, data: dict) -> None:
-        """A-2: look up real Etsy market data for the concept and attach it to
-        `data['market']`. Best-effort — never raises, never blocks."""
+        """A-2 / 1-5: look up real Etsy market data for the concept's NICHE and
+        attach it to `data['market']`. Searching the whole product name returns a
+        handful of listings (competition looks tiny → inflated 10/10 score); the
+        deterministic evidence the gate leans on was systematically wrong. Fix:
+        search the NORMALIZED niche query, and take the LARGER of the 3-4 token
+        query and the 2-token head-niche count (conservative). Best-effort."""
         try:
             import asyncio
             from app.services.etsy_market_service import EtsyMarketService
-            # Use the product name (minus format noise) as the search phrase.
-            keywords = (data.get("product_name") or "").strip()
-            if not keywords:
+            from app.core.search_query import normalize_market_query, head_niche_query
+            raw = (data.get("product_name") or "").strip()
+            query = normalize_market_query(raw) or raw
+            if not query:
                 return
-            market = asyncio.run(EtsyMarketService().validate_concept(keywords))
-            if market:
-                data["market"] = market
-                logger.info(
-                    f"TrendResearchAgent: market for '{keywords}': "
-                    f"competition={market.get('competition_count')}, p50={market.get('price_p50')}"
-                )
+            svc = EtsyMarketService()
+            market = asyncio.run(svc.validate_concept(query))
+            if not market:
+                return
+            market["query"] = query  # 1-5: auditability
+
+            # second, broader lookup on the 2-token head niche; take the LARGER
+            # competition count (a long query undercounts saturation).
+            head = head_niche_query(raw)
+            if head and head != query:
+                try:
+                    head_market = asyncio.run(svc.validate_concept(head))
+                    if head_market and (head_market.get("competition_count") or 0) > (market.get("competition_count") or 0):
+                        market["competition_count"] = head_market.get("competition_count")
+                        market["head_query"] = head
+                except Exception:
+                    pass
+
+            data["market"] = market
+            logger.info(
+                f"TrendResearchAgent: market for '{query}' (from '{raw}'): "
+                f"competition={market.get('competition_count')}, p50={market.get('price_p50')}"
+            )
         except Exception as e:
             logger.warning(f"TrendResearchAgent: market attach failed: {e}")
 

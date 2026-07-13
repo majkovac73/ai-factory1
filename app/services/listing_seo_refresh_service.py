@@ -56,14 +56,10 @@ class ListingSeoRefreshService:
     # ── keyword query for the market lookup ──────────────────────────────────
     @staticmethod
     def _query_from_listing(listing: dict) -> str:
-        """Derive a niche keyword query from the listing's own title (first few
-        content words) so top_titles reflects THIS listing's competitors."""
-        title = (listing.get("title") or "").lower()
-        stop = {"the", "and", "for", "with", "your", "you", "our", "a", "an", "of",
-                "to", "in", "on", "printable", "digital", "instant", "download"}
-        words = [w for w in "".join(c if c.isalnum() or c.isspace() else " " for c in title).split()
-                 if len(w) > 2 and w not in stop]
-        return " ".join(words[:4])
+        """Derive a niche keyword query from the listing's own title so top_titles
+        reflects THIS listing's competitors. 1-5: shared normalizer."""
+        from app.core.search_query import normalize_market_query
+        return normalize_market_query(listing.get("title") or "")
 
     # ── the actual rewrite (deterministic, pure) ─────────────────────────────
     @staticmethod
