@@ -937,6 +937,7 @@
       const [lastTs, setLastTs]   = useState(null);
       const [panel, setPanel]     = useState(null); // { type, key, idx? }
       const [pnl, setPnl]         = useState(null); // D-6: revenue vs spend
+      const [prod, setProd]       = useState(null); // 106 1-9: production monitor
 
       const fetch_ = useCallback(async () => {
         try {
@@ -969,6 +970,19 @@
         return () => clearInterval(id);
       }, []);
 
+      // 106 1-9: is the factory actually building products?
+      useEffect(() => {
+        const loadProd = async () => {
+          try {
+            const r = await apiFetch(`${API}/dashboard/production`);
+            if (r.ok) setProd(await r.json());
+          } catch (e) { /* non-fatal */ }
+        };
+        loadProd();
+        const id = setInterval(loadProd, POLL);
+        return () => clearInterval(id);
+      }, []);
+
       if (!data && !err)  return <div className="fscreen">INITIALIZING FACILITY…</div>;
       if (!data && err)   return <div className="fscreen err">CONNECTION LOST — {err}</div>;
 
@@ -986,6 +1000,15 @@
                   <b style={{ color: pnl.profit_usd >= 0 ? '#5bd97a' : '#e57373' }}>
                     ${pnl.profit_usd} profit
                   </b>{' '}({pnl.sales} {pnl.sales === 1 ? 'sale' : 'sales'})
+                </span>
+              )}
+              {prod && (
+                <span className="pnl-tile" title={`Products built — last 24h: ${prod.products_last_24h}, last 7d: ${prod.products_last_7d}. Concepts scored today: ${prod.concepts_scored_today}. Best today: ${prod.best_concept_today || '—'} (${prod.best_score_today != null ? prod.best_score_today : '—'})`}>
+                  🏭 {prod.products_last_24h}/24h · {prod.products_last_7d}/7d built{' '}
+                  <b style={{ color: prod.products_last_24h > 0 ? '#5bd97a' : '#e5b673' }}>
+                    ▸{prod.best_score_today != null ? prod.best_score_today : '—'} best today
+                  </b>
+                  {prod.has_near_miss ? ' ★near-miss' : ''}
                 </span>
               )}
               <span className={overall === 'ok' ? 'wstatus-ok' : 'wstatus-deg'}>

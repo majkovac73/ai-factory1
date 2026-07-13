@@ -40,6 +40,14 @@ def pnl():
     }
 
 
+@router.get("/production")
+def production_summary():
+    """1-9: the single most important business fact — is the factory building
+    products? Products created in the last 24h / 7d + today's best concept score."""
+    from app.services.production_monitor_service import ProductionMonitorService
+    return ProductionMonitorService().dashboard_summary()
+
+
 @router.get("/overview")
 def dashboard_overview():
     all_tasks = task_service.list_tasks()

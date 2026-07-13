@@ -117,6 +117,12 @@ class EtsyReceiptWorker:
                 except Exception as e:
                     logger.error(f"EtsyReceiptWorker: listing-stats tick failed: {e}")
 
+                # 1-9: daily zero-production check (alert if autonomy on + 0 built).
+                try:
+                    self._maybe_production_check()
+                except Exception as e:
+                    logger.error(f"EtsyReceiptWorker: production-check tick failed: {e}")
+
                 # Disk hygiene: prune old generated images so the volume doesn't fill.
                 try:
                     self._maybe_cleanup_images()
@@ -736,6 +742,19 @@ class EtsyReceiptWorker:
         state["last_image_cleanup_at"] = now
         self._save_state(state)
         logger.info(f"EtsyReceiptWorker: image-cleanup tick done — {report}")
+
+    def _maybe_production_check(self):
+        """1-9: once per day, alert if the factory is autonomously enabled but has
+        built nothing in 24h (the single most important business fact)."""
+        state = self._load_state()
+        now = int(datetime.now(timezone.utc).timestamp())
+        if now - state.get("last_production_check_at", 0) < 24 * 3600:
+            return
+        from app.services.production_monitor_service import ProductionMonitorService
+        rep = ProductionMonitorService().run_zero_production_check()
+        state["last_production_check_at"] = now
+        self._save_state(state)
+        logger.info(f"EtsyReceiptWorker: production check — {rep}")
 
     def _maybe_poll_listing_stats(self):
         """A-10: once per day, poll active-listing views/favorites and record

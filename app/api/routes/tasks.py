@@ -21,6 +21,23 @@ def create_task(task: TaskCreate):
     return task_service.create_task(task)
 
 
+@router.post("/approve-concept", response_model=TaskResponse)
+def approve_concept(concept: dict):
+    """1-10: human-approve a concept (e.g. a near-miss from the daily alert) into
+    a real product task, bypassing the autonomous quality gate EXPLICITLY and
+    auditably (metadata.source='manual_approval'). The autonomous bar never moves.
+    Accepts the concept JSON as logged in a concept_near_miss/concept_scored event
+    (product_name, product_format, description, market, page_count, ...)."""
+    if not isinstance(concept, dict) or not concept.get("product_name") or not concept.get("product_format"):
+        raise HTTPException(status_code=400, detail="concept must include product_name and product_format")
+    from app.workers.autonomy_worker import AutonomyWorker
+    from app.core.product_formats import PRODUCT_FORMATS
+    if concept["product_format"] not in PRODUCT_FORMATS:
+        raise HTTPException(status_code=400, detail=f"unknown product_format '{concept['product_format']}'")
+    prompt, product_format, metadata = AutonomyWorker.build_task_from_concept(concept, source="manual_approval")
+    return task_service.create_task(TaskCreate(prompt=prompt, type=product_format, metadata=metadata))
+
+
 @router.get("/{task_id}", response_model=TaskResponse)
 def get_task(task_id: str):
     task = task_service.get_task(task_id)

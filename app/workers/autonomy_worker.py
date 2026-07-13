@@ -93,6 +93,51 @@ class AutonomyWorker:
                 except Exception:
                     pass
 
+    @staticmethod
+    def build_task_from_concept(concept: dict, source: str = "autonomy_worker"):
+        """Build (prompt, product_format, metadata) from a concept dict — shared
+        by the autonomous cycle AND the 1-10 manual-approval endpoint so both
+        create identical, fully-grounded tasks. `source` tags provenance."""
+        product_name = concept.get("product_name") or "Product"
+        product_format = concept.get("product_format") or "single_print"
+        description = concept.get("description", "")
+        target_audience = concept.get("target_audience", "")
+        page_count = concept.get("page_count")
+
+        prompt_parts = [f"Create a {product_format.replace('_', ' ')} product: {product_name}."]
+        if description:
+            prompt_parts.append(description)
+        if target_audience:
+            prompt_parts.append(f"Target audience: {target_audience}.")
+        prompt = " ".join(prompt_parts)
+
+        metadata = {"source": source, "product_name": product_name}
+        if page_count:
+            metadata["page_count"] = page_count
+        # A-2: carry the Etsy market data (real median price + winning titles).
+        market = concept.get("market")
+        if market:
+            metadata["market"] = market
+            if market.get("top_titles"):
+                metadata["seo_context"] = market["top_titles"]
+        # 1-4 (106-B): a rising-query match also lands in seo_context.
+        if concept.get("seo_context"):
+            existing = metadata.get("seo_context") or []
+            metadata["seo_context"] = list(dict.fromkeys(list(existing) + list(concept["seo_context"])))
+        # B-4: text-led flag + exact words for deterministic typography.
+        if concept.get("text_led") and concept.get("display_text"):
+            metadata["text_led"] = True
+            metadata["display_text"] = concept["display_text"]
+        # 1-4: stamp the occasion so the seasonal lifecycle can manage it.
+        try:
+            from app.core.seasonality import occasion_for
+            occ = occasion_for(product_name, description)
+            if occ:
+                metadata["occasion"] = occ
+        except Exception:
+            pass
+        return prompt, product_format, metadata
+
     def _run_cycle(self):
         from app.services.autonomy_service import AutonomyService
         from app.services.task_service import TaskService
@@ -130,45 +175,9 @@ class AutonomyWorker:
             return
 
         product_name = opportunity.get("product_name") or "Product"
-        product_format = opportunity.get("product_format") or "single_print"
-        description = opportunity.get("description", "")
-        target_audience = opportunity.get("target_audience", "")
-        page_count = opportunity.get("page_count")
 
-        prompt_parts = [f"Create a {product_format.replace('_', ' ')} product: {product_name}."]
-        if description:
-            prompt_parts.append(description)
-        if target_audience:
-            prompt_parts.append(f"Target audience: {target_audience}.")
-        prompt = " ".join(prompt_parts)
-
+        prompt, product_format, metadata = self.build_task_from_concept(opportunity, source="autonomy_worker")
         logger.info(f"AutonomyWorker: creating task for product: {product_name[:80]} (format={product_format})")
-
-        metadata = {"source": "autonomy_worker", "product_name": product_name}
-        if page_count:
-            metadata["page_count"] = page_count
-        # A-2: carry the Etsy market data (real median price + winning titles)
-        # so the listing stage grounds pricing and the executor grounds SEO.
-        market = opportunity.get("market")
-        if market:
-            metadata["market"] = market
-            if market.get("top_titles"):
-                metadata["seo_context"] = market["top_titles"]
-        # B-4: carry a text-led flag + exact words so the design stage renders
-        # the typography deterministically (no garbled Seedream text).
-        if opportunity.get("text_led") and opportunity.get("display_text"):
-            metadata["text_led"] = True
-            metadata["display_text"] = opportunity["display_text"]
-        # 1-4: stamp the occasion this product is FOR (if any) so the seasonal
-        # listing-lifecycle tick can deactivate it after the window closes and
-        # reactivate it when the window reopens next year.
-        try:
-            from app.core.seasonality import occasion_for
-            occ = occasion_for(product_name, description)
-            if occ:
-                metadata["occasion"] = occ
-        except Exception:
-            pass
 
         task_service = TaskService()
         task = task_service.create_task(TaskCreate(
