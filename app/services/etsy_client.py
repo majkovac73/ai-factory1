@@ -103,6 +103,25 @@ class EtsyClient:
 
             return response.json()
 
+    async def get_production_partners(self) -> dict:
+        """List the shop's declared production partners (for POD compliance —
+        ETSY_PRODUCTION_PARTNER_ID). Etsy endpoint:
+        GET /v3/application/shops/{shop_id}/production-partners. Uses the stored
+        OAuth token, so no manual key/token pasting."""
+        access_token = await get_valid_access_token()
+        api_key_header = f"{settings.ETSY_API_KEY}:{settings.ETSY_SHARED_SECRET}"
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{ETSY_API_BASE}/shops/{settings.ETSY_SHOP_ID}/production-partners",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "x-api-key": api_key_header,
+                },
+            )
+            if response.status_code >= 400:
+                raise Exception(f"Etsy API error {response.status_code}: {response.text}")
+            return response.json()
+
     async def get_listing(self, listing_id: str) -> dict:
         """
         Readback verification (step 93): re-fetch a listing to confirm real
