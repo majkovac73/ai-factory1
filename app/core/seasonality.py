@@ -126,7 +126,7 @@ _EVENTS = [
      "seeds": ["fathers day printable", "fathers day card printable", "gift for dad printable"],
      "match": ["father's day", "fathers day", "dad gift", "gift for dad"]},
     {"key": "back_to_school", "name": "Back to school", "date": lambda y: date(y, 9, 1),
-     "keyword": "back to school printable", "min_w": 4, "max_w": 10,
+     "keyword": "back to school printable", "min_w": 3, "max_w": 8,
      "seeds": ["back to school printable", "teacher appreciation printable", "classroom printable"],
      "match": ["back to school", "classroom", "teacher appreciation", "school planner"]},
     {"key": "halloween", "name": "Halloween", "date": lambda y: date(y, 10, 31),
@@ -267,9 +267,17 @@ def occasion_mismatch(name: str, description: str = "", today: date = None) -> s
     return None
 
 
-def seasonal_prompt_block(today: date = None) -> str:
-    """A dated prompt block: what buyers are shopping for NOW (positive) and which
-    occasions have passed / are too far out (negative — 1-3). '' if nothing near."""
+def seasonal_prompt_block(today: date = None, mode: str = "seasonal") -> str:
+    """A dated prompt block.
+
+    mode="seasonal": positively steer toward an in-window occasion (+ the negative
+      "don't build passed/too-far occasions" list).
+    mode="evergreen": do NOT steer toward any occasion — instruct the model to
+      build an EVERGREEN, year-round product, and keep only the negative list
+      (which now also names the CURRENT in-window occasions as ones to AVOID this
+      cycle, so the shop isn't 100% one occasion).
+
+    '' if there's nothing seasonally relevant to say."""
     today = today or date.today()
     positive = upcoming_occasions(today)
 
@@ -291,6 +299,21 @@ def seasonal_prompt_block(today: date = None) -> str:
         return ""
 
     parts = [f"\n\nSEASONAL TIMING — today is {today.isoformat()}."]
+    if mode == "evergreen":
+        # Evergreen cycle: build a year-round product, NOT tied to any occasion —
+        # including the ones currently in-window (so the catalog keeps a steady
+        # base of products that sell at any time).
+        parts.append(
+            "This is an EVERGREEN cycle: propose a product with STEADY YEAR-ROUND demand "
+            "(e.g. everyday wall art, planners, coloring pages, wallpapers, patterns) that is "
+            "NOT tied to any holiday, season, or occasion."
+        )
+        avoid = [o["occasion"] for o in positive] + passed + [f.split(" (~")[0] for f in far]
+        if avoid:
+            parts.append("Do NOT tie this product to any occasion — in particular avoid: "
+                         + "; ".join(dict.fromkeys(avoid)) + ".")
+        return " ".join(parts)
+
     if positive:
         names = ", ".join(f"{o['occasion']} (~{max(1, o['days_until'] // 7)} weeks away)" for o in positive)
         parts.append(

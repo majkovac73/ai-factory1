@@ -180,6 +180,12 @@ class Settings(BaseSettings):
     # 7-3: max in-season occasion seed phrases folded into the trend pull per
     # cycle (each is a separate pytrends fetch; keep modest to avoid 429).
     SEASONAL_SEED_MAX: int = 4
+    # Fraction of autonomy cycles that TARGET an in-window occasion; the rest
+    # build EVERGREEN products with year-round demand. Keeps the catalog from
+    # becoming 100% one occasion (e.g. all back-to-school in July) and guarantees
+    # a steady base of products that sell at any time. 0 = never seasonal,
+    # 1 = always seasonal-when-available.
+    SEASONAL_PRODUCT_RATIO: float = 0.30
     # 7-4: zero-view listing SEO refresh thresholds.
     SEO_REFRESH_MIN_AGE_DAYS: int = 21
     SEO_REFRESH_MAX_VIEWS: int = 5

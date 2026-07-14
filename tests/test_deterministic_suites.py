@@ -102,6 +102,7 @@ DETERMINISTIC = [
     "test_step106_nits.py",
     "test_pinterest_public_site.py",
     "test_pinterest_backfill.py",
+    "test_seasonal_evergreen_balance.py",
 ]
 
 

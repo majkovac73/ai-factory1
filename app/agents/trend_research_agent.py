@@ -91,6 +91,9 @@ class TrendResearchAgent(BaseAgent):
         self._insights_block: str = ""
         # 1-2/1-9/1-10: last cycle's persistent-search state (best failed concept).
         self._last_search: dict | None = None
+        # seasonal vs evergreen mode for THIS cycle (None = not decided / no
+        # enforcement, so direct _propose_product() calls in tests are unaffected).
+        self._seasonal_mode: bool | None = None
 
     def run(self) -> dict | None:
         """
@@ -123,23 +126,30 @@ class TrendResearchAgent(BaseAgent):
             )
             return None
 
-        # 1-7: vary the research topic. Every ~3rd cycle, when an occasion is in
-        # its buying window, research that occasion directly instead of the same
-        # fixed sentence every time — combats the attractor-concept problem that
-        # A-3 dedup only fights as a symptom.
+        # Decide this cycle's MODE: seasonal (target an in-window occasion) vs
+        # evergreen (year-round product). Only SEASONAL_PRODUCT_RATIO of cycles are
+        # seasonal, so the catalog keeps a steady evergreen base instead of becoming
+        # 100% whatever single occasion happens to be in-window (e.g. all
+        # back-to-school in July). This mode gates the research topic, the concept
+        # prompt's seasonal block, and evergreen enforcement.
+        in_window = []
+        try:
+            from app.core.seasonality import upcoming_occasions
+            in_window = upcoming_occasions()
+        except Exception:
+            pass
+        ratio = float(getattr(settings, "SEASONAL_PRODUCT_RATIO", 0.30))
+        self._seasonal_mode = bool(in_window) and random.random() < ratio
+
         # 2-4: reflect the currently-proposable formats (POD paused → digital only).
         research_topic = (_RESEARCH_TOPIC_WITH_POD
                           if getattr(settings, "POD_APPAREL_ENABLED", False)
                           else _RESEARCH_TOPIC_DIGITAL)
-        try:
-            from app.core.seasonality import upcoming_occasions
-            in_window = upcoming_occasions()
-            if in_window and random.random() < 0.34:
-                occ = random.choice(in_window)["occasion"]
-                research_topic = f"Etsy {occ} printable and wall-art products buyers want right now"
-        except Exception:
-            pass
-        logger.info(f"TrendResearchAgent: research topic = {research_topic!r}")
+        if self._seasonal_mode:
+            occ = random.choice(in_window)["occasion"]
+            research_topic = f"Etsy {occ} printable and wall-art products buyers want right now"
+        logger.info(f"TrendResearchAgent: mode={'seasonal' if self._seasonal_mode else 'evergreen'}, "
+                    f"research topic = {research_topic!r}")
 
         try:
             research = self._research.research(research_topic, _RESEARCH_SCOPE, real_trend_data=trend_data)
@@ -338,6 +348,20 @@ class TrendResearchAgent(BaseAgent):
                     state, f"{dup} Propose a clearly different product — different theme AND different wording.")
                 continue
 
+            # Evergreen cycle: reject occasion-tied concepts (cheap raw retry) so the
+            # SEASONAL_PRODUCT_RATIO actually holds and the shop keeps a year-round base.
+            if getattr(self, "_seasonal_mode", None) is False:
+                from app.core.seasonality import occasion_for
+                occ = occasion_for(data.get("product_name", ""), data.get("description", ""))
+                if occ:
+                    state["raw"] += 1
+                    logger.warning(f"TrendResearchAgent: raw attempt rejected — evergreen cycle got occasion '{occ}'")
+                    feedback = self._retry_feedback_with_history(
+                        state, f"This is an EVERGREEN cycle — do NOT propose an occasion/holiday product "
+                               f"(this one is tied to {occ}). Propose something with STEADY YEAR-ROUND demand, "
+                               "not tied to any season, holiday, or occasion.")
+                    continue
+
             data["confidence"] = data.get("confidence") or fallback_confidence
             # A-2: real Etsy market data (competition + prices + winning titles).
             self._attach_market(data)
@@ -423,12 +447,14 @@ class TrendResearchAgent(BaseAgent):
                  "variations of them):\n" + "\n".join(lines))
         return base + block
 
-    @staticmethod
-    def _seasonal_block() -> str:
-        """A-7: name the occasions buyers are shopping for right now."""
+    def _seasonal_block(self) -> str:
+        """A-7: the dated seasonal block — steer toward an in-window occasion in
+        SEASONAL cycles, or explicitly build EVERGREEN (and avoid occasions) in
+        evergreen cycles. Default (mode undecided) keeps the seasonal wording."""
         try:
             from app.core.seasonality import seasonal_prompt_block
-            return seasonal_prompt_block()
+            mode = "evergreen" if getattr(self, "_seasonal_mode", None) is False else "seasonal"
+            return seasonal_prompt_block(mode=mode)
         except Exception:
             return ""
 
