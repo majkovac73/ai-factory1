@@ -30,9 +30,14 @@ needs the container's DB + image assets to publish a real Pin.)
 """
 import argparse
 import asyncio
+import os
 import sys
 import time
 import webbrowser
+
+# Make the repo root importable when run as `python scripts/pinterest_demo.py`
+# (otherwise only scripts/ is on sys.path and `config`/`app` aren't found).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import httpx
 
