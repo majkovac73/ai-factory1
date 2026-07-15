@@ -13,10 +13,24 @@ from config import settings
 # refresh token — same rationale as etsy_oauth._refresh_lock).
 _refresh_lock = threading.Lock()
 
-PINTEREST_AUTH_URL = "https://www.pinterest.com/oauth"
-PINTEREST_TOKEN_URL = "https://api.pinterest.com/v5/oauth/token"
+PINTEREST_AUTH_URL = "https://www.pinterest.com/oauth"  # consent screen (same for both envs)
 
 _pending_states = set()
+
+
+# ── production / sandbox routing ─────────────────────────────────────────────
+def _sandbox() -> bool:
+    return bool(getattr(settings, "PINTEREST_SANDBOX", False))
+
+
+def api_base() -> str:
+    """v5 API base — sandbox when PINTEREST_SANDBOX is on."""
+    return "https://api-sandbox.pinterest.com/v5" if _sandbox() else "https://api.pinterest.com/v5"
+
+
+def token_url() -> str:
+    """OAuth token-exchange endpoint — sandbox when PINTEREST_SANDBOX is on."""
+    return f"{api_base()}/oauth/token"
 
 
 def is_connected() -> bool:
@@ -35,7 +49,6 @@ def is_connected() -> bool:
         db.close()
 
 
-PINTEREST_API_BASE = "https://api.pinterest.com/v5"
 
 
 async def list_boards() -> list:
@@ -50,7 +63,7 @@ async def list_boards() -> list:
             if bookmark:
                 params["bookmark"] = bookmark
             r = await client.get(
-                f"{PINTEREST_API_BASE}/boards",
+                f"{api_base()}/boards",
                 headers={"Authorization": f"Bearer {token}"},
                 params=params,
             )
@@ -72,7 +85,35 @@ async def get_user_account() -> dict:
     token = await get_valid_access_token()
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.get(
-            f"{PINTEREST_API_BASE}/user_account",
+            f"{api_base()}/user_account",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+async def create_board(name: str, description: str = "") -> dict:
+    """Create a board (POST /v5/boards). Handy for the sandbox demo, where the
+    test account starts with no boards to pin to."""
+    token = await get_valid_access_token()
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(
+            f"{api_base()}/boards",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"name": name, "description": description},
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+async def get_pin(pin_id: str) -> dict:
+    """Read a Pin back by id (GET /v5/pins/{id}) — used to confirm a created Pin
+    actually landed, especially in sandbox where there's no public pinterest.com
+    URL to open."""
+    token = await get_valid_access_token()
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.get(
+            f"{api_base()}/pins/{pin_id}",
             headers={"Authorization": f"Bearer {token}"},
         )
         r.raise_for_status()
@@ -135,7 +176,7 @@ async def exchange_code_for_token(code: str, state: str) -> dict:
 
     async with httpx.AsyncClient() as client:
         response = await client.post(
-            PINTEREST_TOKEN_URL,
+            token_url(),
             headers={
                 "Authorization": f"Basic {credentials}",
                 "Content-Type": "application/x-www-form-urlencoded",
@@ -181,6 +222,11 @@ def _needs_refresh(token) -> bool:
 
 
 async def get_valid_access_token() -> str:
+    # Sandbox: use the dashboard-generated sandbox token directly if provided
+    # (no OAuth/refresh needed) so a Trial-access app can create Pins in sandbox.
+    if _sandbox() and getattr(settings, "PINTEREST_SANDBOX_TOKEN", None):
+        return settings.PINTEREST_SANDBOX_TOKEN
+
     # Fast path: valid token, no lock needed.
     db = SessionLocal()
     try:
@@ -210,7 +256,7 @@ async def get_valid_access_token() -> str:
 
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    PINTEREST_TOKEN_URL,
+                    token_url(),
                     headers={
                         "Authorization": f"Basic {credentials}",
                         "Content-Type": "application/x-www-form-urlencoded",

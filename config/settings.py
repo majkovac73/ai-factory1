@@ -41,6 +41,13 @@ class Settings(BaseSettings):
     PINTEREST_APP_SECRET: str | None = None
     PINTEREST_REDIRECT_URI: str = "http://localhost:8000/pinterest/oauth/callback"
     PINTEREST_BOARD_ID: str | None = None
+    # Sandbox mode — route ALL Pinterest calls (OAuth token exchange + API) to
+    # https://api-sandbox.pinterest.com so an app on Trial access can actually
+    # create Pins (production blocks that until Standard access). If
+    # PINTEREST_SANDBOX_TOKEN is set, it's used directly (a token generated in the
+    # app dashboard's sandbox tab) and the browser OAuth step can be skipped.
+    PINTEREST_SANDBOX: bool = False
+    PINTEREST_SANDBOX_TOKEN: str | None = None
     # A-9: optional per-format Pinterest board routing (product_format ->
     # board_id) as a JSON env, e.g. '{"single_print":"123","pdf_planner_or_guide":"456"}'.
     # Falls back to PINTEREST_BOARD_ID when a format isn't mapped.

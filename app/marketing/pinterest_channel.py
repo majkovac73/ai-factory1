@@ -2,10 +2,8 @@ import asyncio
 import httpx
 
 from app.marketing.base import MarketingChannel
-from app.services.pinterest_oauth import get_valid_access_token
+from app.services.pinterest_oauth import get_valid_access_token, api_base
 from config import settings
-
-PINTEREST_API_BASE = "https://api.pinterest.com/v5"
 
 
 class PinterestChannel(MarketingChannel):
@@ -51,7 +49,7 @@ class PinterestChannel(MarketingChannel):
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    f"{PINTEREST_API_BASE}/pins",
+                    f"{api_base()}/pins",
                     headers={"Authorization": f"Bearer {access_token}"},
                     json=payload,
                 )

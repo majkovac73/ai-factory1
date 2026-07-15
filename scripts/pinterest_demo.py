@@ -51,10 +51,26 @@ def banner(step: str, text: str):
 
 
 def phase1_authenticate(base_url: str):
-    banner("1", "Starting REAL Pinterest OAuth (against pinterest.com — not sandbox)")
+    sandbox = bool(getattr(settings, "PINTEREST_SANDBOX", False))
+    env = "SANDBOX (api-sandbox.pinterest.com)" if sandbox else "PRODUCTION (api.pinterest.com)"
+    banner("1", f"Pinterest authentication — environment: {env}")
     print(f"App ID:        {settings.PINTEREST_APP_ID}")
     print(f"Redirect URI:  {settings.PINTEREST_REDIRECT_URI}")
     print("(Confirm this App ID is the correct one before recording.)\n")
+
+    # Sandbox with a dashboard-generated token: no browser OAuth needed — the
+    # token authenticates every call. (Trial-access apps can create Pins here.)
+    if sandbox and getattr(settings, "PINTEREST_SANDBOX_TOKEN", None):
+        print("Using the generated SANDBOX access token — authenticating with it directly.\n")
+        banner("2", "Confirming the token is accepted by Pinterest (sandbox)")
+        try:
+            account = asyncio.run(pinterest_oauth.get_user_account())
+        except Exception as e:
+            print(f"Sandbox token was rejected ({e}). Check PINTEREST_SANDBOX_TOKEN and its scopes. Aborting.")
+            sys.exit(1)
+        print(f"Authenticated as: {account.get('username')} "
+              f"(business: {account.get('business_name')}, id: {account.get('id')})", flush=True)
+        return None  # boards are fetched/created in phase 2
 
     # Ask the RUNNING app for the auth URL so the OAuth `state` is stored by the
     # process that will handle the callback (avoids 'Unknown or expired state').
@@ -106,9 +122,15 @@ def phase2_core_features(boards):
     for b in boards:
         print(f" - {b.get('name')} (id={b.get('id')}, {b.get('privacy')})")
     if not boards:
-        print("No boards found — create at least one real board on the connected "
-              "account before recording. Aborting.")
-        sys.exit(1)
+        # A fresh sandbox account has no boards — create one so there's a real
+        # destination for the Pin (also demonstrates board creation).
+        print("No boards yet — creating one to pin to...")
+        nb = asyncio.run(pinterest_oauth.create_board("AI Factory Demo", "Demo board"))
+        boards = [{"id": nb.get("id"), "name": nb.get("name"), "privacy": nb.get("privacy")}]
+        print(f" + created board '{boards[0]['name']}' (id={boards[0]['id']})")
+    # Pin to the first board (in sandbox this is the sandbox board), regardless of
+    # the PINTEREST_BOARD_ID env — so the demo is self-contained.
+    settings.PINTEREST_BOARD_ID = boards[0]["id"]
     time.sleep(1)
 
     banner("5", "Publishing a REAL Pin from a real shop product (the live marketing path)")
@@ -135,19 +157,32 @@ def phase2_core_features(boards):
     )
 
     if result.get("success"):
-        pin_url = result.get("url") or (f"https://www.pinterest.com/pin/{result.get('external_id')}/")
-        print(f"Pin created. id={result.get('external_id')}", flush=True)
-        banner("6", "Opening the created Pin on pinterest.com to confirm it's live")
-        print(f"Pin URL: {pin_url}\n", flush=True)
+        pin_id = result.get("external_id")
+        print(f"Pin created. id={pin_id}", flush=True)
+
+        banner("6", "Reading the Pin back from Pinterest to confirm it landed")
         try:
-            webbrowser.open(pin_url)
-        except Exception:
-            pass
-        input(">>> Confirm the Pin is visible on the real Pinterest page, then press Enter to finish...\n")
+            pin = asyncio.run(pinterest_oauth.get_pin(pin_id))
+            print(f" confirmed on Pinterest: id={pin.get('id')}, board_id={pin.get('board_id')}, "
+                  f"title={pin.get('title')!r}", flush=True)
+        except Exception as e:
+            print(f" (could not read the pin back: {e})", flush=True)
+
+        # Production has a public page; sandbox pins aren't public, so only open
+        # a browser when we're in production.
+        if not getattr(settings, "PINTEREST_SANDBOX", False):
+            pin_url = result.get("url") or f"https://www.pinterest.com/pin/{pin_id}/"
+            print(f"Pin URL: {pin_url}")
+            try:
+                webbrowser.open(pin_url)
+            except Exception:
+                pass
+            input(">>> Confirm the Pin is visible on the real Pinterest page, then press Enter to finish...\n")
+
         banner("7", "Demo complete")
-        print("Real OAuth authentication and the core Pinterest features (account read, "
-              "board listing, and publishing a live Pin) were all demonstrated against "
-              "production pinterest.com with real results.", flush=True)
+        print("Authentication and the core Pinterest features (account read, board "
+              "listing/creation, and publishing a Pin that lands on a real board) were "
+              "all demonstrated with real results.", flush=True)
         return
 
     # Pin publish failed — most likely the app is still on TRIAL access, which
