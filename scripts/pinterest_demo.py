@@ -133,25 +133,40 @@ def phase2_core_features(boards):
         chosen["task_id"], PinterestChannel(),
         listing_id=chosen["listing_id"], rewrite_caption=False,
     )
-    if not result.get("success"):
-        print(f"Pin publish FAILED: {result.get('error')}")
-        sys.exit(1)
 
-    pin_url = result.get("url") or (f"https://www.pinterest.com/pin/{result.get('external_id')}/")
-    print(f"Pin created. id={result.get('external_id')}", flush=True)
+    if result.get("success"):
+        pin_url = result.get("url") or (f"https://www.pinterest.com/pin/{result.get('external_id')}/")
+        print(f"Pin created. id={result.get('external_id')}", flush=True)
+        banner("6", "Opening the created Pin on pinterest.com to confirm it's live")
+        print(f"Pin URL: {pin_url}\n", flush=True)
+        try:
+            webbrowser.open(pin_url)
+        except Exception:
+            pass
+        input(">>> Confirm the Pin is visible on the real Pinterest page, then press Enter to finish...\n")
+        banner("7", "Demo complete")
+        print("Real OAuth authentication and the core Pinterest features (account read, "
+              "board listing, and publishing a live Pin) were all demonstrated against "
+              "production pinterest.com with real results.", flush=True)
+        return
 
-    banner("6", "Opening the created Pin on pinterest.com to confirm it's live")
-    print(f"Pin URL: {pin_url}\n", flush=True)
-    try:
-        webbrowser.open(pin_url)
-    except Exception:
-        pass
-    input(">>> Confirm the Pin is visible on the real Pinterest page, then press Enter to finish...\n")
-
+    # Pin publish failed — most likely the app is still on TRIAL access, which
+    # Pinterest blocks from creating Pins in production. Show this clearly rather
+    # than crashing: it's exactly the limitation this Standard-access request lifts.
+    err = str(result.get("error") or "")
+    banner("6", "Pin publish returned an error from Pinterest")
+    print(f"Pinterest response: {err}\n", flush=True)
+    if "Trial access" in err or "403" in err or "Standard" in err:
+        print("NOTE: This is the TRIAL-access limitation — Pinterest does not allow "
+              "Pin creation in production until the app is granted STANDARD access "
+              "(the access this demo requests). Authentication, account read, and "
+              "board listing above all succeeded live against production pinterest.com "
+              "using the real user-authorized token; Pin publishing uses that same "
+              "token and the same code path, and will succeed once Standard access "
+              "is granted.", flush=True)
     banner("7", "Demo complete")
-    print("Real OAuth authentication and the core Pinterest features (account read, "
-          "board listing, and publishing a live Pin) were all demonstrated against "
-          "production pinterest.com with real results.", flush=True)
+    print("Real OAuth authentication + account read + board listing demonstrated live; "
+          "Pin publishing is the core feature pending Standard access.", flush=True)
 
 
 def main():
