@@ -37,23 +37,47 @@ class PinterestChannel(MarketingChannel):
 
         image_url = listing.get("image_url")
         image_b64 = listing.get("image_base64")
+        content_type = listing.get("image_content_type", "image/png")
+        # The refresh/backfill path supplies image_PATH (a local file), not base64
+        # — a Pin with no media_source is a 400. Read + base64-encode the file here.
+        if not image_b64 and not image_url:
+            image_path = listing.get("image_path")
+            if image_path:
+                try:
+                    import base64 as _b64
+                    import pathlib
+                    p = pathlib.Path(image_path)
+                    if p.exists() and p.suffix.lower() in (".png", ".jpg", ".jpeg"):
+                        image_b64 = _b64.b64encode(p.read_bytes()).decode()
+                        content_type = "image/jpeg" if p.suffix.lower() in (".jpg", ".jpeg") else "image/png"
+                except Exception:
+                    pass
+
         if image_b64:
             payload["media_source"] = {
                 "source_type": "image_base64",
-                "content_type": listing.get("image_content_type", "image/png"),
+                "content_type": content_type,
                 "data": image_b64,
             }
         elif image_url:
             payload["media_source"] = {"source_type": "image_url", "url": image_url}
 
+        if "media_source" not in payload:
+            return {"success": False, "external_id": None, "url": None,
+                    "error": "no usable image (Pinterest requires an image; provide a PNG/JPG "
+                             "image_path, image_base64, or image_url)"}
+
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=60) as client:
                 response = await client.post(
                     f"{api_base()}/pins",
                     headers={"Authorization": f"Bearer {access_token}"},
                     json=payload,
                 )
-                response.raise_for_status()
+                if response.status_code >= 400:
+                    # surface Pinterest's real reason, not a generic httpx string.
+                    return {"success": False, "external_id": None, "url": None,
+                            "error": f"{response.status_code}: {response.text[:500]}"}
                 data = response.json()
 
             return {
