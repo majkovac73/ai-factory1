@@ -64,6 +64,21 @@ async def list_boards() -> list:
     return boards
 
 
+async def get_user_account() -> dict:
+    """Fetch the connected account's basic profile (username, business name, id,
+    board/pin counts) via GET /v5/user_account, using the stored OAuth token
+    (needs the user_accounts:read scope). Read-only account info the app uses to
+    confirm which account is connected."""
+    token = await get_valid_access_token()
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.get(
+            f"{PINTEREST_API_BASE}/user_account",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        r.raise_for_status()
+        return r.json()
+
+
 def disconnect() -> dict:
     """Disconnect the Pinterest account and delete ALL Pinterest-derived data
     from our systems, immediately. This backs the privacy-policy promise (see

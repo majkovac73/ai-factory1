@@ -5,9 +5,19 @@ from app.services.pinterest_oauth import (
     exchange_code_for_token,
     disconnect as pinterest_disconnect,
     list_boards as pinterest_list_boards,
+    get_user_account as pinterest_get_user_account,
 )
 
 router = APIRouter()
+
+
+@router.get("/account")
+async def pinterest_account():
+    """The connected Pinterest account's basic profile (which account is linked)."""
+    try:
+        return await pinterest_get_user_account()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not fetch account (is Pinterest connected?): {e}")
 
 
 @router.get("/oauth/login")
