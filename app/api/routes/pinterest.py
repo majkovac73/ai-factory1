@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import HTMLResponse
 
 from app.services.pinterest_oauth import (
     build_authorization_url,
@@ -38,13 +39,43 @@ async def pinterest_boards():
         raise HTTPException(status_code=400, detail=f"Could not list boards (is Pinterest connected?): {e}")
 
 
-@router.get("/oauth/callback")
+def _oauth_result_page(title: str, heading: str, message: str, ok: bool) -> str:
+    color = "#2e7d32" if ok else "#c62828"
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>{title}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="font-family: system-ui, sans-serif; max-width: 520px; margin: 80px auto; padding: 0 24px; text-align: center; line-height: 1.6;">
+  <div style="font-size: 56px;">{'&#10003;' if ok else '&#10007;'}</div>
+  <h1 style="color: {color}; margin: 8px 0 4px;">{heading}</h1>
+  <p style="color: #444;">{message}</p>
+  <p style="color: #888; font-size: 14px;">You can close this tab and return to the app.</p>
+</body></html>"""
+
+
+@router.get("/oauth/callback", response_class=HTMLResponse, include_in_schema=False)
 async def pinterest_oauth_callback(code: str, state: str):
+    """Pinterest redirects the user's browser here after they click "Allow".
+    Returns a friendly HTML confirmation page (this is what the reviewer sees on
+    screen during the demo), not raw JSON."""
     try:
-        token_data = await exchange_code_for_token(code, state)
-        return {"status": "connected", "expires_in": token_data.get("expires_in")}
+        await exchange_code_for_token(code, state)
+        return HTMLResponse(_oauth_result_page(
+            "Connected — DesignsForAll",
+            "Pinterest account connected",
+            "Your Pinterest account is now authorized. The app can publish Pins on your behalf.",
+            ok=True,
+        ))
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"OAuth exchange failed: {e}")
+        return HTMLResponse(
+            _oauth_result_page(
+                "Connection failed — DesignsForAll",
+                "Connection failed",
+                f"We couldn't complete the Pinterest authorization: {e}",
+                ok=False,
+            ),
+            status_code=400,
+        )
 
 
 @router.post("/set-token")

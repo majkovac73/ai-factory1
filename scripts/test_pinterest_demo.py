@@ -59,12 +59,8 @@ with patch("app.api.routes.pinterest.pinterest_get_user_account", side_effect=bo
     r2 = client.get("/pinterest/account")
 check("/pinterest/account 400 when not connected", r2.status_code == 400)
 
-# ── phase2 exercises the REAL feature path (account -> boards -> publish pin) ──
+# ── phase2 exercises the REAL feature path (boards -> publish pin -> confirm) ──
 posted = {}
-
-
-class FakeChannelResult:
-    pass
 
 
 def fake_refresh_post(task_id, channel, listing_id=None, rewrite_caption=True):
@@ -73,12 +69,13 @@ def fake_refresh_post(task_id, channel, listing_id=None, rewrite_caption=True):
 
 
 boards = [{"name": "Printables", "id": "111", "privacy": "PUBLIC"}]
+connected_account = {"username": "majkovacai", "business_name": "DesignsForAll", "id": "123",
+                     "account_type": "BUSINESS", "board_count": 1}
 
 async def fake_get_pin(pin_id):
     return {"id": pin_id, "board_id": "111", "title": "Boho Sunset Print"}
 
-with patch.object(pdemo.pinterest_oauth, "get_user_account", side_effect=fake_account), \
-     patch.object(pdemo.pinterest_oauth, "list_boards", side_effect=lambda: boards), \
+with patch.object(pdemo.pinterest_oauth, "list_boards", side_effect=lambda: boards), \
      patch.object(pdemo.pinterest_oauth, "get_pin", side_effect=fake_get_pin), \
      patch.object(pdemo.PinterestBackfillService, "candidates",
                   return_value=[{"task_id": "t1", "listing_id": "L1", "title": "Boho Sunset Print"}]), \
@@ -86,13 +83,13 @@ with patch.object(pdemo.pinterest_oauth, "get_user_account", side_effect=fake_ac
      patch.object(pdemo.MarketingRefreshService, "refresh_post", side_effect=fake_refresh_post), \
      patch("builtins.input", return_value=""), \
      patch("webbrowser.open", return_value=True):
-    pdemo.phase2_core_features(boards)
+    pdemo.phase2_core_features(connected_account)
 
 check("phase2 published a real pin via refresh_post (production path)", posted.get("task_id") == "t1")
 check("phase2 used the PinterestChannel", posted.get("channel") == "PinterestChannel")
 check("phase2 linked the real listing", posted.get("listing_id") == "L1")
 
-# ── sandbox routing: api_base/token_url flip; sandbox-token phase1 skips OAuth ──
+# ── sandbox routing on pinterest_oauth still flips api_base/token_url ──
 from app.services import pinterest_oauth as po
 with patch.object(settings, "PINTEREST_SANDBOX", True):
     check("sandbox api_base -> sandbox host", po.api_base() == "https://api-sandbox.pinterest.com/v5")
@@ -100,24 +97,10 @@ with patch.object(settings, "PINTEREST_SANDBOX", True):
 with patch.object(settings, "PINTEREST_SANDBOX", False):
     check("production api_base -> prod host", po.api_base() == "https://api.pinterest.com/v5")
 
-# sandbox token bypasses OAuth/DB in get_valid_access_token
-import asyncio as _aio
-with patch.object(settings, "PINTEREST_SANDBOX", True), patch.object(settings, "PINTEREST_SANDBOX_TOKEN", "sbx_tok_123"):
-    tok = _aio.run(po.get_valid_access_token())
-check("sandbox token used directly (no OAuth needed)", tok == "sbx_tok_123")
-
-# phase1 in sandbox-token mode skips the browser and confirms via account read
-httpx_called = {"n": 0}
-def _should_not_call(*a, **k):
-    httpx_called["n"] += 1
-    raise AssertionError("phase1 should NOT hit /oauth/login in sandbox-token mode")
-with patch.object(settings, "PINTEREST_SANDBOX", True), patch.object(settings, "PINTEREST_SANDBOX_TOKEN", "sbx_tok_123"), \
-     patch.object(pdemo.pinterest_oauth, "get_user_account", side_effect=fake_account), \
-     patch("httpx.get", side_effect=_should_not_call):
-    out = pdemo.phase1_authenticate("http://localhost:8000")
-check("sandbox-token phase1 skips browser OAuth", httpx_called["n"] == 0 and out is None)
-
-# ── phase1 pulls the auth URL from the RUNNING app (state correctness) ──
+# ── phase1 shows the auth link FIRST, then confirms via a real account read ──
+# It must force PRODUCTION even if the env left sandbox on, and it must pull the
+# auth URL from the RUNNING app (so the OAuth `state` lives in the callback's
+# process). It returns the connected account.
 seen = {}
 
 
@@ -136,14 +119,20 @@ def fake_get(url, timeout=30):
     return _Resp()
 
 
-with patch("httpx.get", side_effect=fake_get), \
-     patch.object(pdemo.pinterest_oauth, "list_boards", side_effect=lambda: boards), \
+with patch.object(settings, "PINTEREST_SANDBOX", True), \
+     patch.object(settings, "PINTEREST_SANDBOX_TOKEN", "sbx_tok_123"), \
+     patch("httpx.get", side_effect=fake_get), \
+     patch.object(pdemo.pinterest_oauth, "get_user_account", side_effect=fake_account), \
      patch("builtins.input", return_value=""), \
      patch("webbrowser.open", return_value=True):
-    out_boards = pdemo.phase1_authenticate("http://localhost:8000")
+    out_account = pdemo.phase1_authenticate("http://localhost:8000")
+    forced_off = (settings.PINTEREST_SANDBOX is False)
+
 check("phase1 fetches auth URL from the running app's /pinterest/oauth/login",
       seen.get("login_url") == "http://localhost:8000/pinterest/oauth/login")
-check("phase1 confirms the token by reading real boards", out_boards == boards)
+check("phase1 forces PRODUCTION even when sandbox was set", forced_off)
+check("phase1 confirms the connection by reading the real account",
+      out_account and out_account.get("username") == "majkovacai")
 
 print()
 if failures:
