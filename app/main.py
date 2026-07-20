@@ -13,7 +13,7 @@ from app.api.api import api_router
 from app.api.auth import is_authorized
 from app.db.database import Base, engine
 from app.db.migrations import run_all_migrations
-from app.models import agent_execution, log, task, task_step, etsy_token, marketing_post, pinterest_token, tumblr_token, analytics_event, image_asset, pod_product, fulfillment_record  # noqa: F401
+from app.models import agent_execution, log, task, task_step, etsy_token, marketing_post, pinterest_token, pinterest_oauth_state, tumblr_token, analytics_event, image_asset, pod_product, fulfillment_record  # noqa: F401
 import app.core.providers.openrouter_image_provider  # noqa: F401 — triggers provider self-registration
 from app.workers.task_worker import TaskWorker
 from app.workers.etsy_receipt_worker import EtsyReceiptWorker

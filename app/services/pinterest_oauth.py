@@ -7,6 +7,7 @@ import httpx
 
 from app.db.database import SessionLocal
 from app.models.pinterest_token import PinterestToken
+from app.models.pinterest_oauth_state import PinterestOAuthState
 from config import settings
 
 # P0-10: serialize concurrent refreshes across threads (single-row, rotating
@@ -15,7 +16,55 @@ _refresh_lock = threading.Lock()
 
 PINTEREST_AUTH_URL = "https://www.pinterest.com/oauth"  # consent screen (same for both envs)
 
+# In-memory fallback only. The authoritative store is the pinterest_oauth_states
+# table (see _remember_state/_consume_state) so a `state` survives a server
+# restart/redeploy between generating the auth URL and handling the callback.
 _pending_states = set()
+_STATE_TTL = timedelta(hours=1)
+
+
+def _remember_state(state: str) -> None:
+    """Persist a pending OAuth state so the callback can validate it even after
+    a restart. Also kept in memory as a fallback if the DB write fails."""
+    _pending_states.add(state)
+    db = SessionLocal()
+    try:
+        db.add(PinterestOAuthState(state=state))
+        db.commit()
+    except Exception:
+        db.rollback()  # table missing / DB hiccup — in-memory fallback covers it
+    finally:
+        db.close()
+
+
+def _consume_state(state: str) -> bool:
+    """Return True and invalidate `state` if it's a known, unexpired pending
+    state. Checks the DB first (survives restarts), then the in-memory set.
+    Also prunes expired rows opportunistically."""
+    now = datetime.utcnow()
+    db = SessionLocal()
+    try:
+        db.query(PinterestOAuthState).filter(
+            PinterestOAuthState.created_at < now - _STATE_TTL
+        ).delete()
+        row = db.query(PinterestOAuthState).filter(
+            PinterestOAuthState.state == state
+        ).first()
+        if row is not None:
+            db.delete(row)
+            db.commit()
+            _pending_states.discard(state)
+            return True
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+    if state in _pending_states:
+        _pending_states.discard(state)
+        return True
+    return False
 
 
 # ── production / sandbox routing ─────────────────────────────────────────────
@@ -152,7 +201,7 @@ def build_authorization_url(
     # "Missing: ['boards:write']". user_accounts:read is included for account
     # reads / diagnostics. After changing scopes you MUST re-consent (reconnect).
     state = secrets.token_urlsafe(16)
-    _pending_states.add(state)
+    _remember_state(state)
 
     params = {
         "response_type": "code",
@@ -166,9 +215,8 @@ def build_authorization_url(
 
 
 async def exchange_code_for_token(code: str, state: str) -> dict:
-    if state not in _pending_states:
+    if not _consume_state(state):
         raise ValueError("Unknown or expired OAuth state")
-    _pending_states.discard(state)
 
     credentials = base64.b64encode(
         f"{settings.PINTEREST_APP_ID}:{settings.PINTEREST_APP_SECRET}".encode("utf-8")
