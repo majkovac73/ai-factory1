@@ -109,55 +109,65 @@ with tempfile.TemporaryDirectory() as tmp:
     report = {"stages": {}}
     paths = orch._build_listing_mockups("task-100g", delivery, report)
 
-    def _top_red_y(im, x):
-        for y in range(0, 1024):
+    def _top_red_y(im, x, h):
+        for y in range(0, h):
             px = im.getpixel((x, y))
             if px[0] > 150 and px[1] < 90 and px[2] < 90:
                 return y
         return None
 
-    # [1] two valid 1024x1024 PNG listing images named hero/lifestyle
+    # #8: mockups are now >=2000px, and the hero is LANDSCAPE (not 1:1). Checks
+    # are RESOLUTION-RELATIVE (fractions of each image's own size) rather than
+    # hardcoded 1024 coordinates.
+    from config import settings as _settings
     names = sorted(Path(p).name for p in paths)
     dims_ok = True
     design_ok = bg_ok = no_wm_ok = angled_ok = True
     for p in paths:
         with PILImage.open(p) as im:
             im = im.convert("RGB")
-            if im.size != (1024, 1024):
-                dims_ok = False
+            W, H = im.size
+            is_hero = Path(p).name == "hero.png"
+            # hero: landscape (LISTING_HERO_W x LISTING_HERO_H); others: square >=2000
+            if is_hero:
+                if (W, H) != (int(_settings.LISTING_HERO_W), int(_settings.LISTING_HERO_H)) or W <= H:
+                    dims_ok = False
+            else:
+                if W != H or W < 2000:
+                    dims_ok = False
             # [2] the composite CONTAINS the real design: the delivery red must
             #     be dominant in the central area where the print sits.
-            #     [5a] NO watermark: almost no light text pixels over the red.
             red = total = 0
-            for yy in range(300, 724, 8):
-                for xx in range(300, 724, 8):
+            for yy in range(int(H * 0.30), int(H * 0.70), max(1, H // 128)):
+                for xx in range(int(W * 0.30), int(W * 0.70), max(1, W // 128)):
                     px = im.getpixel((xx, yy)); total += 1
                     if px[0] > 150 and px[1] < 90 and px[2] < 90:
                         red += 1
-            if red < total * 0.25:
+            if total == 0 or red < total * 0.25:
                 design_ok = False
-            # NO watermark: in a TIGHT central box (deep inside the solid design,
-            # away from the white matte border) there should be ~no light pixels;
-            # a tiled watermark would blend many.
-            light = 0
-            for yy in range(460, 566, 6):
-                for xx in range(460, 566, 6):
+            # NO watermark: in a TIGHT central box (deep inside the solid design)
+            # there should be ~no light pixels; a tiled watermark would blend many.
+            light = ltot = 0
+            for yy in range(int(H * 0.45), int(H * 0.55), max(1, H // 170)):
+                for xx in range(int(W * 0.45), int(W * 0.55), max(1, W // 170)):
+                    ltot += 1
                     px = im.getpixel((xx, yy))
                     if px[0] > 150 and px[1] > 110 and px[2] > 110:
                         light += 1
-            if light > 4:
+            if light > max(4, ltot * 0.05):
                 no_wm_ok = False
             if im.getpixel((5, 5)) == DELIVERY_COLOR:
                 bg_ok = False
             # [5b] ANGLED: the design's top edge is NOT horizontal (perspective /
             #      rotation), so a screenshot isn't a clean flat rectangle.
-            tops = [t for t in (_top_red_y(im, x) for x in range(340, 690, 25)) if t is not None]
-            if not tops or (max(tops) - min(tops)) < 10:
+            xs = range(int(W * 0.34), int(W * 0.67), max(1, W // 40))
+            tops = [t for t in (_top_red_y(im, x, H) for x in xs) if t is not None]
+            if not tops or (max(tops) - min(tops)) < int(H * 0.01):
                 angled_ok = False
 
     EXPECTED_MOCKUPS = {"hero.png", "lifestyle.png", "styled.png", "desk.png"}
     if len(paths) == 4 and set(names) == EXPECTED_MOCKUPS and dims_ok:
-        ok("[1] four valid 1024x1024 listing mockups (A-8: hero, lifestyle, styled, desk)")
+        ok("[1] four valid >=2000px listing mockups, landscape hero (A-8 + #8)")
     else:
         fail("[1] mockup files", f"paths={paths}, dims_ok={dims_ok}")
 

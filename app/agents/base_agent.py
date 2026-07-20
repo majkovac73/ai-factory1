@@ -76,7 +76,11 @@ class BaseAgent:
         # 1-8: meter the text call in the daily spend ledger (best-effort).
         try:
             from app.services.autonomy_service import AutonomyService
-            AutonomyService().record_spend(self._text_cost(self.model), f"text LLM ({self.__class__.__name__})")
+            _txt_cost = self._text_cost(self.model)
+            AutonomyService().record_spend(_txt_cost, f"text LLM ({self.__class__.__name__})")
+            # #4: per-task cost ledger (attributed via cost_context).
+            from app.core.cost_context import record_cost
+            record_cost(_txt_cost, use_case="text_llm", provider="openrouter", model=self.model or "")
         except Exception:
             pass
 

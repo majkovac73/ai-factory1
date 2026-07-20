@@ -40,6 +40,26 @@ def pnl():
     }
 
 
+@router.get("/pnl-by-listing")
+def pnl_by_listing(limit: int = 100):
+    """#4: per-listing profit & loss (worst net first) so loss-makers surface —
+    joins per-task production cost (cost_incurred) + revenue − Etsy fees, resolved
+    to each real etsy_listing_id. Enables doubling down on winners and cutting
+    uniform losers instead of flying blind on unit economics."""
+    from app.services.revenue_service import RevenueService
+    rows = RevenueService().pnl_by_listing()
+    return {
+        "count": len(rows),
+        "rows": rows[: max(1, int(limit))],
+        "totals": {
+            "cost": round(sum(r["cost"] for r in rows), 2),
+            "revenue": round(sum(r["revenue"] for r in rows), 2),
+            "fees": round(sum(r["fees"] for r in rows), 2),
+            "net": round(sum(r["net"] for r in rows), 2),
+        },
+    }
+
+
 @router.get("/production")
 def production_summary():
     """1-9: the single most important business fact — is the factory building

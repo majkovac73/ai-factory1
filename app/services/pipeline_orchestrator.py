@@ -93,6 +93,22 @@ class PipelineOrchestrator:
         Execute all downstream stages for a task that just reached DONE.
         Returns a per-stage report dict; never raises.
         """
+        # #4: attribute every provider cost (image gen, vision-QA, text LLM) spent
+        # while processing this task to task_id, so per-product cost/profit exists.
+        from app.core.cost_context import cost_attribution
+        with cost_attribution(task_id):
+            report = self._run_post_completion(task_id)
+        # #15: persist per-stage provenance (task_steps + agent_executions summary)
+        # so which stage did what, at what cost, is auditable from the DB.
+        try:
+            from app.services.execution_log_service import ExecutionLogService
+            if isinstance(report, dict) and report.get("stages"):
+                ExecutionLogService().record_pipeline_run(task_id, report)
+        except Exception as e:
+            logger.warning(f"PipelineOrchestrator: provenance logging failed for {task_id}: {e}")
+        return report
+
+    def _run_post_completion(self, task_id: str) -> dict:
         task = self.task_service.get_task(task_id)
         if not task:
             return {"error": f"Task {task_id} not found"}
@@ -815,27 +831,37 @@ class PipelineOrchestrator:
                 logger.warning(f"PipelineOrchestrator: no extractable PDF pages for mockups {task_id}")
                 report["stages"]["listing_images"] = {"ok": False, "error": "no extractable pdf pages", "source": "delivery_mockup"}
                 return []
+            # #8: hero is LANDSCAPE (>=2000px) to avoid Etsy grid cropping; the
+            # rest are >=2000px square. Sizes come from settings (LISTING_HERO_*,
+            # LISTING_IMAGE_SIZE) so they're tunable without a code change.
+            _hw, _hh = int(settings.LISTING_HERO_W), int(settings.LISTING_HERO_H)
+            _sq = int(settings.LISTING_IMAGE_SIZE)
             builders = [
-                ("hero.png", "pdf_page", lambda: mockups.build_mockup_bytes(str(page_pngs[0]), role="flatlay", size=1024, product_format=product_format)),
-                ("lifestyle.png", "pdf_fan", lambda: mockups.build_flatlay_bytes([str(p) for p in page_pngs], size=1024, product_format=product_format)),
+                ("hero.png", "pdf_page", lambda: mockups.build_mockup_bytes(str(page_pngs[0]), role="flatlay", size=_hw, height=_hh, product_format=product_format)),
+                ("lifestyle.png", "pdf_fan", lambda: mockups.build_flatlay_bytes([str(p) for p in page_pngs], size=_sq, product_format=product_format)),
             ]
         else:
             # A-8: more listing photos convert better; all are free PIL composites
             # of the already-verified design, and the P3-6 scene cache gives each
             # a different background for variety. 3-2: watermarked for formats
             # where the preview IS the product (see WATERMARK_FORMATS).
+            _hw, _hh = int(settings.LISTING_HERO_W), int(settings.LISTING_HERO_H)
+            _sq = int(settings.LISTING_IMAGE_SIZE)
             builders = [
-                ("hero.png", "framed", lambda: mockups.build_mockup_bytes(str(delivery_path), role="framed", size=1024, product_format=product_format)),
-                ("lifestyle.png", "flatlay", lambda: mockups.build_mockup_bytes(str(delivery_path), role="flatlay", size=1024, product_format=product_format)),
-                ("styled.png", "framed", lambda: mockups.build_mockup_bytes(str(delivery_path), role="framed", size=1024, product_format=product_format)),
-                ("desk.png", "flatlay", lambda: mockups.build_mockup_bytes(str(delivery_path), role="flatlay", size=1024, product_format=product_format)),
+                ("hero.png", "framed", lambda: mockups.build_mockup_bytes(str(delivery_path), role="framed", size=_hw, height=_hh, product_format=product_format)),
+                ("lifestyle.png", "flatlay", lambda: mockups.build_mockup_bytes(str(delivery_path), role="flatlay", size=_sq, product_format=product_format)),
+                ("styled.png", "framed", lambda: mockups.build_mockup_bytes(str(delivery_path), role="framed", size=_sq, product_format=product_format)),
+                ("desk.png", "flatlay", lambda: mockups.build_mockup_bytes(str(delivery_path), role="flatlay", size=_sq, product_format=product_format)),
             ]
 
         for fname, role, build in builders:
             try:
                 png = build()
                 p = Path(fs.save_bytes(png, task_id, "listing", fname))
-                validator.validate(p, use_case="listing")
+                # #8: the hero is intentionally landscape (not 1:1) — validate it
+                # against its own ratio so the square-listing rule doesn't reject it.
+                _ratio = (int(settings.LISTING_HERO_W), int(settings.LISTING_HERO_H)) if fname == "hero.png" else None
+                validator.validate(p, use_case="listing", expected_ratio=_ratio)
                 self.catalog.register(
                     task_id=task_id,
                     local_path=str(p),
@@ -1803,14 +1829,16 @@ class PipelineOrchestrator:
         from config import settings
 
         try:
-            # P0-6: skip BEFORE generating the pin image when Pinterest can't
-            # receive a post anyway (not configured / not OAuth-connected).
-            # enrich_listing_with_image below spends a real ~$0.04 image call;
-            # generating it only to have the post fail wasted money on every
-            # task while Pinterest is inactive.
-            from app.services.pinterest_oauth import is_connected as pinterest_connected
-            if not pinterest_connected():
-                report["stages"]["pinterest"] = {"skipped": "Pinterest not connected"}
+            # P0-6 / P1-5 (#1c,#5): skip BEFORE generating the pin image when
+            # Pinterest can't receive a post anyway. is_connected() only proves an
+            # OAuth token exists; a Trial-access app is "connected" yet 403s every
+            # pin-create (code 29), so we'd pay ~$0.04 for an image thrown away on
+            # every task. can_publish() additionally checks real publish capability
+            # (auto-detected from post history / operator override) and auto-resumes
+            # once Standard access lands.
+            from app.services.pinterest_oauth import can_publish as pinterest_can_publish
+            if not pinterest_can_publish():
+                report["stages"]["pinterest"] = {"skipped": "Pinterest cannot publish (not connected or Trial-blocked)"}
                 return
 
             marketing_svc = MarketingService()

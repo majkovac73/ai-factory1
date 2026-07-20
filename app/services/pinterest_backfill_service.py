@@ -69,7 +69,7 @@ class PinterestBackfillService:
 
     def run(self, apply: bool = False, limit: int = 50, sleep_seconds: float = 3.0,
             rewrite_caption: bool = True, include_already_pinned: bool = False) -> dict:
-        from app.services.pinterest_oauth import is_connected
+        from app.services.pinterest_oauth import can_publish
         from app.marketing.pinterest_channel import PinterestChannel
 
         cands = self.candidates(include_already_pinned=include_already_pinned)
@@ -80,8 +80,8 @@ class PinterestBackfillService:
             report["dry_run"] = [{"task_id": c["task_id"], "title": c["title"][:70]} for c in plan]
             return report
 
-        if not is_connected():
-            report["error"] = "Pinterest is not connected (set PINTEREST_APP_ID/SECRET/BOARD_ID and complete /pinterest/oauth/login)"
+        if not can_publish():
+            report["error"] = "Pinterest cannot publish (not connected, or Trial-blocked — set PINTEREST_CAN_PUBLISH once Standard access is granted)"
             return report
 
         channel = PinterestChannel()

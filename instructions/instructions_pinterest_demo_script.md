@@ -14,9 +14,9 @@ board. Do not use the sandbox environment or the manually-generated
 sandbox access token anywhere in this script; the existing app
 secret/OAuth flow already in production is what should be exercised here.
 
-**Confirm the correct App ID with Maj before starting** — there are two
-numbers in play (1587865 vs 1589935); make sure the redirect URI, app
-secret, and this script all target the one Maj confirms is correct.
+**Use production App ID `1589935`** (AUDIT 2026-07-20 #18: this is the current
+production app; `1587865` is a superseded, different app — do not use it). Make
+sure the redirect URI, app secret, and this script all target `1589935`.
 
 The goal is a single script that produces a clean, narratable,
 step-by-step console trace covering both authentication and the core

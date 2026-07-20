@@ -1,8 +1,14 @@
-# Instructions: Standalone site + privacy policy for Pinterest app review (App ID 1587865)
+# Instructions: Standalone site + privacy policy for Pinterest app review (App ID 1589935)
+
+> AUDIT 2026-07-20 #18: production standardizes on Pinterest **App ID `1589935`**
+> ("ai-factory2"). The older `1587865` app referenced historically below is a
+> DIFFERENT, superseded app — ignore it; do all review/OAuth/secret work against
+> `1589935`. (Occurrences of `1587865` retained only for historical context.)
 
 ## Context (read first)
 
-Pinterest rejected app 1587865 for two reasons:
+Pinterest rejected the older app (1587865) for two reasons — the same fixes apply
+to the current app 1589935:
 1. The app's "Main URL" and Privacy Policy URL both point to a GitHub
    repo. Pinterest requires a URL on a domain you actually control (not
    GitHub, not a social profile) — a "standalone website that represents
@@ -185,7 +191,8 @@ doesn't exist.
 ## Part C — What Maj needs to do manually (cannot be done by Claude Code)
 
 1. Confirm the deployed pages are really live and public (Part A2 above).
-2. Go to the Pinterest developer portal → the app with ID `1587865`.
+2. Go to the Pinterest developer portal → the app with ID `1589935` (the current
+   production app — NOT the superseded `1587865`).
 3. Edit the app's configuration:
    - **App website / Main URL** → the new landing page URL (e.g.
      `https://kind-liberation-production.up.railway.app/` or your chosen

@@ -104,6 +104,18 @@ DETERMINISTIC = [
     "test_pinterest_backfill.py",
     "test_pinterest_demo.py",
     "test_seasonal_evergreen_balance.py",
+    # Audit 2026-07-20 fixes
+    "test_audit_step3_enforce_streak.py",
+    "test_audit_step4_cost_ledger.py",
+    "test_audit_step7_seo_tags.py",
+    "test_audit_step8_image_resolution.py",
+    "test_audit_step9_10_learning_trend.py",
+    "test_audit_step11_blocked_tasks.py",
+    "test_audit_step12_http_backoff.py",
+    "test_audit_step14_db_logging.py",
+    "test_audit_step15_provenance.py",
+    "test_audit_step17_margin_guidance.py",
+    "test_audit_step19_visual_ip.py",
 ]
 
 

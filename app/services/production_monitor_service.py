@@ -111,11 +111,134 @@ class ProductionMonitorService:
             logger.warning(f"ProductionMonitorService: alert failed: {e}")
         return report
 
-    def _alert_once_per_day(self) -> bool:
+    # ── #11: blocked-task surfacing ──────────────────────────────────────────
+    @staticmethod
+    def blocked_tasks(hours: int = 24) -> dict:
+        """#11: tasks whose post-completion pipeline BLOCKED them (no verified
+        product) in the last `hours`, with the top reasons. Blocks are persisted
+        as output_data.pipeline_status='BLOCKED_NO_PRODUCT' (not a deletion and not
+        task.status, which stays DONE because the task's OWN QA passed — it's the
+        downstream listing that was refused). This makes them countable/alertable
+        so silent-failure regressions surface."""
+        from collections import Counter
+        from app.db.database import SessionLocal
+        from app.models.task import Task
+        cutoff = datetime.utcnow() - timedelta(hours=hours)
+        db = SessionLocal()
+        try:
+            rows = db.query(Task).filter(Task.updated_at >= cutoff).all()
+        except Exception:
+            # updated_at may be absent on very old rows; fall back to created_at.
+            rows = db.query(Task).filter(Task.created_at >= cutoff).all()
+        finally:
+            db.close()
+        blocked, reasons = [], Counter()
+        for t in rows:
+            od = t.output_data or {}
+            if od.get("pipeline_status") == "BLOCKED_NO_PRODUCT":
+                reason = str(od.get("pipeline_blocked_reason") or "unknown")
+                blocked.append(t.id)
+                # bucket by the leading phrase so counts are meaningful
+                reasons[reason.split(":")[0].strip()[:60]] += 1
+        return {"count": len(blocked), "task_ids": blocked[:50], "top_reasons": reasons.most_common(5)}
+
+    def run_blocked_tasks_check(self) -> dict:
+        """#11: daily 'N tasks blocked, top reasons' alert. At most once/UTC day."""
+        info = self.blocked_tasks(24)
+        report = {"blocked_24h": info["count"], "alerted": False, "top_reasons": info["top_reasons"]}
+        if info["count"] == 0:
+            return report
+        if not self._alert_once_per_day(marker_name="blocked_tasks_alert.json"):
+            report["alerted"] = "suppressed (already alerted today)"
+            return report
+        reasons = "; ".join(f"{r} ({n})" for r, n in info["top_reasons"]) or "see logs"
+        try:
+            from app.services.alert_service import AlertService
+            AlertService().send_alert_sync(
+                f"{info['count']} task(s) blocked in the last 24h",
+                f"The post-completion pipeline refused to publish {info['count']} product(s) "
+                f"(no verified deliverable). Top reasons: {reasons}. "
+                "Review GET /dashboard/production or the tasks' output_data.pipeline_blocked_reason.",
+                level="warning",
+            )
+            report["alerted"] = True
+        except Exception as e:
+            logger.warning(f"ProductionMonitorService: blocked-tasks alert failed: {e}")
+        return report
+
+    # ── #3: enforce-mode zero-passer streak guardrail ────────────────────────
+    def record_enforce_cycle_outcome(self, produced: bool) -> dict:
+        """#3: called once per autonomy cycle. While PRODUCT_SCORE_ENFORCE is on,
+        track CONSECUTIVE cycles that produced no passing concept; alert Maj the
+        moment the streak reaches PRODUCT_ENFORCE_ZERO_STREAK_ALERT so a gate that
+        is too tight for the current CONCEPT_MODEL can't silently halt the factory.
+        A produced cycle resets the streak. No-op when enforce is off.
+
+        This complements the daily run_zero_production_check (which is cause-blind
+        and fires at most once/day): this fires FAST and specifically attributes
+        the halt to the quality gate + names the day's best near-miss."""
+        from config import settings
+        if not bool(getattr(settings, "PRODUCT_SCORE_ENFORCE", False)):
+            self._write_streak(0)
+            return {"enforce": False, "streak": 0, "alerted": False}
+
+        threshold = int(getattr(settings, "PRODUCT_ENFORCE_ZERO_STREAK_ALERT", 3))
+        if produced:
+            self._write_streak(0)
+            return {"enforce": True, "streak": 0, "alerted": False}
+
+        streak = self._read_streak() + 1
+        self._write_streak(streak)
+        report = {"enforce": True, "streak": streak, "alerted": False}
+        # Alert exactly when the streak first reaches the threshold (== not >=) so
+        # we warn once per breach, not every cycle thereafter.
+        if threshold > 0 and streak == threshold:
+            stats = self.concept_stats_today()
+            near = ""
+            if stats.get("near_miss_total") is not None:
+                near = (f" Best near-miss today scored {stats['near_miss_total']} "
+                        f"(min {int(getattr(settings, 'PRODUCT_MIN_SCORE', 90))}).")
+            try:
+                from app.services.alert_service import AlertService
+                AlertService().send_alert_sync(
+                    "Quality gate is blocking ALL production",
+                    f"PRODUCT_SCORE_ENFORCE is on and {streak} consecutive cycles produced "
+                    f"ZERO passing concepts — the factory is building nothing.{near} "
+                    "The gate is likely too tight for the current CONCEPT_MODEL. "
+                    "Either set a stronger CONCEPT_MODEL (e.g. anthropic/claude-sonnet-5) "
+                    "or lower the floors / set PRODUCT_SCORE_ENFORCE=false until quality recovers. "
+                    "See GET /analytics/events?event_type=concept_scored.",
+                    level="warning",
+                )
+                report["alerted"] = True
+            except Exception as e:
+                logger.warning(f"ProductionMonitorService: enforce-streak alert failed: {e}")
+        return report
+
+    def _streak_marker(self):
+        from app.core.paths import get_data_dir
+        return get_data_dir() / "enforce_zero_passer_streak.json"
+
+    def _read_streak(self) -> int:
+        try:
+            m = self._streak_marker()
+            if m.exists():
+                return int(json.loads(m.read_text(encoding="utf-8")).get("streak", 0))
+        except Exception:
+            pass
+        return 0
+
+    def _write_streak(self, streak: int) -> None:
+        try:
+            self._streak_marker().write_text(json.dumps({"streak": int(streak)}), encoding="utf-8")
+        except Exception:
+            pass
+
+    def _alert_once_per_day(self, marker_name: str = "zero_production_alert.json") -> bool:
         from app.core.paths import get_data_dir
         import time as _t
         try:
-            marker = get_data_dir() / "zero_production_alert.json"
+            marker = get_data_dir() / marker_name
             last = 0
             if marker.exists():
                 last = json.loads(marker.read_text(encoding="utf-8")).get("at", 0)
@@ -129,6 +252,7 @@ class ProductionMonitorService:
     # ── dashboard tile ───────────────────────────────────────────────────────
     def dashboard_summary(self) -> dict:
         stats = self.concept_stats_today()
+        blocked = self.blocked_tasks(24)
         return {
             "products_last_24h": self.products_created(24),
             "products_last_7d": self.products_created(24 * 7),
@@ -136,4 +260,6 @@ class ProductionMonitorService:
             "best_score_today": stats["best_total"],
             "best_concept_today": stats["best_name"],
             "has_near_miss": stats["near_miss"] is not None,
+            "blocked_tasks_24h": blocked["count"],           # #11
+            "blocked_top_reasons": blocked["top_reasons"],   # #11
         }

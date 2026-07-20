@@ -224,7 +224,10 @@ class PDFGenerationService:
             "Do NOT include any photographs, decorative illustrations, clip-art, or "
             "food/object/scenery/people imagery; do NOT print paragraphs of body text, "
             "page numbers, 'page X of Y', 'print-ready', the shop or product name, or "
-            "any watermark. Just the clean, usable page layout."
+            "any watermark. Just the clean, usable page layout. "
+            # #19: visual-IP safety — no derivative/branded content.
+            "Entirely ORIGINAL: no recognizable characters, brand logos, trademarks, "
+            "or copyrighted artwork."
         )
 
     def _review_page(self, img: PILImage.Image, product_name: str, brief: str, page_num: int, total: int):

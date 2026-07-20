@@ -24,6 +24,14 @@ from config import settings
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ai-factory")
 
+# #14: persist WARNING/ERROR from the ai-factory logger into the `logs` table so
+# failures/spend are traceable from the DB (not just ephemeral stdout).
+try:
+    from app.services.log_service import install_db_log_handler
+    install_db_log_handler()
+except Exception as _e:  # never block startup on logging setup
+    logger.warning(f"AI Factory: could not install DB log handler: {_e}")
+
 run_all_migrations(engine)
 Base.metadata.create_all(bind=engine)
 

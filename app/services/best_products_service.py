@@ -93,6 +93,11 @@ class BestProductsService:
         fmt_earning = Counter(by_id[tid].type for tid, _ in earners if tid in by_id)
         zero_rev_formats = [(fmt, n) for fmt, n in fmt_total.items() if n >= 3 and fmt_earning.get(fmt, 0) == 0]
 
+        # #9: total lifetime tracked views across all product listings. Below a
+        # floor this internal signal is noise (7 views across 43 listings), so the
+        # learning loop should NOT bias toward it — the caller checks this.
+        total_views = self._total_tracked_views([t.id for t in product_tasks])
+
         return {
             "count": len(products),
             "has_sales": has_sales,
@@ -100,5 +105,21 @@ class BestProductsService:
             "top_task_types": type_counts.most_common(5),
             "top_keywords": keyword_counts.most_common(10),
             "zero_revenue_formats": zero_rev_formats,
+            "total_views": total_views,
             "products": products,
         }
+
+    def _total_tracked_views(self, task_ids: list) -> int:
+        """#9: sum the most-recent (lifetime) view count per product listing from
+        listing_stats events. Best-effort; 0 if unavailable."""
+        try:
+            from app.services.analytics_service import AnalyticsService
+            an = AnalyticsService()
+            total = 0
+            for tid in task_ids:
+                evs = an.get_events(event_type="listing_stats", entity_type="task", entity_id=tid, limit=1)
+                if evs:
+                    total += int((evs[0].payload or {}).get("views", 0) or 0)
+            return total
+        except Exception:
+            return 0

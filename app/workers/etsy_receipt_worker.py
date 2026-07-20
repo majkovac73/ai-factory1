@@ -811,10 +811,13 @@ class EtsyReceiptWorker:
         if now - state.get("last_production_check_at", 0) < 24 * 3600:
             return
         from app.services.production_monitor_service import ProductionMonitorService
-        rep = ProductionMonitorService().run_zero_production_check()
+        pms = ProductionMonitorService()
+        rep = pms.run_zero_production_check()
+        # #11: also surface blocked tasks (silent-failure signal) once per day.
+        blocked_rep = pms.run_blocked_tasks_check()
         state["last_production_check_at"] = now
         self._save_state(state)
-        logger.info(f"EtsyReceiptWorker: production check — {rep}")
+        logger.info(f"EtsyReceiptWorker: production check — {rep}; blocked — {blocked_rep}")
 
     def _maybe_poll_listing_stats(self):
         """A-10: once per day, poll active-listing views/favorites and record

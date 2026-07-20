@@ -109,6 +109,59 @@ def is_connected() -> bool:
         db.close()
 
 
+# Substrings that identify Pinterest's Trial-access pin-create rejection
+# (403, code 29: "Apps with Trial access may not create Pins in production").
+_TRIAL_BLOCK_MARKERS = ("trial access", "code 29", '"code":29', "may not create pins")
+
+
+def can_publish() -> bool:
+    """#1c/#5: True only when Pinterest is connected AND the app can actually
+    create Pins in production. A Trial-access app returns 403 code 29 on every
+    pin-create, so generating the (billable) pin image only to have the post fail
+    is pure loss (P1-5). The pipeline gates the pin stage on THIS, not merely
+    is_connected(), so it stops spending while Trial-blocked and auto-resumes the
+    moment Standard access lands.
+
+    Resolution order:
+      1. Not connected -> False.
+      2. PINTEREST_CAN_PUBLISH env explicitly set -> honor it (operator override:
+         force True the instant Standard access is granted, or False to hard-stop).
+      3. Auto-detect from marketing_posts history (most recent Pinterest attempt):
+         a `success` proves publishing works -> True; a Trial-403 failure proves it
+         doesn't -> False.
+      4. No history / indeterminate -> True (optimistic bootstrap: attempt once so
+         the very next attempt learns the real capability from the result).
+    """
+    if not is_connected():
+        return False
+
+    override = getattr(settings, "PINTEREST_CAN_PUBLISH", None)
+    if override is not None:
+        return bool(override)
+
+    from app.models.marketing_post import MarketingPost
+    db = SessionLocal()
+    try:
+        recent = (
+            db.query(MarketingPost)
+            .filter(MarketingPost.channel == "pinterest")
+            .order_by(MarketingPost.created_at.desc())
+            .limit(10)
+            .all()
+        )
+    finally:
+        db.close()
+
+    for post in recent:
+        if post.status == "success":
+            return True
+        blob = f"{post.error_message or ''}".lower()
+        if any(m in blob for m in _TRIAL_BLOCK_MARKERS):
+            return False
+    # No decisive signal in recent history -> attempt once so we can learn.
+    return True
+
+
 
 
 async def list_boards() -> list:

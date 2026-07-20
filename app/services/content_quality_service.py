@@ -138,6 +138,10 @@ class ContentQualityService:
             from app.services.autonomy_service import AutonomyService
             cost = getattr(settings, "VISION_QA_COST_USD", 0.002)
             AutonomyService().record_spend(cost, "vision QA")
+            # #4: per-task cost ledger (attributed via cost_context).
+            from app.core.cost_context import record_cost
+            record_cost(cost, use_case="vision_qa", provider="openrouter",
+                        model=getattr(settings, "CONTENT_QA_MODEL", ""))
         except Exception:
             pass
 

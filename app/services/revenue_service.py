@@ -204,6 +204,92 @@ class RevenueService:
 
         return breakdown
 
+    def get_total_cost(self, task_id: Optional[str] = None) -> dict:
+        """#4: total recorded production cost (cost_incurred events) for a task, or
+        shop-wide when task_id is None. This is the SPEND side of unit economics —
+        image gen + vision-QA + text-LLM dollars attributed per task via
+        cost_context."""
+        events = self.analytics_service.get_events(
+            event_type="cost_incurred", entity_type="task",
+            entity_id=task_id, limit=100000,
+        )
+        by_use: dict = {}
+        for e in events:
+            uc = (e.payload or {}).get("use_case", "other")
+            by_use[uc] = round(by_use.get(uc, 0.0) + (e.value or 0), 6)
+        return {
+            "total_cost": round(sum(e.value or 0 for e in events), 4),
+            "cost_count": len(events),
+            "by_use_case": by_use,
+            "task_id": task_id,
+        }
+
+    def cost_by_task(self) -> dict:
+        """#4: {task_id -> total cost_incurred}."""
+        events = self.analytics_service.get_events(
+            event_type="cost_incurred", entity_type="task", limit=100000,
+        )
+        out: dict = {}
+        for e in events:
+            out[e.entity_id] = round(out.get(e.entity_id, 0.0) + (e.value or 0), 6)
+        return out
+
+    def pnl_by_listing(self) -> list:
+        """#4: per-listing profit & loss — the money view the whole optimization
+        loop needs. Joins cost_incurred (spend) + sale_recorded (revenue) −
+        fee_estimate (Etsy fees), keyed by task, resolved to its real
+        etsy_listing_id. Returns rows sorted by net ascending (worst first) so
+        loss-makers surface. A task with cost but no sale shows negative net
+        (correct: it's sunk cost until it sells)."""
+        costs = self.cost_by_task()
+        revenue = self.get_revenue_by_task()
+        fees_by_task: dict = {}
+        for e in self.analytics_service.get_events(event_type="fee_estimate", entity_type="task", limit=100000):
+            fees_by_task[e.entity_id] = round(fees_by_task.get(e.entity_id, 0.0) + (e.value or 0), 6)
+
+        task_ids = set(costs) | set(revenue) | set(fees_by_task)
+        if not task_ids:
+            return []
+
+        # Resolve task_id -> (listing_id, format, name)
+        meta = {}
+        try:
+            from app.db.database import SessionLocal
+            from app.models.task import Task
+            from app.services.marketing_refresh_service import MarketingRefreshService
+            refresh = MarketingRefreshService()
+            db = SessionLocal()
+            try:
+                for t in db.query(Task).filter(Task.id.in_(list(task_ids))).all():
+                    name = (t.output_data or {}).get("title") or t.title or t.id
+                    meta[t.id] = {"format": t.type or "unknown", "name": name}
+            finally:
+                db.close()
+            for tid in task_ids:
+                meta.setdefault(tid, {"format": "unknown", "name": tid})
+                meta[tid]["listing_id"] = refresh.resolve_listing_id(tid)
+        except Exception:
+            pass
+
+        rows = []
+        for tid in task_ids:
+            m = meta.get(tid, {})
+            cost = round(costs.get(tid, 0.0), 4)
+            rev = round(revenue.get(tid, 0.0), 4)
+            fee = round(fees_by_task.get(tid, 0.0), 4)
+            rows.append({
+                "task_id": tid,
+                "listing_id": m.get("listing_id"),
+                "format": m.get("format", "unknown"),
+                "name": (m.get("name") or tid)[:80],
+                "cost": cost,
+                "revenue": rev,
+                "fees": fee,
+                "net": round(rev - fee - cost, 4),
+            })
+        rows.sort(key=lambda r: r["net"])
+        return rows
+
     def profit_by_format(self) -> dict:
         """3-5: per-format {sales, revenue, fees, net, avg_price} so the learning
         loop can bias by DOLLARS (a $12 planner ~ 4 coloring-page sales), not just

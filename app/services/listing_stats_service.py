@@ -31,10 +31,12 @@ class ListingStatsService:
         at = await get_valid_access_token()
         headers = {"Authorization": f"Bearer {at}",
                    "x-api-key": f"{settings.ETSY_API_KEY}:{settings.ETSY_SHARED_SECRET}"}
+        from app.core.http_backoff import request_with_backoff
         listings, offset = [], 0
         async with httpx.AsyncClient(timeout=30) as client:
             while True:
-                r = await client.get(
+                r = await request_with_backoff(  # #12: 429 backoff on the stats poll
+                    client, "GET",
                     f"{ETSY_API_BASE}/shops/{settings.ETSY_SHOP_ID}/listings/active",
                     headers=headers, params={"limit": 100, "offset": offset},
                 )
@@ -46,6 +48,7 @@ class ListingStatsService:
                 if len(page) < 100:
                     break
                 offset += 100
+                await asyncio.sleep(0.5)  # #12: gentle inter-page delay
         return listings
 
     @staticmethod

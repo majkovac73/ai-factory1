@@ -1,5 +1,6 @@
 import httpx
 
+from app.core.http_backoff import request_with_backoff
 from app.services.etsy_oauth import get_valid_access_token
 from config import settings
 
@@ -89,7 +90,8 @@ class EtsyClient:
                     pass
 
         async with httpx.AsyncClient() as client:
-            response = await client.post(
+            response = await request_with_backoff(  # #12: 429/5xx backoff
+                client, "POST",
                 f"{ETSY_API_BASE}/shops/{settings.ETSY_SHOP_ID}/listings",
                 headers={
                     "Authorization": f"Bearer {access_token}",
@@ -111,7 +113,8 @@ class EtsyClient:
         access_token = await get_valid_access_token()
         api_key_header = f"{settings.ETSY_API_KEY}:{settings.ETSY_SHARED_SECRET}"
         async with httpx.AsyncClient() as client:
-            response = await client.get(
+            response = await request_with_backoff(  # #12
+                client, "GET",
                 f"{ETSY_API_BASE}/shops/{settings.ETSY_SHOP_ID}/production-partners",
                 headers={
                     "Authorization": f"Bearer {access_token}",
@@ -133,7 +136,8 @@ class EtsyClient:
         api_key_header = f"{settings.ETSY_API_KEY}:{settings.ETSY_SHARED_SECRET}"
 
         async with httpx.AsyncClient() as client:
-            response = await client.get(
+            response = await request_with_backoff(  # #12
+                client, "GET",
                 f"{ETSY_API_BASE}/listings/{listing_id}",
                 headers={
                     "Authorization": f"Bearer {access_token}",
@@ -155,7 +159,8 @@ class EtsyClient:
         api_key_header = f"{settings.ETSY_API_KEY}:{settings.ETSY_SHARED_SECRET}"
 
         async with httpx.AsyncClient() as client:
-            response = await client.patch(
+            response = await request_with_backoff(  # #12
+                client, "PATCH",
                 f"{ETSY_API_BASE}/shops/{settings.ETSY_SHOP_ID}/listings/{listing_id}",
                 headers={
                     "Authorization": f"Bearer {access_token}",
@@ -174,7 +179,8 @@ class EtsyClient:
         access_token = await get_valid_access_token()
         api_key_header = f"{settings.ETSY_API_KEY}:{settings.ETSY_SHARED_SECRET}"
         async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.put(
+            response = await request_with_backoff(  # #12
+                client, "PUT",
                 f"{ETSY_API_BASE}/listings/{listing_id}/inventory",
                 headers={
                     "Authorization": f"Bearer {access_token}",
@@ -200,7 +206,8 @@ class EtsyClient:
         api_key_header = f"{settings.ETSY_API_KEY}:{settings.ETSY_SHARED_SECRET}"
 
         async with httpx.AsyncClient() as client:
-            response = await client.delete(
+            response = await request_with_backoff(  # #12
+                client, "DELETE",
                 f"{ETSY_API_BASE}/listings/{listing_id}",
                 headers={
                     "Authorization": f"Bearer {access_token}",

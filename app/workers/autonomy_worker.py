@@ -170,6 +170,14 @@ class AutonomyWorker:
         agent = TrendResearchAgent()
         opportunity = agent.run()
 
+        # #3: track the enforce-mode zero-passer streak so a too-tight gate that
+        # silently halts the factory is surfaced fast (not just by the daily check).
+        try:
+            from app.services.production_monitor_service import ProductionMonitorService
+            ProductionMonitorService().record_enforce_cycle_outcome(produced=bool(opportunity))
+        except Exception as e:
+            logger.warning(f"AutonomyWorker: enforce-streak tracking failed: {e}")
+
         if not opportunity:
             logger.info("AutonomyWorker: TrendResearchAgent returned no opportunity, skipping")
             return

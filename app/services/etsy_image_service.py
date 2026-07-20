@@ -53,6 +53,7 @@ import asyncio
 import mimetypes
 import httpx
 
+from app.core.http_backoff import request_with_backoff  # #12
 from app.services.etsy_oauth import get_valid_access_token
 from config import settings
 
@@ -117,7 +118,8 @@ class EtsyImageService:
         data = {"alt_text": alt_text[:250]} if alt_text else None
 
         async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
+            response = await request_with_backoff(  # #12
+                client, "POST",
                 f"{ETSY_API_BASE}/shops/{settings.ETSY_SHOP_ID}/listings/{listing_id}/images",
                 headers={
                     "Authorization": f"Bearer {access_token}",
@@ -146,7 +148,8 @@ class EtsyImageService:
         data = {"name": filename[:255]}
 
         async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(
+            response = await request_with_backoff(  # #12
+                client, "POST",
                 f"{ETSY_API_BASE}/shops/{settings.ETSY_SHOP_ID}/listings/{listing_id}/videos",
                 headers={
                     "Authorization": f"Bearer {access_token}",
@@ -194,7 +197,8 @@ class EtsyImageService:
         data = {"name": filename, "rank": 1}
 
         async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
+            response = await request_with_backoff(  # #12
+                client, "POST",
                 f"{ETSY_API_BASE}/shops/{settings.ETSY_SHOP_ID}/listings/{listing_id}/files",
                 headers={
                     "Authorization": f"Bearer {access_token}",
@@ -221,7 +225,8 @@ class EtsyImageService:
         """
         access_token = await get_valid_access_token()
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.delete(
+            response = await request_with_backoff(  # #12
+                client, "DELETE",
                 f"{ETSY_API_BASE}/shops/{settings.ETSY_SHOP_ID}/listings/{listing_id}/files/{listing_file_id}",
                 headers={
                     "Authorization": f"Bearer {access_token}",
@@ -237,7 +242,8 @@ class EtsyImageService:
     async def _patch_listing_state_active(self, listing_id: str) -> dict:
         access_token = await get_valid_access_token()
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.patch(
+            response = await request_with_backoff(  # #12
+                client, "PATCH",
                 f"{ETSY_API_BASE}/shops/{settings.ETSY_SHOP_ID}/listings/{listing_id}",
                 headers={
                     "Authorization": f"Bearer {access_token}",
@@ -297,7 +303,8 @@ class EtsyImageService:
         """
         access_token = await get_valid_access_token()
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(
+            response = await request_with_backoff(  # #12
+                client, "GET",
                 f"{ETSY_API_BASE}/listings/{listing_id}/images",
                 headers={
                     "Authorization": f"Bearer {access_token}",
@@ -322,7 +329,8 @@ class EtsyImageService:
         """
         access_token = await get_valid_access_token()
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(
+            response = await request_with_backoff(  # #12
+                client, "GET",
                 f"{ETSY_API_BASE}/shops/{settings.ETSY_SHOP_ID}/listings/{listing_id}/files",
                 headers={
                     "Authorization": f"Bearer {access_token}",

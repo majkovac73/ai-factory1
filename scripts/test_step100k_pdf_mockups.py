@@ -151,7 +151,14 @@ with tempfile.TemporaryDirectory() as tmp:
     regs = [c for c in catalog_calls if c.get("variant") == "listing" and c.get("agent") == "DeliveryMockup"]
     models = sorted(c.get("model") for c in regs)
     stage = report["stages"].get("listing_images", {})
-    dims_ok = all(PILImage.open(p).size == (1024, 1024) for p in paths)
+    # #8: mockups are now >=2000px; the hero is landscape, the fan is square.
+    from config import settings as _settings
+    def _dims_ok(p):
+        w, h = PILImage.open(p).size
+        if Path(p).name == "hero.png":
+            return (w, h) == (int(_settings.LISTING_HERO_W), int(_settings.LISTING_HERO_H)) and w > h
+        return w == h and w >= 2000
+    dims_ok = all(_dims_ok(p) for p in paths)
     if (len(paths) == 2 and names == ["hero.png", "lifestyle.png"] and all_pngs and raw_pdf_not_included
             and len(regs) == 2 and models == ["scene_composite:pdf_fan", "scene_composite:pdf_page"]
             and stage.get("source") == "delivery_mockup" and dims_ok):

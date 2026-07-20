@@ -90,18 +90,23 @@ class MockupService:
         self,
         design_path,
         role: str = "framed",
-        size: int = 1024,
+        size: int = None,
         product_format: str = None,
+        height: int = None,
     ) -> bytes:
-        """Return PNG bytes of a `size`x`size` mockup of the real design in a
-        `role` scene ('framed' or 'flatlay'). The design is composited at a
-        PERSPECTIVE ANGLE (foreshortened); for `product_format` in
-        settings.WATERMARK_FORMATS a tiled watermark is also baked into the
-        design layer (3-2)."""
+        """Return PNG bytes of a `size`x`height` mockup of the real design in a
+        `role` scene ('framed' or 'flatlay'). #8: defaults to
+        settings.LISTING_IMAGE_SIZE (>=2000px) instead of 1024; pass `height` for a
+        LANDSCAPE hero (e.g. 2000x1600) that isn't cropped in Etsy's grid. The
+        design is composited at a PERSPECTIVE ANGLE (foreshortened); for
+        `product_format` in settings.WATERMARK_FORMATS a tiled watermark is also
+        baked into the design layer (3-2)."""
+        w = int(size or getattr(settings, "LISTING_IMAGE_SIZE", 2000))
+        h = int(height or w)
         design = Image.open(design_path).convert("RGB")
         design = self._maybe_watermark(design, product_format)
 
-        scene = self._scene(role, size)
+        scene = self._scene(role, w, h)
 
         if role == "flatlay":
             obj = self._flat_print(design)
@@ -114,13 +119,17 @@ class MockupService:
             fill = 0.66
             y_nudge = -0.03  # hang slightly above centre on the wall
 
-        target_w = int(size * fill)
+        # Fit the design within BOTH dimensions (so a portrait design still fits a
+        # landscape canvas without overflowing vertically).
+        target_w = int(w * fill)
         scale = target_w / obj.width
+        if obj.height * scale > h * 0.9:
+            scale = (h * 0.9) / obj.height
         obj = obj.resize((max(1, int(obj.width * scale)), max(1, int(obj.height * scale))), Image.LANCZOS)
 
         base = scene.convert("RGBA")
-        x = (size - obj.width) // 2
-        y = (size - obj.height) // 2 + int(size * y_nudge)
+        x = (w - obj.width) // 2
+        y = (h - obj.height) // 2 + int(h * y_nudge)
         base.alpha_composite(obj, (x, y))
         out = base.convert("RGB")
 
@@ -128,11 +137,12 @@ class MockupService:
         out.save(buf, format="PNG")
         return buf.getvalue()
 
-    def build_flatlay_bytes(self, page_paths, size: int = 1024, product_format: str = None) -> bytes:
+    def build_flatlay_bytes(self, page_paths, size: int = None, product_format: str = None) -> bytes:
         """Return PNG bytes of several REAL pages (e.g. a multi-page PDF planner)
         fanned out on a desk scene, each foreshortened + rotated so the preview
         shows the actual pages the buyer gets but isn't a usable flat copy. A
         single page falls back to the normal flat-lay."""
+        size = int(size or getattr(settings, "LISTING_IMAGE_SIZE", 2000))
         pages = [p for p in (page_paths or []) if p][:4]
         if not pages:
             raise ValueError("no pages to compose a flat-lay")
@@ -245,10 +255,13 @@ class MockupService:
 
     # ── Scene (generated, with a deterministic fallback) ───────────────────────
 
-    def _scene(self, role: str, size: int) -> Image.Image:
+    def _scene(self, role: str, size: int, height: int = None) -> Image.Image:
+        w, h = int(size), int(height or size)  # #8: support landscape canvases
         if getattr(settings, "MOCKUP_USE_GENERATED_SCENES", True):
             # P3-6: reuse a cached scene if we already have enough; the scene is
             # product-agnostic (empty wall/desk), so caching loses no quality.
+            # Scenes are cached square at 2K then ImageOps.fit-cropped to the
+            # requested (w,h), so a landscape hero reuses the same cache.
             cache_dir = get_data_dir() / "images" / "scenes"
             cached = []
             try:
@@ -260,7 +273,7 @@ class MockupService:
                 try:
                     pick = random.choice(cached)
                     scene = Image.open(pick).convert("RGB")
-                    return ImageOps.fit(scene, (size, size), Image.LANCZOS)
+                    return ImageOps.fit(scene, (w, h), Image.LANCZOS)
                 except Exception as e:
                     logger.warning(f"MockupService: cached scene load failed ({pick}): {e}")
 
@@ -282,32 +295,33 @@ class MockupService:
                     scene.save(cache_dir / f"{role}_{len(cached)}.png", format="PNG")
                 except Exception:
                     pass
-                return ImageOps.fit(scene, (size, size), Image.LANCZOS)
+                return ImageOps.fit(scene, (w, h), Image.LANCZOS)
             except Exception as e:
                 logger.warning(f"MockupService: scene generation failed ({role}), using PIL fallback: {e}")
-        return self._studio_bg(role, size)
+        return self._studio_bg(role, w, h)
 
-    def _studio_bg(self, role: str, size: int) -> Image.Image:
+    def _studio_bg(self, role: str, size: int, height: int = None) -> Image.Image:
         """Deterministic, always-clean fallback background: a soft studio radial
         gradient (framed) or a warm desk-tone gradient (flatlay)."""
+        w, h = int(size), int(height or size)
         if role == "flatlay":
             top, bottom = (232, 222, 208), (208, 192, 170)
         else:
             top, bottom = (250, 250, 252), (223, 224, 230)
-        bg = Image.new("RGB", (size, size), top)
+        bg = Image.new("RGB", (w, h), top)
         # vertical gradient
-        grad = Image.new("L", (1, size))
-        for y in range(size):
-            grad.putpixel((0, y), int(255 * (y / max(1, size - 1))))
-        grad = grad.resize((size, size))
-        bottom_img = Image.new("RGB", (size, size), bottom)
+        grad = Image.new("L", (1, h))
+        for y in range(h):
+            grad.putpixel((0, y), int(255 * (y / max(1, h - 1))))
+        grad = grad.resize((w, h))
+        bottom_img = Image.new("RGB", (w, h), bottom)
         bg = Image.composite(bottom_img, bg, grad)
-        # soft central vignette highlight
-        vig = Image.new("L", (size, size), 0)
+        # soft central vignette highlight (sized to the full canvas, w may != h)
+        vig = Image.new("L", (w, h), 0)
         d = ImageDraw.Draw(vig)
-        d.ellipse([size * 0.12, size * 0.10, size * 0.88, size * 0.86], fill=60)
-        vig = vig.filter(ImageFilter.GaussianBlur(size // 8))
-        light = Image.new("RGB", (size, size), (255, 255, 255))
+        d.ellipse([w * 0.12, h * 0.10, w * 0.88, h * 0.86], fill=60)
+        vig = vig.filter(ImageFilter.GaussianBlur(min(w, h) // 8))
+        light = Image.new("RGB", (w, h), (255, 255, 255))
         bg = Image.composite(light, bg, vig)
         return bg
 

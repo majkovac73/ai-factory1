@@ -43,24 +43,67 @@ class ListingGeneratorAgent(BaseAgent):
                             return out
         return out
 
+    # #7: generic-but-valid evergreen tags, used ONLY as a final backfill so a
+    # listing never ships with fewer than 13 tags (an empty slot is a search you
+    # can never appear in). Every one is <= 20 chars and a real buyer phrase.
+    _FILLER_TAGS = [
+        "digital download", "printable art", "instant download", "wall art print",
+        "home decor gift", "printable decor", "digital print", "art print gift",
+        "downloadable art", "printable gift", "modern wall art", "digital art print",
+        "printable wall art",
+    ]
+
+    @classmethod
+    def _to_valid_tag(cls, candidate: str):
+        """#7: normalize a candidate into an Etsy-valid tag — single-spaced,
+        stripped, and <= 20 chars WITHOUT cutting mid-word. Etsy matches whole tag
+        phrases, so a hard slice to 20 chars ("classroom organizati") matches no
+        real query and wastes the slot. Instead drop trailing WHOLE words until it
+        fits; return None if no valid (>=3 char) whole-word tag fits, so the slot
+        is backfilled with a real phrase rather than a fragment."""
+        if not candidate:
+            return None
+        words = " ".join(str(candidate).split()).strip().split()
+        while words and len(" ".join(words)) > cls.MAX_TAG_LENGTH:
+            words.pop()  # drop the trailing partial/overflowing word, keep whole words
+        tag = " ".join(words).strip()
+        if len(tag) < 3 or len(tag) > cls.MAX_TAG_LENGTH:
+            return None
+        return tag
+
+    @classmethod
+    def validate_tags(cls, tags: list) -> list:
+        """#7 post-generation gate: every tag must be non-empty, stripped, and
+        <= 20 chars (Etsy hard-truncates otherwise). Drops any invalid tag and
+        de-dupes. Callers should then have exactly MAX_TAGS."""
+        out, seen = [], set()
+        for t in tags or []:
+            if not isinstance(t, str):
+                continue
+            tag = t.strip()
+            if 3 <= len(tag) <= cls.MAX_TAG_LENGTH and tag == t.strip() and tag.lower() not in seen:
+                out.append(tag)
+                seen.add(tag.lower())
+        return out[: cls.MAX_TAGS]
+
     def _derive_tags(self, keywords: list, product_name: str = "", extra_terms: list = None) -> list:
         """
-        Converts SEO keywords into Etsy-compliant tags: max 20 chars each,
-        deduplicated, and — A-4 — PADDED to a full 13 tags. Every unused tag
-        slot is a search you can never appear in, so we fill them from the
-        product name's 2-3 word phrases and keyword combinations when the LLM
-        returns fewer than 13. Prefers multi-word phrases (they match Etsy
-        phrase searches better than single words).
+        Converts SEO keywords into Etsy-compliant tags: max 20 chars each (WHOLE
+        words, never mid-word — #7), deduplicated, and — A-4 — PADDED to a full 13
+        tags. Every unused tag slot is a search you can never appear in, so we fill
+        them from the product name's 2-3 word phrases, keyword combinations, and a
+        final generic-but-valid filler pool. Prefers multi-word phrases (they match
+        Etsy phrase searches better than single words).
         """
         tags = []
         seen = set()
 
         def _add(candidate: str) -> bool:
-            if not candidate:
+            tag = self._to_valid_tag(candidate)
+            if tag is None:
                 return False
-            tag = " ".join(candidate.split()).strip()[: self.MAX_TAG_LENGTH].strip()
             key = tag.lower()
-            if tag and key not in seen and len(tag) >= 3:
+            if key not in seen:
                 tags.append(tag)
                 seen.add(key)
                 return True
@@ -97,8 +140,15 @@ class ListingGeneratorAgent(BaseAgent):
             for m in modifiers:
                 _add(f"{w} {m}")
                 if len(tags) >= self.MAX_TAGS:
-                    return tags
-        return tags
+                    return self.validate_tags(tags)
+
+        # 5. #7: final generic-but-valid filler so we NEVER under-fill the 13 slots
+        # (18/45 live listings used only 3-8 tags — free discoverability lost).
+        for f in self._FILLER_TAGS:
+            _add(f)
+            if len(tags) >= self.MAX_TAGS:
+                break
+        return self.validate_tags(tags)
 
     def generate_listing(self, product: dict, seo_data: dict) -> dict:
         """

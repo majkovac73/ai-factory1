@@ -63,7 +63,13 @@ class PODDesignAgent(BaseAgent):
             "Artwork style, clean design suitable for printing. "
             "Centered composition, no bleed required, white or transparent background. "
             "Professional quality, no text unless it is integral to the design. "
-            "No borders, no watermarks, no drop shadows outside the design."
+            "No borders, no watermarks, no drop shadows outside the design. "
+            # #19: visual-IP safety — the text trademark screen catches branded
+            # NAMES but an AI image can still be derivative (a character silhouette,
+            # a known logo/art style). Instruct the generator away from that to
+            # reduce Etsy takedown/suspension risk. Not a legal guarantee.
+            "Must be entirely ORIGINAL: no recognizable characters, mascots, celebrities, "
+            "brand logos, trademarks, or copyrighted artwork/styles."
         )
 
     def generate_design(

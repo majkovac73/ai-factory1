@@ -118,7 +118,7 @@ class OpenRouterImageProvider(BaseImageProvider):
         # P0-13: record image spend at the single choke point every image passes
         # through, so the daily ledger is accurate (PDF pages, mockups, remakes,
         # pins — all counted). Best-effort: never let ledger I/O break generation.
-        self._record_image_spend()
+        self._record_image_spend(model_name)
 
         return ImageGenerationResult(
             url=None,
@@ -130,11 +130,14 @@ class OpenRouterImageProvider(BaseImageProvider):
 
 
     @staticmethod
-    def _record_image_spend():
+    def _record_image_spend(model_name: str = ""):
         try:
             from app.services.autonomy_service import AutonomyService
             cost = getattr(settings, "IMAGE_COST_USD", 0.04)
             AutonomyService().record_spend(cost, "image generation")
+            # #4: per-task cost ledger (attributed via cost_context).
+            from app.core.cost_context import record_cost
+            record_cost(cost, use_case="image", provider="openrouter", model=model_name)
         except Exception:
             pass
 

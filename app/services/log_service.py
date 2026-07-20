@@ -1,4 +1,6 @@
 import json
+import logging
+import threading
 import uuid
 from datetime import datetime
 
@@ -88,6 +90,32 @@ class LogService:
         finally:
             db.close()
 
+    def error_summary(self, hours: int = 24) -> dict:
+        """#14: quick DB-only view of persisted problems — count of ERROR/WARNING
+        rows in the window + the most recent few. Proves the 'every failure
+        traceable from the DB' rule now holds."""
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(hours=hours)
+        db = SessionLocal()
+        try:
+            rows = (
+                db.query(Log)
+                .filter(Log.level.in_(["ERROR", "CRITICAL", "WARNING"]), Log.created_at >= cutoff)
+                .order_by(Log.created_at.desc())
+                .limit(500)
+                .all()
+            )
+        finally:
+            db.close()
+        errors = [r for r in rows if r.level in ("ERROR", "CRITICAL")]
+        return {
+            "window_hours": hours,
+            "error_count": len(errors),
+            "warning_count": len(rows) - len(errors),
+            "recent": [{"level": r.level, "source": r.source, "message": (r.message or "")[:200]}
+                       for r in rows[:10]],
+        }
+
     def get_token_usage_summary(self):
         """
         Aggregates token usage across all logged LLM calls that carried
@@ -123,3 +151,47 @@ class LogService:
             "total_completion_tokens": total_completion_tokens,
             "total_tokens": total_tokens,
         }
+
+
+class DBLogHandler(logging.Handler):
+    """#14: forward WARNING+ log records into the `logs` table so failures are
+    traceable from the DB, not just ephemeral stdout that vanishes when the
+    container recycles. The audit found the logs table had ZERO ERROR/CRITICAL
+    rows despite real failures because every logger.warning/error(...) went to
+    stdout only. Installing this on the 'ai-factory' logger captures them all
+    without touching each call site.
+
+    A thread-local guard prevents infinite recursion if writing a log itself
+    logs; the write is best-effort (never raises into the logging path)."""
+
+    def __init__(self, level=logging.WARNING):
+        super().__init__(level=level)
+        self._svc = LogService()
+        self._guard = threading.local()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if getattr(self._guard, "active", False):
+            return
+        self._guard.active = True
+        try:
+            payload = {}
+            if record.exc_info:
+                payload["exc"] = logging.Formatter().formatException(record.exc_info)[:2000]
+            self._svc.log(
+                level=record.levelname,
+                source=record.name or "ai-factory",
+                message=str(record.getMessage())[:2000],
+                payload=payload,
+            )
+        except Exception:
+            pass  # logging must never crash the app
+        finally:
+            self._guard.active = False
+
+
+def install_db_log_handler(logger_name: str = "ai-factory", level=logging.WARNING) -> None:
+    """Attach a DBLogHandler to the named logger exactly once (idempotent)."""
+    lg = logging.getLogger(logger_name)
+    if any(isinstance(h, DBLogHandler) for h in lg.handlers):
+        return
+    lg.addHandler(DBLogHandler(level=level))

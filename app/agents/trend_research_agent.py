@@ -112,10 +112,6 @@ class TrendResearchAgent(BaseAgent):
         except Exception as e:
             logger.warning(f"TrendResearchAgent: could not load recent products for dedup: {e}")
             self._recent_products = []
-        # A-1: close the learning loop — bias new concepts toward what actually
-        # earned / got engagement, away from formats piling up unsold.
-        self._insights_block = self._load_insights_block()
-
         try:
             trend_data = TrendDataService().get_real_trend_signals()
             self._trend_data = trend_data or {}  # 1-1: for the demand subscore
@@ -125,6 +121,18 @@ class TrendResearchAgent(BaseAgent):
                 f"cycle rather than falling back to guessed data: {e}"
             )
             return None
+
+        # #10: record per-cycle trend coverage so it's measurable from the DB (not
+        # just stdout). If rising_query_count/matched are usually low, the "grounded
+        # in real demand" premise is weak (feeds the mediocrity in #2) — this makes
+        # that visible instead of a guess.
+        self._record_trend_signal(self._trend_data)
+
+        # A-1/#9: close the learning loop — bias new concepts toward what actually
+        # earned / got engagement, away from formats piling up unsold. Loaded AFTER
+        # trend_data so that, when internal signal is too sparse to trust (#9), it
+        # can steer toward the REAL rising queries in self._trend_data.
+        self._insights_block = self._load_insights_block()
 
         # Decide this cycle's MODE: seasonal (target an in-window occasion) vs
         # evergreen (year-round product). Only SEASONAL_PRODUCT_RATIO of cycles are
@@ -471,6 +479,44 @@ class TrendResearchAgent(BaseAgent):
             formats = [f for f in formats if f != "wall_art_set_3"]
         return formats
 
+    def _margin_guidance_block(self) -> str:
+        """#17: bias the concept generator toward higher-margin, less-saturated
+        formats. Ranks each proposable format by the net a sale nets after Etsy
+        fees (price-band midpoint x (1 - fee)), and explicitly de-prioritizes the
+        low-margin saturated formats (coloring_page, phone_wallpaper) that earn
+        almost nothing per sale and are hardest to rank as a new shop."""
+        try:
+            from app.core.product_formats import price_band_for
+            fee = (float(getattr(settings, "ETSY_TRANSACTION_FEE_PCT", 0.065))
+                   + float(getattr(settings, "ETSY_PAYMENT_FEE_PCT", 0.03)))
+            deprioritize = set(getattr(settings, "LOW_MARGIN_DEPRIORITIZE_FORMATS", []) or [])
+            ranked = []
+            for fmt in self._proposable_formats():
+                lo, hi = price_band_for(fmt)
+                mid = (lo + hi) / 2.0
+                net = round(mid * (1 - fee) - 0.25, 2)  # minus flat payment fee
+                ranked.append((fmt, net))
+            ranked.sort(key=lambda x: x[1], reverse=True)
+            if not ranked:
+                return ""
+            listed = ", ".join(f"{fmt} (~${net:.2f}/sale)" for fmt, net in ranked)
+            avoid = ", ".join(sorted(deprioritize)) if deprioritize else ""
+            block = (
+                "\n\nMARGIN GUIDANCE (unit economics matter — a $12 planner beats "
+                "4 coloring-page sales after fees):\n- Net-per-sale by format, best "
+                f"first: {listed}.\n- STRONGLY prefer the higher-margin formats. "
+            )
+            if avoid:
+                block += (
+                    f"Only propose a low-margin format ({avoid}) when the niche demand is "
+                    "genuinely exceptional (a specific, underserved, clearly-searched audience) — "
+                    "otherwise pick a higher-margin format."
+                )
+            return block
+        except Exception as e:
+            logger.warning(f"TrendResearchAgent: margin guidance failed: {e}")
+            return ""
+
     def _build_concept_prompt(self, insight: str, feedback: str) -> str:
         retry_note = f"\n\nIMPORTANT — retry feedback:\n{feedback}" if feedback else ""
         # B-1(b): only advertise POD when it's enabled.
@@ -524,7 +570,7 @@ allowed is wall_art_set_3 (exactly 3 coordinated prints), and only when it is
 listed as an available format above.
 
 Market insight:
-{insight}{self._insights_block}{self._seasonal_block()}{dedup_note}
+{insight}{self._insights_block}{self._margin_guidance_block()}{self._seasonal_block()}{dedup_note}
 
 Return ONLY valid JSON with this structure:
 {{
@@ -539,6 +585,30 @@ Return ONLY valid JSON with this structure:
 }}{retry_note}
 """
 
+    @staticmethod
+    def _record_trend_signal(trend_data: dict) -> None:
+        """#10: persist this cycle's trend coverage as a `trend_signal` analytics
+        event {keywords_fetched, rising_query_count, matched}. Best-effort."""
+        try:
+            rq = (trend_data or {}).get("rising_queries") or {}
+            keywords = (trend_data or {}).get("keywords") or []
+            rising_query_count = sum(len(v or []) for v in rq.values())
+            matched = sum(1 for v in rq.values() if v)  # keywords with >=1 rising query
+            from app.services.analytics_service import AnalyticsService
+            AnalyticsService().record_event(
+                event_type="trend_signal",
+                entity_type="cycle",
+                entity_id="trend_research",
+                value=float(rising_query_count),
+                payload={
+                    "keywords_fetched": len(keywords),
+                    "rising_query_count": rising_query_count,
+                    "matched": matched,
+                },
+            )
+        except Exception as e:
+            logger.warning(f"TrendResearchAgent: could not record trend_signal: {e}")
+
     def _load_insights_block(self) -> str:
         """A-1: a short block summarizing what's working (best formats/keywords,
         recorded revenue) and the current format mix, injected into the concept
@@ -552,16 +622,48 @@ Return ONLY valid JSON with this structure:
             revenue_by_task = RevenueService().get_revenue_by_task() or {}
             parts = []
 
-            # 2-1: honest label — "earned money" vs "no sales yet, by view velocity".
-            top_types = insights.get("top_task_types") or []
-            if top_types:
-                parts.append((insights.get("label") or "Best so far:") + " " +
-                             ", ".join(f"{t} ({n})" for t, n in top_types))
-            top_kws = insights.get("top_keywords") or []
-            if top_kws:
-                parts.append("Themes/keywords in the above: " + ", ".join(k for k, _ in top_kws[:8]))
-
             total_rev = sum(v or 0 for v in revenue_by_task.values())
+            total_views = int(insights.get("total_views", 0) or 0)
+            view_floor = int(getattr(settings, "LEARNING_MIN_VIEWS_FOR_SIGNAL", 50))
+            # #9: the internal "best so far" view-velocity signal is meaningful ONLY
+            # once there's real traffic (or any sale). Below the floor with $0
+            # revenue it's noise (chasing 1-view listings), so suppress the internal
+            # bias and steer toward EXTERNAL real demand (Google-Trends rising
+            # queries) instead of pretending to have "proven" internal winners.
+            internal_signal_trustworthy = (total_rev > 0) or (total_views >= view_floor)
+
+            if internal_signal_trustworthy:
+                # 2-1: honest label — "earned money" vs "no sales yet, by view velocity".
+                top_types = insights.get("top_task_types") or []
+                if top_types:
+                    parts.append((insights.get("label") or "Best so far:") + " " +
+                                 ", ".join(f"{t} ({n})" for t, n in top_types))
+                top_kws = insights.get("top_keywords") or []
+                if top_kws:
+                    parts.append("Themes/keywords in the above: " + ", ".join(k for k, _ in top_kws[:8]))
+            else:
+                # #9: external-demand steer. Use the REAL rising queries already
+                # fetched this cycle (self._trend_data) — never invented data.
+                rising = []
+                try:
+                    # rising_queries is {keyword: [query, ...]} — flatten the values.
+                    rq = (self._trend_data or {}).get("rising_queries") or {}
+                    if isinstance(rq, dict):
+                        for qs in rq.values():
+                            rising.extend(str(q) for q in (qs or []))
+                    else:  # tolerate a flat list
+                        rising = [str(q) for q in rq]
+                    rising = rising[:8]
+                except Exception:
+                    rising = []
+                steer = (
+                    f"Only {total_views} total listing views so far and no sales — internal "
+                    "performance data is too sparse to trust. IGNORE internal 'popular format' "
+                    "guesses and ground this concept in REAL external demand"
+                )
+                if rising:
+                    steer += ": prioritize these rising Google-Trends queries — " + ", ".join(rising)
+                parts.append(steer + ".")
             if total_rev > 0:
                 parts.append(
                     f"Total recorded revenue so far: ${total_rev:.2f}. Bias STRONGLY toward the "

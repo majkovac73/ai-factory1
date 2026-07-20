@@ -30,6 +30,14 @@ class Settings(BaseSettings):
     IMAGE_PROVIDER: str = "openrouter"
     OPENROUTER_IMAGE_MODEL: str = "bytedance-seed/seedream-4.5"
     DEFAULT_IMAGE_SIZE: str = "1024x1024"  # fallback; actual per-request sizing uses aspect_ratio + resolution params
+    # #8: listing photos were composited at 1024x1024 — below Etsy's recommended
+    # >=2000px shortest side, so thumbnails render softer than competitors' and
+    # can be cropped in the grid (the top-of-funnel CTR driver). Mockups now
+    # composite at LISTING_IMAGE_SIZE px, and the primary/hero photo is LANDSCAPE
+    # (LISTING_HERO_W x LISTING_HERO_H) to avoid grid cropping.
+    LISTING_IMAGE_SIZE: int = 2000
+    LISTING_HERO_W: int = 2000
+    LISTING_HERO_H: int = 1600
 
     ETSY_API_KEY: str | None = None
     ETSY_SHARED_SECRET: str | None = None
@@ -51,6 +59,14 @@ class Settings(BaseSettings):
     # board_id) as a JSON env, e.g. '{"single_print":"123","pdf_planner_or_guide":"456"}'.
     # Falls back to PINTEREST_BOARD_ID when a format isn't mapped.
     PINTEREST_BOARD_MAP: dict = {}
+    # #1c/#5: publish-capability override. A Trial-access Pinterest app returns
+    # 403 code 29 on every pin-create, so generating the (billable) pin image is
+    # pure waste. pinterest_oauth.can_publish() auto-detects capability from
+    # marketing_posts history (a recent success => can publish; a recent Trial-403
+    # => cannot). This env is an explicit override: set True the moment Standard
+    # access is granted to force-enable, or False to hard-disable. Unset (None) =
+    # auto-detect. See P1-5.
+    PINTEREST_CAN_PUBLISH: bool | None = None
 
     # Tumblr (OAuth 2.0). Maj registered the app and set the consumer key/secret
     # in Railway. The redirect_uri MUST match one registered on the Tumblr app —
@@ -307,6 +323,11 @@ class Settings(BaseSettings):
     PRODUCT_JUDGE_FLOOR: int = 9      # both judges in the "distinctive/compelling" band
     PRODUCT_DET_FLOOR: int = 30       # of 40 — evidence must be strong
     PRODUCT_SCORE_ENFORCE: bool = False
+    # #3: guardrail against the "enforce flipped on before quality is ready ->
+    # factory silently builds nothing" trap. When enforce is on and this many
+    # CONSECUTIVE autonomy cycles produce zero passing concepts, alert Maj (the
+    # gate is likely too tight for the current CONCEPT_MODEL). 0 disables.
+    PRODUCT_ENFORCE_ZERO_STREAK_ALERT: int = 3
     # 106 1-2: cycle-wide budget of fully-scored concept attempts (each ~2 judge
     # LLM calls). The persistent search tries every opportunity + one fresh
     # research pass until this many scored attempts, then stops for the hour.
@@ -329,6 +350,13 @@ class Settings(BaseSettings):
     WATERMARK_ALPHA: int = 55           # 0-255 opacity of the tiled text
     SHOP_NAME: str | None = None
 
+    # #17: product-mix / margin steering. The catalog skews to low-margin coloring
+    # pages (€3.50, band floor) that earn almost nothing after fees and are hardest
+    # to rank as a new shop; planners (€10-15) have far better unit economics. The
+    # concept generator now gets a margin-ranked guidance block that de-prioritizes
+    # these low-margin formats (chosen only when niche demand is exceptional).
+    LOW_MARGIN_DEPRIORITIZE_FORMATS: list = ["coloring_page", "phone_wallpaper"]
+
     # STEP 103 C-1: extra trademark/brand terms to block beyond the built-in
     # list, as a JSON array env, e.g. TRADEMARK_BLOCKLIST_EXTRA='["acme","foo"]'.
     # Screened against concept name/description, tags, and trend queries.
@@ -339,6 +367,12 @@ class Settings(BaseSettings):
     # service's built-in SEED_KEYWORDS default. Lets the anchor list be tuned
     # without a redeploy-requiring code change.
     TREND_SEED_KEYWORDS: list = []
+    # #9: below this many TOTAL tracked listing views, internal view-velocity is
+    # noise (e.g. 7 views across 43 listings), so the learning loop must NOT bias
+    # new concepts toward "proven" internal themes — it steers toward EXTERNAL
+    # Google-Trends rising queries instead. Performance-weighting resumes once real
+    # traffic/sales exist. Sales (any revenue) always re-enable internal bias.
+    LEARNING_MIN_VIEWS_FOR_SIGNAL: int = 50
     # D-1: serve Google Trends data from a local cache within this many hours
     # (trends don't change hourly; re-fetching every cycle from one IP risks a
     # 429 ban that halts all autonomy). 0 disables caching.
