@@ -82,6 +82,17 @@ def token_url() -> str:
     return f"{api_base()}/oauth/token"
 
 
+# The interactive OAuth flow (build_authorization_url -> callback exchange ->
+# refresh) is ALWAYS a real production flow: the consent screen lives on
+# www.pinterest.com and issues production authorization codes, so the code/refresh
+# token must be exchanged at the PRODUCTION token endpoint even when the app is
+# otherwise running in sandbox mode. Sandbox mode in this app uses a
+# dashboard-generated PINTEREST_SANDBOX_TOKEN instead of OAuth (see
+# get_valid_access_token), so it never needs the sandbox token endpoint here.
+# Exchanging a real consent code against api-sandbox.pinterest.com returns 401.
+OAUTH_TOKEN_URL = "https://api.pinterest.com/v5/oauth/token"
+
+
 def is_connected() -> bool:
     """
     Cheap, synchronous check for whether Pinterest can actually receive a
@@ -224,7 +235,7 @@ async def exchange_code_for_token(code: str, state: str) -> dict:
 
     async with httpx.AsyncClient() as client:
         response = await client.post(
-            token_url(),
+            OAUTH_TOKEN_URL,
             headers={
                 "Authorization": f"Basic {credentials}",
                 "Content-Type": "application/x-www-form-urlencoded",
@@ -304,7 +315,7 @@ async def get_valid_access_token() -> str:
 
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    token_url(),
+                    OAUTH_TOKEN_URL,
                     headers={
                         "Authorization": f"Basic {credentials}",
                         "Content-Type": "application/x-www-form-urlencoded",
