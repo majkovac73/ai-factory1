@@ -90,6 +90,91 @@ def _pretty(obj) -> str:
         return str(obj)[:4000]
 
 
+# ── Live HTTP tracer ─────────────────────────────────────────────────────────
+# The core review requirement is to show HOW the Pin is created — i.e. the actual
+# API call, not just its result. This wraps httpx so that as the REAL production
+# code path (PinterestChannel -> POST /v5/pins, and the read-backs) runs, the
+# exact HTTP request (method, URL, headers, JSON body) and the raw HTTP response
+# (status + body) are printed on screen. Nothing is faked: these are the real
+# bytes sent to and received from Pinterest.
+_TRACE_INSTALLED = False
+
+
+def _redact_headers(headers) -> dict:
+    out = {}
+    for k, v in dict(headers or {}).items():
+        if k.lower() == "authorization":
+            out[k] = "Bearer ****REDACTED****"
+        else:
+            out[k] = v
+    return out
+
+
+def _shrink_body(body):
+    """Show the real JSON body, but truncate the (huge) base64 image bytes so the
+    structure — endpoint fields, board_id, link, title, media_source — is legible."""
+    if not isinstance(body, dict):
+        return body
+    import copy
+    b = copy.deepcopy(body)
+    ms = b.get("media_source")
+    if isinstance(ms, dict) and isinstance(ms.get("data"), str) and len(ms["data"]) > 64:
+        ms["data"] = f"<{len(ms['data'])} base64 chars of PNG image bytes>"
+    return b
+
+
+def _print_request(method, url, kwargs):
+    print("\n    +-- HTTP REQUEST --------------------------------------------")
+    print(f"    | {method} {url}")
+    for k, v in _redact_headers(kwargs.get("headers")).items():
+        print(f"    | {k}: {v}")
+    if "params" in kwargs and kwargs["params"]:
+        print(f"    | query: {dict(kwargs['params'])}")
+    if kwargs.get("json") is not None:
+        body = _pretty(_shrink_body(kwargs["json"]))
+        print("    | body:")
+        for line in body.splitlines():
+            print(f"    |   {line}")
+    print("    +------------------------------------------------------------", flush=True)
+
+
+def _print_response(resp):
+    print("    +-- HTTP RESPONSE -------------------------------------------")
+    print(f"    | {resp.status_code} {resp.reason_phrase}")
+    try:
+        body = _pretty(resp.json())
+    except Exception:
+        body = (resp.text or "")[:2000]
+    for line in body.splitlines():
+        print(f"    |   {line}")
+    print("    +------------------------------------------------------------", flush=True)
+
+
+def install_http_tracer():
+    """Monkeypatch httpx (async + sync) so every Pinterest API call the REAL code
+    path makes is printed request-and-response. Idempotent."""
+    global _TRACE_INSTALLED
+    if _TRACE_INSTALLED:
+        return
+    _TRACE_INSTALLED = True
+
+    _apost, _aget = httpx.AsyncClient.post, httpx.AsyncClient.get
+    _sget = httpx.Client.get
+
+    async def apost(self, url, **kw):
+        _print_request("POST", str(url), kw); r = await _apost(self, url, **kw); _print_response(r); return r
+
+    async def aget(self, url, **kw):
+        _print_request("GET", str(url), kw); r = await _aget(self, url, **kw); _print_response(r); return r
+
+    def sget(self, url, **kw):
+        _print_request("GET", str(url), kw); r = _sget(self, url, **kw); _print_response(r); return r
+
+    httpx.AsyncClient.post = apost
+    httpx.AsyncClient.get = aget
+    httpx.Client.get = sget
+
+
 # ── PHASE 1: production OAuth ────────────────────────────────────────────────
 def phase1_authenticate(base_url: str):
     """Force production for the OAuth flow — the review must see the real
@@ -160,7 +245,13 @@ def phase_sandbox_integration(sandbox_token: str):
     print("29). Pinterest's review guidance says to demonstrate the integration in the")
     print("SANDBOX environment, where Pin creation works. The code below is the SAME")
     print("production path (PinterestChannel -> POST /v5/pins); only the API host +")
-    print("token are the sandbox ones.\n", flush=True)
+    print("token are the sandbox ones.\n")
+    print("Every Pinterest API call below prints its EXACT HTTP request (method, URL,")
+    print("headers, body) and the raw HTTP response — so you can see precisely HOW the")
+    print("Pin is created, not just that it was.\n", flush=True)
+
+    # Trace every real HTTP call the production code path makes from here on.
+    install_http_tracer()
 
     if not sandbox_token:
         print("MISSING sandbox token. Generate one in the Pinterest developer portal:")
