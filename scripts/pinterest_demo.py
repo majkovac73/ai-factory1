@@ -60,6 +60,7 @@ that services the public callback URL):
 """
 import argparse
 import asyncio
+import io
 import json
 import os
 import sys
@@ -81,6 +82,62 @@ def banner(step: str, text: str):
     print("\n" + "=" * 70)
     print(f"STEP {step}: {text}")
     print("=" * 70, flush=True)
+
+
+# ── Reading-time pauses (for the screen recording) ───────────────────────────
+# Each step should stay on screen long enough to be read on the video. Rather than
+# a fixed delay, we measure how much text a step printed and pause for roughly how
+# long it takes to read it: (words printed) / READ_WPM, floored at MIN_PAUSE (~10s)
+# and capped at MAX_PAUSE so a huge JSON dump doesn't stall the demo forever.
+READ_WPM = 150.0          # careful reading of technical output
+MIN_PAUSE_SECONDS = 10.0
+MAX_PAUSE_SECONDS = 30.0
+
+
+class _CountingStdout(io.TextIOBase):
+    """Tees writes to the real stdout while counting words, so pause_to_read()
+    can size each pause to what was just printed."""
+
+    def __init__(self, wrapped):
+        self._w = wrapped
+        self.words_since = 0
+
+    def write(self, s):
+        self.words_since += len(str(s).split())
+        return self._w.write(s)
+
+    def flush(self):
+        try:
+            return self._w.flush()
+        except Exception:
+            return None
+
+
+_METER = None
+
+
+def install_reading_meter():
+    global _METER
+    if _METER is None:
+        _METER = _CountingStdout(sys.stdout)
+        sys.stdout = _METER
+
+
+def pause_to_read():
+    """Pause ~ the reading time of everything printed since the last pause."""
+    words = _METER.words_since if _METER is not None else 0
+    if words <= 0:
+        if _METER is not None:
+            _METER.words_since = 0
+        return
+    secs = max(MIN_PAUSE_SECONDS, min(MAX_PAUSE_SECONDS, words / READ_WPM * 60.0))
+    print(f"\n    ... pausing ~{int(round(secs))}s to read the above ...", flush=True)
+    try:
+        time.sleep(secs)
+    except KeyboardInterrupt:
+        print("    (pause skipped)", flush=True)
+    if _METER is not None:
+        _METER.words_since = 0  # reset AFTER, so the pause line doesn't count next
 
 
 def _pretty(obj) -> str:
@@ -214,6 +271,8 @@ def phase1_authenticate(base_url: str):
 
     input(">>> After you click 'Allow' on Pinterest's consent screen and the page "
           "shows \"connected\", press Enter to continue...\n")
+    if _METER is not None:
+        _METER.words_since = 0  # the manual Allow step was the pause for the above
 
     banner("2", "Authorization complete — confirming the connected account (GET /v5/user_account)")
     try:
@@ -223,7 +282,7 @@ def phase1_authenticate(base_url: str):
         sys.exit(1)
     print("Connected. GET /v5/user_account returned:")
     print(_pretty(account), flush=True)
-    time.sleep(1)
+    pause_to_read()
     return account
 
 
@@ -276,6 +335,7 @@ def phase_sandbox_integration(sandbox_token: str):
     except Exception as e:
         print(f"Could not read sandbox account (token invalid/expired?): {e}")
         sys.exit(1)
+    pause_to_read()
 
     # 3b — a board to publish to (create one if the sandbox account has none)
     banner("4", "Create/select a sandbox board, then CREATE a Pin (POST /v5/pins)")
@@ -310,6 +370,7 @@ def phase_sandbox_integration(sandbox_token: str):
 
     pin_id = result.get("external_id")
     print(f"\nPin CREATED. POST /v5/pins returned id = {pin_id}", flush=True)
+    pause_to_read()
 
     # 3d — DISPLAY the created Pin: read it back + show full JSON
     banner("5", "DISPLAY the newly created Pin (GET /v5/pins/{id}) + list the board's Pins")
@@ -325,6 +386,7 @@ def phase_sandbox_integration(sandbox_token: str):
         print("(The created Pin id above appears in this board's Pin list — proof it landed.)")
     except Exception as e:
         print(f"(board pin list read failed, non-fatal: {e})")
+    pause_to_read()
 
     banner("6", "Demo complete — both requirements shown")
     print("Shown live and end to end:")
@@ -379,6 +441,7 @@ def main():
                          "integration (useful for a second take of just Phases 3-5).")
     args = ap.parse_args()
 
+    install_reading_meter()  # size the between-step pauses to reading time
     token = _sandbox_token(args.sandbox_token)
     if not args.skip_oauth:
         phase1_authenticate(args.base_url.rstrip("/"))
