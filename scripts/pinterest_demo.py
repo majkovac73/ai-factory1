@@ -422,6 +422,18 @@ def phase_oauth(base_url: str):
         try:
             account = asyncio.run(pinterest_oauth.get_user_account())
         except Exception as e:
+            msg = str(e)
+            if "no such table" in msg or "no pinterest token" in msg.lower() or "No Pinterest token" in msg:
+                die("The OAuth token is not in THIS machine's database.",
+                    "You are running the script LOCALLY, but the OAuth callback was handled by the",
+                    "DEPLOYED app on Railway, which stored the token in Railway's database -- not on",
+                    "your laptop. Run the script INSIDE the container so it shares that database:",
+                    "    railway ssh        (opens an interactive shell in the deployed container)",
+                    "    cd /app && python scripts/pinterest_demo.py --sandbox-token <token> \\",
+                    "        --base-url https://kind-liberation-production.up.railway.app",
+                    "Copy the printed auth URL (Step 1) and the pinterest.com URLs (Step 8) into your",
+                    "own browser to record them. (Or run locally with --skip-oauth to demo just the",
+                    "sandbox Pin creation + display, which needs no database.)")
             die(f"No working token yet ({e}) -- the OAuth flow did not complete.",
                 "Make sure you clicked 'Allow' and the callback page showed \"connected\".",
                 "Confirm the app's PINTEREST_REDIRECT_URI matches the one registered on app 1589935.")
