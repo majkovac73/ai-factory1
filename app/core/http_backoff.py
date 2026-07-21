@@ -16,6 +16,7 @@ present, up to a capped number of attempts. It returns the final httpx.Response
 import asyncio
 import logging
 import random
+import time
 from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone
 
@@ -87,4 +88,42 @@ async def request_with_backoff(
             f"{delay:.1f}s (attempt {attempt + 1}/{max_retries})"
         )
         await asyncio.sleep(delay)
+        attempt += 1
+
+
+def _next_delay(response, attempt, base_delay, max_delay):
+    delay = _parse_retry_after(response.headers.get("Retry-After"))
+    if delay is None:
+        delay = min(max_delay, base_delay * (2 ** attempt))
+        delay += random.uniform(0, delay * 0.25)
+    return min(delay, max_delay)
+
+
+def request_with_backoff_sync(
+    client,
+    method: str,
+    url: str,
+    *,
+    max_retries: int = 4,
+    base_delay: float = 1.0,
+    max_delay: float = 30.0,
+    retry_statuses=RETRY_STATUSES,
+    **kwargs,
+):
+    """Synchronous twin of request_with_backoff for httpx.Client-based clients
+    (e.g. PrintifyClient). Same policy: mutating methods retry only on 429."""
+    verb = getattr(client, method.lower())
+    if method.upper() not in _IDEMPOTENT_METHODS:
+        retry_statuses = tuple(s for s in retry_statuses if s in _RATE_LIMIT_ONLY)
+    attempt = 0
+    while True:
+        response = verb(url, **kwargs)
+        if response.status_code not in retry_statuses or attempt >= max_retries:
+            return response
+        delay = _next_delay(response, attempt, base_delay, max_delay)
+        logger.warning(
+            f"http_backoff(sync): {response.status_code} on {method} {url} — retrying in "
+            f"{delay:.1f}s (attempt {attempt + 1}/{max_retries})"
+        )
+        time.sleep(delay)
         attempt += 1

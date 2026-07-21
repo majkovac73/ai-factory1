@@ -247,9 +247,15 @@ class PODFulfillmentService:
 
     @staticmethod
     def _pod_price_cents_from_cost(cost_cents: int) -> int:
-        """P0-4 margin math: price = ceil((cost + shipping + $0.20 + profit) /
-        (1 - fee_fraction)), rounded UP to a whole dollar to protect margin."""
-        cost = cost_cents / 100.0
+        """P0-4 margin math: price = ceil((cost + shipping + 0.20 + profit) /
+        (1 - fee_fraction)), rounded UP to a whole unit to protect margin.
+
+        DEEP AUDIT V3: the Printify `cost` is billed in USD, but the Etsy shop
+        charges in EUR (BASE_CURRENCY). Convert the USD production cost to EUR
+        first, so the EUR price genuinely covers the USD money that goes out.
+        shipping/profit are operator targets in the base currency."""
+        from app.core.currency import usd_to_base
+        cost = usd_to_base(cost_cents / 100.0)   # USD production cost -> EUR
         shipping = getattr(settings, "POD_SHIPPING_ESTIMATE_USD", 5.0)
         profit = getattr(settings, "POD_TARGET_PROFIT_USD", 6.0)
         fee = getattr(settings, "POD_ETSY_FEE_FRACTION", 0.10)

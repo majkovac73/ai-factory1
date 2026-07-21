@@ -23,6 +23,13 @@ from app.db.database import Base, engine
 from app.core import cost_context
 from app.services.analytics_service import AnalyticsService
 from app.services.revenue_service import RevenueService
+from config import settings
+
+# This suite tests the cost-ledger MECHANICS, independent of FX. Pin the USD->base
+# rate to 1.0 so cost (USD) and revenue are directly comparable (currency
+# conversion itself is covered by test_deep_audit_v3_fixes.py).
+settings.USD_TO_BASE_RATE = 1.0
+settings.BASE_CURRENCY = "USD"
 
 Base.metadata.create_all(bind=engine)
 

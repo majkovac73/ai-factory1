@@ -68,8 +68,10 @@ class PinterestChannel(MarketingChannel):
                              "image_path, image_base64, or image_url)"}
 
         try:
+            from app.core.http_backoff import request_with_backoff  # DEEP AUDIT V3 #12
             async with httpx.AsyncClient(timeout=60) as client:
-                response = await client.post(
+                response = await request_with_backoff(   # POST retries only on 429
+                    client, "POST",
                     f"{api_base()}/pins",
                     headers={"Authorization": f"Bearer {access_token}"},
                     json=payload,

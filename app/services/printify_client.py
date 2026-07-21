@@ -50,16 +50,19 @@ class PrintifyClient:
 
     def _get(self, path: str, params: Optional[Dict] = None) -> Any:
         url = f"{PRINTIFY_API_BASE}{path}"
+        from app.core.http_backoff import request_with_backoff_sync  # DEEP AUDIT V3 #12
         with httpx.Client(timeout=30) as client:
-            resp = client.get(url, headers=self._headers(), params=params)
+            resp = request_with_backoff_sync(client, "GET", url, headers=self._headers(), params=params)
         if resp.status_code >= 400:
             raise RuntimeError(f"Printify GET {path} → {resp.status_code}: {resp.text[:300]}")
         return resp.json()
 
     def _post(self, path: str, payload: Dict) -> Any:
         url = f"{PRINTIFY_API_BASE}{path}"
+        from app.core.http_backoff import request_with_backoff_sync  # DEEP AUDIT V3 #12
         with httpx.Client(timeout=30) as client:
-            resp = client.post(url, headers=self._headers(), json=payload)
+            # POST retries only on 429 (never double-submit an order on a 5xx).
+            resp = request_with_backoff_sync(client, "POST", url, headers=self._headers(), json=payload)
         if resp.status_code >= 400:
             raise RuntimeError(f"Printify POST {path} → {resp.status_code}: {resp.text[:300]}")
         return resp.json()

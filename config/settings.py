@@ -46,6 +46,15 @@ class Settings(BaseSettings):
     LISTING_HERO_W: int = 2000
     LISTING_HERO_H: int = 1600
 
+    # Currency: the Etsy shop LISTS and SELLS in this currency (EUR). Provider
+    # costs (OpenRouter images/LLM, Printify) are billed in USD. P&L must be in ONE
+    # currency, so USD costs are converted to BASE_CURRENCY at USD_TO_BASE_RATE
+    # before being netted against EUR revenue. The rate is an ESTIMATE (FX drifts)
+    # and is operator-tunable; update it periodically or set the shop to USD to
+    # avoid conversion entirely.
+    BASE_CURRENCY: str = "EUR"
+    USD_TO_BASE_RATE: float = 0.92   # 1 USD -> this many BASE (EUR)
+
     ETSY_API_KEY: str | None = None
     ETSY_SHARED_SECRET: str | None = None
     ETSY_REDIRECT_URI: str = "http://localhost:8000/etsy/oauth/callback"

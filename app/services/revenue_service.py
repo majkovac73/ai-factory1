@@ -51,12 +51,15 @@ class RevenueService:
         if quantity <= 0:
             raise ValueError("quantity must be a positive integer")
 
-        if currency != "USD":
-            # D-6: revenue aggregation assumes USD; surface non-USD sales instead
-            # of silently summing mixed currencies.
+        # DEEP AUDIT V3: revenue is aggregated in the shop's BASE_CURRENCY (EUR).
+        # A sale in the base currency is EXPECTED; only a genuinely different
+        # currency (mixed-currency shop) is worth surfacing.
+        from app.core.currency import base_currency
+        if currency != base_currency():
             import logging
             logging.getLogger("ai-factory").warning(
-                f"RevenueService: recording non-USD sale ({currency}) for task {task_id}"
+                f"RevenueService: sale currency {currency} != shop base {base_currency()} "
+                f"for task {task_id} — P&L may mix currencies"
             )
         self.analytics_service.record_event(
             event_type="sale_recorded",
@@ -271,17 +274,21 @@ class RevenueService:
         except Exception:
             pass
 
+        # DEEP AUDIT V3: costs are USD; revenue + fees are the shop's base currency
+        # (EUR). Convert costs to base so `net` is a single currency, not a mix.
+        from app.core.currency import usd_to_base, base_currency
         rows = []
         for tid in task_ids:
             m = meta.get(tid, {})
-            cost = round(costs.get(tid, 0.0), 4)
-            rev = round(revenue.get(tid, 0.0), 4)
+            cost = usd_to_base(costs.get(tid, 0.0))   # USD -> EUR
+            rev = round(revenue.get(tid, 0.0), 4)     # already EUR
             fee = round(fees_by_task.get(tid, 0.0), 4)
             rows.append({
                 "task_id": tid,
                 "listing_id": m.get("listing_id"),
                 "format": m.get("format", "unknown"),
                 "name": (m.get("name") or tid)[:80],
+                "currency": base_currency(),
                 "cost": cost,
                 "revenue": rev,
                 "fees": fee,

@@ -22,21 +22,32 @@ def pnl():
     listing fees). Reporting only gross would overstate profit by ~10% of sales."""
     from app.services.autonomy_service import AutonomyService
     from app.services.revenue_service import RevenueService
-    spend = AutonomyService().lifetime_spend()
+    from app.core.currency import usd_to_base, base_currency
+    spend_usd = AutonomyService().lifetime_spend()
+    spend_base = usd_to_base(spend_usd)   # DEEP AUDIT V3: costs are USD, revenue EUR
     rs = RevenueService()
     rev = rs.get_total_revenue()
     fees = rs.get_total_fees()
-    gross = round(rev.get("total_revenue", 0.0) or 0.0, 2)
-    etsy_fees = round(fees.get("total_fees", 0.0) or 0.0, 2)
+    gross = round(rev.get("total_revenue", 0.0) or 0.0, 2)   # EUR
+    etsy_fees = round(fees.get("total_fees", 0.0) or 0.0, 2)  # EUR
     net_revenue = round(gross - etsy_fees, 2)
+    cur = base_currency()
     return {
-        "revenue_usd": gross,                 # gross, kept for backwards compat
+        "currency": cur,                      # everything below is in this currency (EUR)
+        "gross_revenue": gross,
+        "etsy_fees": etsy_fees,
+        "net_revenue": net_revenue,
+        "spend": round(spend_base, 2),        # USD spend converted to EUR
+        "spend_usd_raw": round(spend_usd, 2), # original USD, for reference
+        "profit": round(net_revenue - spend_base, 2),
+        "sales": rev.get("sale_count", 0),
+        # legacy keys kept for any existing dashboard consumers (now EUR-normalized)
+        "revenue_usd": gross,
         "gross_revenue_usd": gross,
         "etsy_fees_usd": etsy_fees,
         "net_revenue_usd": net_revenue,
-        "spend_usd": round(spend, 2),
-        "profit_usd": round(net_revenue - spend, 2),
-        "sales": rev.get("sale_count", 0),
+        "spend_usd": round(spend_base, 2),
+        "profit_usd": round(net_revenue - spend_base, 2),
     }
 
 

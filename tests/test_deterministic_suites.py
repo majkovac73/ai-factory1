@@ -118,6 +118,7 @@ DETERMINISTIC = [
     "test_audit_step19_visual_ip.py",
     "test_deep_audit_v2_fixes.py",
     "test_product_strategy.py",
+    "test_deep_audit_v3_fixes.py",
 ]
 
 

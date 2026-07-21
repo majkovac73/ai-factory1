@@ -202,8 +202,10 @@ class TumblrChannel(MarketingChannel):
             form.update(files)
 
         try:
+            from app.core.http_backoff import request_with_backoff  # DEEP AUDIT V3 #12
             async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(
+                response = await request_with_backoff(   # POST retries only on 429
+                    client, "POST",
                     f"{TUMBLR_API_BASE}/blog/{blog}/posts",
                     headers={"Authorization": f"Bearer {access_token}"},
                     files=form,
