@@ -141,10 +141,11 @@ def die(reason: str, *fix_lines: str):
     sys.exit(1)
 
 
-# -- Reading-time pauses (so each step stays on screen long enough to read) ----
+# -- Between-step pauses (so each step stays on screen long enough to read) ----
+# Fixed 15s wait after every step, per operator request.
 READ_WPM = 150.0
-MIN_PAUSE_SECONDS = 10.0
-MAX_PAUSE_SECONDS = 30.0
+MIN_PAUSE_SECONDS = 15.0
+MAX_PAUSE_SECONDS = 15.0
 
 
 class _CountingStdout(io.TextIOBase):
