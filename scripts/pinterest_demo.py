@@ -5,14 +5,17 @@ Built to be screen-recorded end to end for Pinterest's Standard-access review.
 
 WHY THIS VERSION EXISTS
 -----------------------
-The first submission was denied because the video showed the OAuth flow but NOT
-a completed Pin-creation integration ("API usage is not visible... show how you
-created it and also display the newly created Pin"). The reason it wasn't shown:
-a TRIAL-access app is BLOCKED from creating Pins in PRODUCTION (403, code 29), so
-the production Pin step could never succeed on camera. Pinterest's own denial
-message points to the fix: demonstrate the integration in the SANDBOX environment
-(https://developer.pinterest.com/docs/developer-tools/sandbox/), where a Trial
-app CAN create Pins.
+Two submissions were denied with "the API usage is not actually visible... show
+how you created [the Pin] and also display the newly created Pin on the Pinterest
+platform." A TRIAL app cannot create Pins in PRODUCTION (403, code 29), so the
+integration is demonstrated in the SANDBOX. The key fact the earlier versions
+missed: **a Sandbox Pin IS viewable on pinterest.com** — per Pinterest's sandbox
+docs, "you can view boards and Pins you create in Sandbox when you visit your own
+Pinterest user profile in the Pinterest mobile apps or on Pinterest.com." They are
+visible ONLY to the creator (the account the sandbox token belongs to), when
+logged in. So "display the newly created Pin on the Pinterest platform" =
+create the sandbox Pin, then open your own profile/board on pinterest.com (logged
+in) and show it there.
 
 So this recording shows BOTH things the reviewer requires, end to end:
 
@@ -22,13 +25,17 @@ So this recording shows BOTH things the reviewer requires, end to end:
 
   2. FULL API INTEGRATION with visible PROCESS + RESULTS (sandbox) — the app
      creates a real Pin via POST /v5/pins using the SAME production code path
-     (app.marketing.pinterest_channel.PinterestChannel), then reads it back via
-     GET /v5/pins/{id} and lists the board's Pins — printing the raw request
-     summary and full JSON responses so the create call, the returned Pin id, and
-     the Pin's data (image, link, title, board) are all visible on screen.
-     (Phases 3-5.) Sandbox Pins are not on the public pinterest.com site, so the
-     API responses ARE the way to display the created Pin — exactly as Pinterest's
-     guidance describes.
+     (app.marketing.pinterest_channel.PinterestChannel), printing the raw HTTP
+     request + response so the create call and returned Pin id are visible; reads
+     it back via GET /v5/pins/{id} and lists the board's Pins (Steps 3-5); THEN
+     **prints the pinterest.com profile/board/Pin URLs to open logged-in and show
+     the Pin on the Pinterest platform (Step 6)** — the piece the earlier videos
+     were missing.
+
+IMPORTANT recording note: the Pin is created with a SANDBOX token (dashboard-
+generated), which belongs to YOUR Pinterest account. Log into pinterest.com as
+THAT SAME account to see the Pin in Step 6. It will not show for logged-out users
+(expected sandbox behavior).
 
 Same production code paths, not a demo-only reimplementation:
   - Auth URL + token exchange: the deployed app's /pinterest/oauth/login +
@@ -327,7 +334,8 @@ def phase_sandbox_integration(sandbox_token: str):
     api = pinterest_oauth.api_base()
     print(f"Sandbox API base: {api}", flush=True)
 
-    # 3a — confirm the sandbox account
+    # 3a — confirm the sandbox account (capture the username: the created Pin is
+    # visible to THIS account on pinterest.com when logged in).
     try:
         acct = asyncio.run(pinterest_oauth.get_user_account())
         print("\nGET /v5/user_account (sandbox) ->")
@@ -335,6 +343,7 @@ def phase_sandbox_integration(sandbox_token: str):
     except Exception as e:
         print(f"Could not read sandbox account (token invalid/expired?): {e}")
         sys.exit(1)
+    username = acct.get("username")
     pause_to_read()
 
     # 3b — a board to publish to (create one if the sandbox account has none)
@@ -347,6 +356,7 @@ def phase_sandbox_integration(sandbox_token: str):
         board = asyncio.run(pinterest_oauth.create_board("AI Factory Demo", "Standard-access demo board"))
         print(f"Created sandbox board via POST /v5/boards: id={board.get('id')} name={board.get('name')}")
     board_id = board["id"]
+    board_name = board.get("name") or ""
     settings.PINTEREST_BOARD_ID = board_id
 
     # 3c — CREATE the Pin through the real production code path
@@ -370,30 +380,14 @@ def phase_sandbox_integration(sandbox_token: str):
 
     pin_id = result.get("external_id")
     print(f"\nPin CREATED. POST /v5/pins returned id = {pin_id}", flush=True)
-
-    # Immediately surface an OPENABLE view of the just-created Pin, rendered from
-    # the exact image + fields we sent (sandbox Pins have no public pinterest.com
-    # URL). Step 5's read-back then refreshes it with Pinterest's hosted media URL.
     listing["board_id"] = board_id
-    try:
-        preview_path = _write_pin_preview(pin_id, listing, {}, api)
-        _announce_openable_pin(pin_id, preview_path, None)
-        try:
-            webbrowser.open(f"file://{preview_path}")  # opens if running with a GUI
-        except Exception:
-            pass
-    except Exception as e:
-        preview_path = None
-        print(f"(could not write pin preview page, non-fatal: {e})")
     pause_to_read()
 
-    # 3d — DISPLAY the created Pin: read it back + show full JSON
-    banner("5", "DISPLAY the newly created Pin (GET /v5/pins/{id}) + list the board's Pins")
+    # 3d — READ THE PIN BACK from Pinterest (proves it exists on the platform)
+    banner("5", "Read the Pin back from Pinterest (GET /v5/pins/{id}) + list the board's Pins")
     pin = asyncio.run(pinterest_oauth.get_pin(pin_id))
     print(f"GET /v5/pins/{pin_id} ->")
     print(_pretty(pin), flush=True)
-
-    # also list the board's pins to show it now contains the new Pin
     try:
         pins = _list_board_pins(api, sandbox_token, board_id)
         print(f"\nGET /v5/boards/{board_id}/pins -> {len(pins)} pin(s); ids: "
@@ -401,28 +395,57 @@ def phase_sandbox_integration(sandbox_token: str):
         print("(The created Pin id above appears in this board's Pin list — proof it landed.)")
     except Exception as e:
         print(f"(board pin list read failed, non-fatal: {e})")
-
-    # Refresh the SAME preview page now that we have the full Pin object (adds
-    # Pinterest's hosted media URL if present), and re-surface the openable link.
-    media_url = _pin_image_url(pin)
-    try:
-        preview_path = _write_pin_preview(pin_id, listing, pin, api)
-        print("\nPin preview page refreshed with the full API response"
-              + (" (now including Pinterest's hosted media URL)." if media_url else "."))
-        _announce_openable_pin(pin_id, preview_path, media_url)
-    except Exception as e:
-        print(f"(could not refresh pin preview page, non-fatal: {e})")
     pause_to_read()
 
-    banner("6", "Demo complete — both requirements shown")
+    # 3e — DISPLAY THE PIN ON PINTEREST.COM (what the reviewer asks for).
+    # Per Pinterest's sandbox docs, a Sandbox Pin IS viewable on pinterest.com /
+    # the mobile app — on the CREATOR's own profile, when logged in as the account
+    # this sandbox token belongs to. So the reviewer's "display the newly created
+    # Pin on the Pinterest platform" = open your own profile/board logged in.
+    banner("6", "DISPLAY the Pin ON PINTEREST.COM — open these logged in as your account")
+    media_url = _pin_image_url(pin)
+    profile_url = f"https://www.pinterest.com/{username}/" if username else "https://www.pinterest.com/ (your profile)"
+    board_slug = _slugify(board_name)
+    board_url = f"https://www.pinterest.com/{username}/{board_slug}/" if (username and board_slug) else None
+    pin_url = f"https://www.pinterest.com/pin/{pin_id}/"
+    print("*" * 70)
+    print("*  OPEN THESE IN A BROWSER **LOGGED IN AS THE ACCOUNT ABOVE** and record")
+    print("*  the newly-created Pin appearing on the Pinterest platform:")
+    print("*")
+    print(f"*    Your profile:  {profile_url}")
+    if board_url:
+        print(f"*    The board:     {board_url}")
+    print(f"*    The Pin:       {pin_url}")
+    if media_url:
+        print(f"*    Pin image URL: {media_url}")
+    print("*")
+    print(f"*  (Sandbox Pins are visible ONLY to you, the creator — account "
+          f"'{username}'. Log into pinterest.com as that account to see it; it will")
+    print("*  NOT appear for logged-out / other users. This is expected sandbox")
+    print("*  behavior and is exactly what Pinterest's sandbox docs describe.)")
+    print("*" * 70, flush=True)
+    for u in [x for x in (board_url or profile_url, pin_url) if x]:
+        try:
+            webbrowser.open(u)
+        except Exception:
+            pass
+    pause_to_read()
+
+    banner("7", "Demo complete — both requirements shown")
     print("Shown live and end to end:")
     print("  1) OAUTH FLOW on production pinterest.com (consent + token + account read).")
-    print("  2) FULL API INTEGRATION in sandbox: a Pin CREATED via POST /v5/pins and")
-    print("     DISPLAYED via GET /v5/pins/{id} (+ the board's Pin list) — the create")
-    print("     call, the returned Pin id, and the Pin's image/link/title are all")
-    print("     visible in the API responses above.")
+    print("  2) FULL API INTEGRATION (sandbox): a Pin CREATED via POST /v5/pins (the")
+    print("     request + 201 + Pin id are visible above), read back via GET /v5/pins/{id},")
+    print("     and DISPLAYED ON PINTEREST.COM on the creator's own profile/board (Step 6).")
     print("\nOnce Standard access is granted, the identical code path runs against")
-    print("PRODUCTION and the Pin appears on the public pinterest.com profile.", flush=True)
+    print("PRODUCTION and the Pin is public on pinterest.com.", flush=True)
+
+
+def _slugify(name: str) -> str:
+    """Pinterest board URL slug: lowercase, non-alphanumerics -> single hyphens."""
+    import re
+    s = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")
+    return s
 
 
 def _pin_image_url(pin: dict):
