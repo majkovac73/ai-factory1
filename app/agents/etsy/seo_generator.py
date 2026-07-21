@@ -51,16 +51,31 @@ Original request context: {task_input}
 Return ONLY valid JSON with this exact structure:
 {{
   "title": "Keyword-rich Etsy title, between 20 and 70 characters",
-  "description": "Persuasive, benefit-driven product description",
+  "description": "A detailed 130-200 word description (700-1100 characters) — see the description rules below",
   "keywords": ["at least 5 relevant Etsy search keywords"],
   "sections": ["Hook", "Benefits", "Features", "Call to Action"]
 }}
 
 Rules:
 - Title must include primary search keywords naturally, not stuffed
-- Description must be specific to this product, not generic
 - Keywords must be realistic Etsy search terms buyers would use
 - No markdown, no extra text, single JSON object only
+
+Description rules (Etsy rewards long, specific, keyword-rich descriptions — thin
+descriptions rank and convert worse):
+- 130-200 words / 700-1100 characters. Specific to THIS product, never generic.
+- FIRST sentence is a benefit-driven hook that contains the PRIMARY keyword
+  (Etsy weights the opening line and it's the search/preview snippet).
+- Then cover, in short scannable sentences or a simple list:
+    * WHAT'S INCLUDED — exact format (PDF/PNG/JPG), page count or dimensions,
+      and that it is an INSTANT DIGITAL DOWNLOAD (no physical item is shipped).
+    * WHO IT'S FOR — the specific buyer/audience.
+    * 2-3 concrete USE CASES or occasions.
+    * HOW TO USE IT — download, print at home or at a print shop, common sizes.
+- Weave in 4-6 of the target keywords NATURALLY (no keyword stuffing).
+- End with a short, warm call to action.
+- Do NOT promise physical shipping, custom personalization you can't deliver, or
+  trademarked characters/brands.
 """
 
         response = self._generate(prompt)

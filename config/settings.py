@@ -375,6 +375,11 @@ class Settings(BaseSettings):
     # concept generator now gets a margin-ranked guidance block that de-prioritizes
     # these low-margin formats (chosen only when niche demand is exceptional).
     LOW_MARGIN_DEPRIORITIZE_FORMATS: list = ["coloring_page", "phone_wallpaper"]
+    # Product-strategy: a theme word appearing in >= this fraction of recent shop
+    # products is "saturated" — the concept generator is told to AVOID it and
+    # diversify, so the catalog doesn't become a monoculture (e.g. 53% "school")
+    # that cannibalizes itself in Etsy search and dies when the season ends.
+    THEME_SATURATION_PCT: float = 0.25
 
     # STEP 103 C-1: extra trademark/brand terms to block beyond the built-in
     # list, as a JSON array env, e.g. TRADEMARK_BLOCKLIST_EXTRA='["acme","foo"]'.

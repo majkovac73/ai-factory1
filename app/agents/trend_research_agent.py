@@ -16,6 +16,7 @@ confidence, or None if nothing promising / valid was produced.
 import json
 import logging
 import random
+import re
 
 from app.agents.base_agent import BaseAgent
 from app.agents.market_intelligence.research import ResearchAgent
@@ -523,6 +524,53 @@ class TrendResearchAgent(BaseAgent):
             logger.warning(f"TrendResearchAgent: margin guidance failed: {e}")
             return ""
 
+    # Words that are format/commerce-generic, not THEMES — excluded so the real
+    # theme concentration (school, teacher, halloween, garden, ...) surfaces.
+    _THEME_STOPWORDS = {
+        "with", "from", "your", "that", "this", "and", "for", "the", "set", "pack",
+        "printable", "digital", "download", "downloadable", "design", "designs",
+        "template", "templates", "print", "prints", "art", "artwork", "sheet",
+        "sheets", "page", "pages", "card", "cards", "planner", "guide", "sticker",
+        "stickers", "coloring", "wallpaper", "pattern", "poster", "instant", "file",
+        "files", "png", "pdf", "kids", "cute", "custom", "customizable", "modern",
+        "minimalist", "gift", "gifts", "decor", "wall", "bundle", "collection",
+    }
+
+    def _theme_diversity_block(self) -> str:
+        """Detect theme monoculture in the existing shop and steer the next concept
+        AWAY from over-saturated themes. Without this, a July catalog becomes ~53%
+        'back to school' (self-cannibalizing in Etsy search + a seasonal cliff),
+        because even 'evergreen' cycles drift toward whatever is trending now."""
+        try:
+            from collections import Counter
+            titles = [t for t, _ in (self._recent_products or [])]
+            n = len(titles)
+            if n < 8:  # too few products to judge saturation reliably
+                return ""
+            counts = Counter()
+            for t in titles:
+                words = {w for w in re.findall(r"[a-z]{4,}", (t or "").lower())
+                         if w not in self._THEME_STOPWORDS}
+                for w in words:
+                    counts[w] += 1
+            thresh = float(getattr(settings, "THEME_SATURATION_PCT", 0.25))
+            saturated = [(w, c) for w, c in counts.most_common(10) if (c / n) >= thresh]
+            if not saturated:
+                return ""
+            listed = ", ".join(f"'{w}' ({round(100 * c / n)}% of the shop)" for w, c in saturated)
+            return (
+                "\n\nTHEME SATURATION (CRITICAL diversity constraint): the shop is already "
+                f"over-concentrated on these themes: {listed}. More products on these themes "
+                "would CANNIBALIZE the existing listings in Etsy search and leave the shop a "
+                "one-theme monoculture that collapses when the season ends. Your proposal MUST "
+                "be about a COMPLETELY DIFFERENT theme, audience, and occasion — it must NOT "
+                "mention or relate to any saturated theme above. Deliberately diversify into an "
+                "UNDERSERVED EVERGREEN niche with year-round demand (a different hobby, life "
+                "event, aesthetic, profession, or audience)."
+            )
+        except Exception:
+            return ""
+
     def _build_concept_prompt(self, insight: str, feedback: str) -> str:
         retry_note = f"\n\nIMPORTANT — retry feedback:\n{feedback}" if feedback else ""
         # B-1(b): only advertise POD when it's enabled.
@@ -576,7 +624,7 @@ allowed is wall_art_set_3 (exactly 3 coordinated prints), and only when it is
 listed as an available format above.
 
 Market insight:
-{insight}{self._insights_block}{self._margin_guidance_block()}{self._seasonal_block()}{dedup_note}
+{insight}{self._insights_block}{self._margin_guidance_block()}{self._theme_diversity_block()}{self._seasonal_block()}{dedup_note}
 
 Return ONLY valid JSON with this structure:
 {{
