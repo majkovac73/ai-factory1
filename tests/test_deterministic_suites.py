@@ -116,6 +116,7 @@ DETERMINISTIC = [
     "test_audit_step15_provenance.py",
     "test_audit_step17_margin_guidance.py",
     "test_audit_step19_visual_ip.py",
+    "test_deep_audit_v2_fixes.py",
 ]
 
 

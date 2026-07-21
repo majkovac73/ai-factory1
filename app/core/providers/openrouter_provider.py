@@ -41,7 +41,16 @@ class OpenRouterProvider(BaseLLMProvider):
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
-        
+
+        # DEEP AUDIT V2 #1: cap max_tokens so OpenRouter doesn't reserve credit for
+        # the model's full max output (which 402s a modest balance on sonnet).
+        if max_tokens is None:
+            try:
+                from config import settings as _s
+                max_tokens = int(getattr(_s, "LLM_MAX_TOKENS", 4000))
+            except Exception:
+                max_tokens = 4000
+
         response = await self.client.chat.completions.create(
             model=model,
             messages=messages,

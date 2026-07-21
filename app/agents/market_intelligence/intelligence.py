@@ -58,12 +58,24 @@ Be concise and actionable.
                 parsed = self.sanitizer.extract(response)
                 return parsed
             except Exception:
+                # DEEP AUDIT V2 #10: previously this returned {"opportunities": []}
+                # silently, so a malformed LLM reply killed the cycle with no product
+                # and no signal — indistinguishable from "no opportunities found".
+                # Surface it loudly (WARNING now persists to the logs table) so the
+                # rate is measurable, rather than degrading to a silent empty.
+                import logging
+                logging.getLogger("ai-factory").warning(
+                    "IntelligenceAgent: could not parse synthesis output as JSON "
+                    "(returning empty opportunities — cycle will produce nothing). "
+                    f"raw[:200]={str(response)[:200]!r}"
+                )
                 return {
                     "summary": response,
                     "opportunities": [],
                     "threats": [],
                     "recommendations": [],
-                    "confidence": "low"
+                    "confidence": "low",
+                    "parse_failed": True,
                 }
 
     def run(self, task: dict) -> dict:

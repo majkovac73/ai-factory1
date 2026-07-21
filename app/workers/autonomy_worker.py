@@ -34,6 +34,36 @@ class AutonomyWorker:
         self._schedule_seconds = schedule_seconds if schedule_seconds is not None else self._resolve_interval_seconds()
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self._consecutive_errors = 0
+        self._last_error_alert_at = 0.0
+
+    def _alert_cycle_error(self, exc: Exception) -> None:
+        """DEEP AUDIT V2 #5: alert on autonomy cycle failure, rate-limited to once
+        per hour so a persistent error (e.g. hourly 402) pages once, not every
+        cycle. The message names the exception so a billing/quota/outage halt is
+        immediately diagnosable."""
+        import time as _t
+        self._consecutive_errors += 1
+        now = _t.time()
+        if now - self._last_error_alert_at < 3600:
+            return
+        self._last_error_alert_at = now
+        try:
+            from app.services.alert_service import AlertService
+            msg = str(exc)
+            hint = ""
+            if "402" in msg or "credit" in msg.lower():
+                hint = (" This looks like an OpenRouter BILLING/credit error — top up the "
+                        "OpenRouter balance (or lower CONCEPT_MODEL cost / max_tokens). "
+                        "The factory builds NOTHING until this is resolved.")
+            AlertService().send_alert_sync(
+                "Autonomy cycle is failing — factory may be halted",
+                f"AutonomyWorker has failed {self._consecutive_errors} consecutive cycle(s). "
+                f"Latest error: {msg[:300]}.{hint}",
+                level="error",
+            )
+        except Exception as e:
+            logger.warning(f"AutonomyWorker: could not send cycle-error alert: {e}")
 
     @staticmethod
     def _resolve_interval_seconds() -> int:
@@ -76,8 +106,14 @@ class AutonomyWorker:
                 if settings.AUTONOMY_ENABLED:
                     try:
                         self._run_cycle()
+                        self._consecutive_errors = 0
                     except Exception as e:
                         logger.error(f"AutonomyWorker: error in cycle: {e}")
+                        # DEEP AUDIT V2 #5: a cycle-level exception (OpenRouter 402/
+                        # quota, provider outage) previously only logged — the factory
+                        # could die silently for up to 24h. Alert Maj (rate-limited)
+                        # so a halt is visible within one cycle, not a day later.
+                        self._alert_cycle_error(e)
 
                 self._stop_event.wait(self._schedule_seconds)
         finally:
@@ -113,6 +149,12 @@ class AutonomyWorker:
 
         metadata = {"source": source, "product_name": product_name}
         if page_count:
+            # DEEP AUDIT V2 #2: clamp autonomy PDF page counts for reliability — the
+            # whole PDF blocks if any single page fails QA/readback, so fewer pages
+            # sharply raises the odds of a shippable product.
+            cap = int(getattr(settings, "PDF_RELIABILITY_PAGE_CAP", 0) or 0)
+            if cap > 0 and isinstance(page_count, int) and page_count > cap:
+                page_count = cap
             metadata["page_count"] = page_count
         # A-2: carry the Etsy market data (real median price + winning titles).
         market = concept.get("market")

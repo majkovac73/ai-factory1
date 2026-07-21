@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     # openai/gpt-4o via OpenRouter) for cents more per day. Default = DEFAULT_MODEL.
     CONCEPT_MODEL: str | None = None
     SEO_MODEL: str | None = None
+    # DEEP AUDIT V2 #1: default output-token cap for text LLM calls. With max_tokens
+    # unset, OpenRouter RESERVES credit for the model's full max output (large for
+    # sonnet), so a modest balance 402s ("requires more credits, or fewer
+    # max_tokens") and halts the factory. Concept/SEO/research outputs are well
+    # under this; capping shrinks the per-call credit reservation. Callers may
+    # still override per-call.
+    LLM_MAX_TOKENS: int = 4000
 
     OPENROUTER_API_KEY: str | None = None
 
@@ -272,6 +279,18 @@ class Settings(BaseSettings):
     MARKETING_REFRESH_SCHEDULE_SECONDS: int = 21600   # every 6 hours
     MARKETING_REFRESH_MIN_INTERVAL_DAYS: int = 7      # don't re-promote same product+channel more often
     MARKETING_REFRESH_MAX_POSTS_PER_CYCLE: int = 3    # hard cap per cycle
+
+    # DEEP AUDIT V2 #2: formats that blocked 100% of their tasks (seamless_pattern
+    # 3/3, phone_wallpaper 3/3) are paused from the concept generator until they
+    # pass a smoke test — they only ever cost generation spend and produced nothing.
+    # Flip True in Railway to re-enable once the block rate is validated.
+    SEAMLESS_PATTERN_ENABLED: bool = False
+    PHONE_WALLPAPER_ENABLED: bool = False
+    # #2: reliability cap on autonomy-proposed PDF page counts. The whole PDF is
+    # blocked if any page fails QA/readback, so more pages = higher block odds.
+    # Concepts requesting more than this are clamped for reliability (separate from
+    # the hard MAX_PDF_PAGES ceiling). 0 disables the clamp.
+    PDF_RELIABILITY_PAGE_CAP: int = 8
 
     # Hard cap on pages for a multi-page PDF product. With A-6 code-rendering,
     # interior pages are ~free and always legible, so a competitive 20-30 page

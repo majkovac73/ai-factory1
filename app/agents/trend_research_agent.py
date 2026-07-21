@@ -477,6 +477,12 @@ class TrendResearchAgent(BaseAgent):
         # costs ~3x an image; enable deliberately).
         if not getattr(settings, "WALL_ART_SET_ENABLED", False):
             formats = [f for f in formats if f != "wall_art_set_3"]
+        # DEEP AUDIT V2 #2: pause formats that blocked 100% of their tasks until
+        # their block rate is validated (they only burned generation spend).
+        if not getattr(settings, "SEAMLESS_PATTERN_ENABLED", False):
+            formats = [f for f in formats if f != "seamless_pattern"]
+        if not getattr(settings, "PHONE_WALLPAPER_ENABLED", False):
+            formats = [f for f in formats if f != "phone_wallpaper"]
         return formats
 
     def _margin_guidance_block(self) -> str:

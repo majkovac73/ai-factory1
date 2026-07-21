@@ -22,6 +22,12 @@ from datetime import datetime, timezone
 logger = logging.getLogger("ai-factory")
 
 RETRY_STATUSES = (429, 500, 502, 503, 504)
+# DEEP AUDIT V2 #11: 5xx retries are only SAFE on idempotent methods. Retrying a
+# POST /listings or POST /pins on a 5xx returned AFTER the resource was created
+# double-creates it (Etsy/Pinterest have no idempotency key). For mutating methods
+# we retry ONLY on 429 (rate-limit — the request provably did not take effect).
+_IDEMPOTENT_METHODS = ("GET", "HEAD", "OPTIONS")
+_RATE_LIMIT_ONLY = (429,)
 
 
 def _parse_retry_after(value) -> float | None:
@@ -61,6 +67,10 @@ async def request_with_backoff(
     # httpx.AsyncClient supports both, but code and tests commonly wrap the client
     # exposing only verb methods, so this stays maximally compatible.
     verb = getattr(client, method.lower())
+    # #11: non-idempotent methods retry ONLY on 429 (safe); idempotent methods may
+    # also retry transient 5xx.
+    if method.upper() not in _IDEMPOTENT_METHODS:
+        retry_statuses = tuple(s for s in retry_statuses if s in _RATE_LIMIT_ONLY)
     attempt = 0
     while True:
         response = await verb(url, **kwargs)

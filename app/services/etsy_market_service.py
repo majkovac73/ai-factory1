@@ -25,8 +25,17 @@ ETSY_API_BASE = "https://openapi.etsy.com/v3/application"
 
 class EtsyMarketService:
     def __init__(self, api_key: str = None):
-        # Public endpoint: the x-api-key is the app keystring only (no OAuth).
-        self._api_key = api_key or settings.ETSY_API_KEY
+        # DEEP AUDIT V2 #6: Etsy now requires the SHARED SECRET in the x-api-key
+        # header even on this public (no-OAuth) endpoint — a keystring-only header
+        # 403s with "Shared secret is required in x-api-key header", which made
+        # 100% of market lookups fail (and starved the quality gate's market-
+        # evidence axis). Send "keystring:shared_secret", exactly like EtsyClient.
+        if api_key:
+            self._api_key = api_key
+        elif settings.ETSY_API_KEY and settings.ETSY_SHARED_SECRET:
+            self._api_key = f"{settings.ETSY_API_KEY}:{settings.ETSY_SHARED_SECRET}"
+        else:
+            self._api_key = settings.ETSY_API_KEY  # degrade (will 403), never crash
 
     async def validate_concept(self, keywords: str, limit: int = 100) -> dict | None:
         """Return {competition_count, price_p25, price_p50, price_p75, currency,

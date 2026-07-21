@@ -263,6 +263,13 @@ class PipelineOrchestrator:
         # 4 — HARD GATE: no listing without a verified real product behind it.
         gate_error = self._delivery_gate_error(task_id, is_pdf, is_pod, pod_product)
         if gate_error:
+            # DEEP AUDIT V2 #2: persist the SPECIFIC delivery failure (which page,
+            # QA reason, page-count mismatch) into the block reason, not just the
+            # generic "no verified PDF". The specifics used to go to stdout only and
+            # were lost on recycle, making the 75% PDF block rate un-diagnosable.
+            specific = (report.get("stages", {}).get("delivery_asset", {}) or {}).get("error")
+            if specific:
+                gate_error = f"{gate_error} [detail: {str(specific)[:180]}]"
             self._block_task(task_id, gate_error, report, pre_listing=True)
             return report
 
