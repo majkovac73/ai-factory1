@@ -370,6 +370,21 @@ def phase_sandbox_integration(sandbox_token: str):
 
     pin_id = result.get("external_id")
     print(f"\nPin CREATED. POST /v5/pins returned id = {pin_id}", flush=True)
+
+    # Immediately surface an OPENABLE view of the just-created Pin, rendered from
+    # the exact image + fields we sent (sandbox Pins have no public pinterest.com
+    # URL). Step 5's read-back then refreshes it with Pinterest's hosted media URL.
+    listing["board_id"] = board_id
+    try:
+        preview_path = _write_pin_preview(pin_id, listing, {}, api)
+        _announce_openable_pin(pin_id, preview_path, None)
+        try:
+            webbrowser.open(f"file://{preview_path}")  # opens if running with a GUI
+        except Exception:
+            pass
+    except Exception as e:
+        preview_path = None
+        print(f"(could not write pin preview page, non-fatal: {e})")
     pause_to_read()
 
     # 3d — DISPLAY the created Pin: read it back + show full JSON
@@ -386,6 +401,17 @@ def phase_sandbox_integration(sandbox_token: str):
         print("(The created Pin id above appears in this board's Pin list — proof it landed.)")
     except Exception as e:
         print(f"(board pin list read failed, non-fatal: {e})")
+
+    # Refresh the SAME preview page now that we have the full Pin object (adds
+    # Pinterest's hosted media URL if present), and re-surface the openable link.
+    media_url = _pin_image_url(pin)
+    try:
+        preview_path = _write_pin_preview(pin_id, listing, pin, api)
+        print("\nPin preview page refreshed with the full API response"
+              + (" (now including Pinterest's hosted media URL)." if media_url else "."))
+        _announce_openable_pin(pin_id, preview_path, media_url)
+    except Exception as e:
+        print(f"(could not refresh pin preview page, non-fatal: {e})")
     pause_to_read()
 
     banner("6", "Demo complete — both requirements shown")
@@ -397,6 +423,94 @@ def phase_sandbox_integration(sandbox_token: str):
     print("     visible in the API responses above.")
     print("\nOnce Standard access is granted, the identical code path runs against")
     print("PRODUCTION and the Pin appears on the public pinterest.com profile.", flush=True)
+
+
+def _pin_image_url(pin: dict):
+    """Largest available image URL from a Pin's media block (if the API returned
+    one). Pinterest media.images is keyed like '150x150','600x','1200x'."""
+    imgs = ((pin or {}).get("media") or {}).get("images") or {}
+
+    def width(k):
+        try:
+            return int(str(k).split("x")[0])
+        except Exception:
+            return 0
+
+    urls = [(width(k), v.get("url")) for k, v in imgs.items()
+            if isinstance(v, dict) and v.get("url")]
+    return max(urls)[1] if urls else None
+
+
+def _write_pin_preview(pin_id, listing, pin, api_base_url):
+    """Render the created Pin as a local HTML 'Pin preview' page you can OPEN and
+    show on the video. Every field comes from the real API data; the image is the
+    exact one we uploaded (embedded so it always renders even if the sandbox media
+    URL isn't publicly reachable). Clearly labeled as this app's preview of the
+    sandbox API response — it does NOT imitate pinterest.com. Returns a file path."""
+    import html
+    from pathlib import Path
+
+    title = html.escape(listing.get("title", "") or (pin or {}).get("title", "") or "Pin")
+    desc = html.escape(listing.get("description", "") or (pin or {}).get("description", "") or "")
+    link = listing.get("listing_url") or (pin or {}).get("link") or ""
+    board_id = (pin or {}).get("board_id") or listing.get("board_id") or ""
+    media_url = _pin_image_url(pin)
+    b64 = listing.get("image_base64") or ""
+    img_src = media_url or (f"data:{listing.get('image_content_type', 'image/png')};base64,{b64}" if b64 else "")
+
+    page = f"""<!doctype html>
+<html><head><meta charset="utf-8"><title>Pin preview {html.escape(str(pin_id))}</title>
+<style>
+ body{{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#f4f4f5;margin:0;padding:32px;color:#111}}
+ .note{{max-width:640px;margin:0 auto 16px;font-size:13px;color:#555;text-align:center}}
+ .card{{max-width:420px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;
+        box-shadow:0 6px 24px rgba(0,0,0,.12)}}
+ .card img{{width:100%;display:block;background:#eee}}
+ .body{{padding:16px 18px}}
+ .title{{font-size:18px;font-weight:700;margin:0 0 6px}}
+ .desc{{font-size:14px;color:#333;margin:0 0 12px}}
+ .meta{{font-size:12px;color:#666;line-height:1.6;border-top:1px solid #eee;padding-top:10px}}
+ a{{color:#0a58ca;text-decoration:none}} a:hover{{text-decoration:underline}}
+ code{{background:#f0f0f0;padding:1px 5px;border-radius:4px}}
+</style></head><body>
+ <div class="note">AI Factory &mdash; local preview rendered from the Pinterest
+   <b>sandbox</b> API response for pin <code>{html.escape(str(pin_id))}</code>.
+   (Sandbox Pins are not published to public pinterest.com; this page is this app's
+   own render of the live API data, not the Pinterest website.)</div>
+ <div class="card">
+   {f'<img src="{html.escape(img_src)}" alt="pin image">' if img_src else ''}
+   <div class="body">
+     <p class="title">{title}</p>
+     <p class="desc">{desc}</p>
+     <div class="meta">
+       Pin id: <code>{html.escape(str(pin_id))}</code><br>
+       Board id: <code>{html.escape(str(board_id))}</code><br>
+       Destination link: <a href="{html.escape(link)}">{html.escape(link)}</a><br>
+       Created via: <code>POST {html.escape(api_base_url)}/pins</code>{f'<br>Pinterest media URL: <a href="{html.escape(media_url)}">{html.escape(media_url)}</a>' if media_url else ''}
+     </div>
+   </div>
+ </div>
+</body></html>"""
+    out = Path.cwd() / "pin_preview.html"
+    out.write_text(page, encoding="utf-8")
+    return str(out.resolve())
+
+
+def _announce_openable_pin(pin_id, preview_path, media_url):
+    """Big, obvious block so the openable link is easy to find on the video."""
+    print("\n" + "*" * 70)
+    print("*  OPEN THIS TO SEE THE CREATED PIN (sandbox)")
+    print("*")
+    print(f"*  Pin preview page (open in a browser):")
+    print(f"*      file://{preview_path}")
+    if media_url:
+        print(f"*  Pin image URL (hosted by Pinterest):")
+        print(f"*      {media_url}")
+    print(f"*  Pin id: {pin_id}")
+    print("*")
+    print("*  NOTE: sandbox Pins have no public pinterest.com page. The preview")
+    print("*  page above is rendered from the live API response for this pin.")
+    print("*" * 70, flush=True)
 
 
 def _list_board_pins(api: str, token: str, board_id: str) -> list:
