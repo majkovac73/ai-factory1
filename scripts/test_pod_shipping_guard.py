@@ -101,6 +101,35 @@ check("parse buyer variations -> (XL, Navy)", s == "XL" and c == "Navy")
 check("end-to-end: buyer XL/Navy -> variant 303",
       PodVariantMapper.resolve_variant_id(vmap, *PodVariantMapper.parse_buyer_variations(txn)) == 303)
 
+# ── real Printify shipping cost baked into the FREE-shipping price ────────────
+from app.services.printify_client import PrintifyClient
+from app.services.pod_fulfillment_service import PODFulfillmentService
+
+pc = PrintifyClient.__new__(PrintifyClient)
+SHIP = {"profiles": [
+    {"variant_ids": [10, 11], "first_item": {"cost": 429, "currency": "USD"}, "countries": ["US"]},
+    {"variant_ids": [10, 11], "first_item": {"cost": 1359, "currency": "USD"}, "countries": ["DE"]},
+    {"variant_ids": [10, 11], "first_item": {"cost": 1000, "currency": "USD"}, "countries": ["REST_OF_THE_WORLD"]},
+    {"variant_ids": [99], "first_item": {"cost": 9999, "currency": "USD"}, "countries": ["XX"]},  # other variant
+]}
+pc._get = lambda path, params=None: SHIP
+check("shipping cost = MAX first_item across destinations for the variant (1359)",
+      pc.get_shipping_cost_cents(5, 39, variant_id=10) == 1359)
+check("shipping cost excludes profiles not covering the variant",
+      pc.get_shipping_cost_cents(5, 39, variant_id=10) != 9999)
+pc_err = PrintifyClient.__new__(PrintifyClient)
+def _boom(*a, **k): raise RuntimeError("api down")
+pc_err._get = _boom
+check("shipping cost None on API error (caller falls back)", pc_err.get_shipping_cost_cents(5, 39, 10) is None)
+
+with patch.object(settings, "USD_TO_BASE_RATE", 1.0), patch.object(settings, "POD_SHIPPING_ESTIMATE_USD", 5.0), \
+     patch.object(settings, "POD_TARGET_PROFIT_USD", 6.0), patch.object(settings, "POD_ETSY_FEE_FRACTION", 0.12):
+    est = PODFulfillmentService._pod_price_cents_from_cost(1200)             # flat $5 estimate
+    real = PODFulfillmentService._pod_price_cents_from_cost(1200, 1359)      # real $13.59 EU shipping
+check("real shipping price COVERS worse shipping (real > estimate)", real > est)
+check("real shipping price includes the ~$8.59 extra shipping",
+      abs((real - est) - round((13.59 - 5.0) / (1 - 0.12)) * 100) < 200)
+
 print()
 if failures:
     print(f"{len(failures)} test(s) FAILED: {failures}")

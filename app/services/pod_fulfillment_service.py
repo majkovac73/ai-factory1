@@ -174,11 +174,14 @@ class PODFulfillmentService:
         # 6b. Readback: confirm the image is attached AND read the real variant cost.
         product = self._verify_product_readback(printify_product_id, printify_image_id)
         cost_cents = self._variant_cost_cents(product, variant_id)
-        price_cents = self._pod_price_cents_from_cost(cost_cents) if cost_cents else None
+        # Real worst-case shipping so the FREE-shipping item price covers it (the
+        # seller must not foot international shipping).
+        shipping_cost_cents = self._printify.get_shipping_cost_cents(blueprint_id, print_provider_id, variant_id)
+        price_cents = self._pod_price_cents_from_cost(cost_cents, shipping_cost_cents) if cost_cents else None
         if cost_cents and price_cents:
             logger.info(
-                f"PODFulfillmentService: variant cost {cost_cents}c -> margin-safe "
-                f"Etsy price {price_cents}c (task {task_id})"
+                f"PODFulfillmentService: variant cost {cost_cents}c + shipping "
+                f"{shipping_cost_cents}c -> margin-safe Etsy price {price_cents}c (task {task_id})"
             )
         else:
             logger.warning(
@@ -251,17 +254,25 @@ class PODFulfillmentService:
         return max(costs) if costs else None
 
     @staticmethod
-    def _pod_price_cents_from_cost(cost_cents: int) -> int:
+    def _pod_price_cents_from_cost(cost_cents: int, shipping_cost_cents: Optional[int] = None) -> int:
         """P0-4 margin math: price = ceil((cost + shipping + 0.20 + profit) /
         (1 - fee_fraction)), rounded UP to a whole unit to protect margin.
 
-        DEEP AUDIT V3: the Printify `cost` is billed in USD, but the Etsy shop
-        charges in EUR (BASE_CURRENCY). Convert the USD production cost to EUR
-        first, so the EUR price genuinely covers the USD money that goes out.
-        shipping/profit are operator targets in the base currency."""
+        The Etsy listing ships FREE, so the item price MUST cover shipping.
+        `shipping_cost_cents` is Printify's REAL worst-case shipping (USD cents);
+        without it the seller foots the shipping (a flat $5 estimate under-covers
+        the $10-14 international rates). Falls back to POD_SHIPPING_ESTIMATE_USD
+        only if the real cost couldn't be fetched.
+
+        DEEP AUDIT V3: Printify `cost` + shipping are billed in USD; the Etsy shop
+        charges in EUR (BASE_CURRENCY), so both are converted to EUR here so the
+        EUR price genuinely covers the USD money that goes out."""
         from app.core.currency import usd_to_base
         cost = usd_to_base(cost_cents / 100.0)   # USD production cost -> EUR
-        shipping = getattr(settings, "POD_SHIPPING_ESTIMATE_USD", 5.0)
+        if isinstance(shipping_cost_cents, (int, float)) and shipping_cost_cents > 0:
+            shipping = usd_to_base(shipping_cost_cents / 100.0)   # REAL Printify shipping USD -> EUR
+        else:
+            shipping = float(getattr(settings, "POD_SHIPPING_ESTIMATE_USD", 5.0))  # fallback estimate (base)
         profit = getattr(settings, "POD_TARGET_PROFIT_USD", 6.0)
         fee = getattr(settings, "POD_ETSY_FEE_FRACTION", 0.10)
         raw = (cost + shipping + 0.20 + profit) / (1 - fee)

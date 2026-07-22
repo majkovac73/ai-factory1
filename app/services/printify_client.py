@@ -82,6 +82,31 @@ class PrintifyClient:
             f"/catalog/blueprints/{blueprint_id}/print_providers/{print_provider_id}/variants.json"
         )
 
+    def get_shipping_cost_cents(self, blueprint_id: int, print_provider_id: int,
+                                variant_id: Optional[int] = None) -> Optional[int]:
+        """The MAX 'first_item' shipping cost (USD cents) across every destination
+        Printify ships this product to. We sell worldwide with FREE Etsy shipping
+        (shipping is baked into the item price), so the price must cover the
+        WORST-CASE shipping or the seller foots the difference (e.g. US $4.29 vs
+        EU $13.49 for the same tee). Returns None on any error (caller falls back
+        to the flat estimate)."""
+        try:
+            data = self._get(
+                f"/catalog/blueprints/{blueprint_id}/print_providers/{print_provider_id}/shipping.json"
+            )
+        except Exception:
+            return None
+        costs = []
+        for prof in (data.get("profiles", []) if isinstance(data, dict) else []) or []:
+            if variant_id is not None:
+                vids = prof.get("variant_ids") or []
+                if vids and variant_id not in vids:
+                    continue
+            cost = (prof.get("first_item") or {}).get("cost")
+            if isinstance(cost, (int, float)) and cost > 0:
+                costs.append(int(cost))
+        return max(costs) if costs else None
+
     # ── Image upload ─────────────────────────────────────────────────────────
 
     def upload_image(self, image_path: str) -> str:

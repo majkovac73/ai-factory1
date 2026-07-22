@@ -356,6 +356,8 @@ with tempfile.TemporaryDirectory() as tmp:
             return [{"id": 3, "title": "Provider"}]
         def list_variants(self, bp, pp):
             return {"variants": [{"id": 101, "is_enabled": True}]}
+        def get_shipping_cost_cents(self, bp, pp, variant_id=None):
+            return 500
         def create_product(self, **kw):
             return {"id": "printify-product-4"}
         def get_product(self, product_id):
