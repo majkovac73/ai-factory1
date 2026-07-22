@@ -578,6 +578,44 @@ class TrendResearchAgent(BaseAgent):
         except Exception:
             return ""
 
+    def _demand_grounding_block(self) -> str:
+        """Ground the concept in MEASURED demand. The quality gate's demand axis
+        scores 4/10 ("no matching trend keyword") whenever a concept doesn't map to
+        a keyword with real search interest — which is exactly what drags scores
+        below the bar. List the niches with actual demand signal and REQUIRE the
+        concept to serve one, so the demand axis (and real buyer traffic) is earned,
+        not defaulted."""
+        try:
+            td = self._trend_data or {}
+            it = td.get("interest_trend") or {}
+            # keywords that are rising or holding steady = live demand to build on
+            live = [kw for kw, info in it.items()
+                    if (info or {}).get("direction") in ("rising", "flat")]
+            # also surface any rising queries (when pytrends returns them)
+            rising = []
+            rq = td.get("rising_queries") or {}
+            if isinstance(rq, dict):
+                for qs in rq.values():
+                    rising.extend(str(q) for q in (qs or []))
+            if not live and not rising:
+                return ""
+            parts = []
+            if live:
+                parts.append("niches with measured search demand: " + ", ".join(sorted(set(live))[:12]))
+            if rising:
+                parts.append("specific rising searches: " + ", ".join(sorted(set(rising))[:10]))
+            return (
+                "\n\nDEMAND GROUNDING (REQUIRED — the quality gate scores demand 4/10 "
+                "and rejects concepts that don't map to real search demand):\n- "
+                + "\n- ".join(parts)
+                + "\n- Your concept MUST clearly and specifically serve one of the "
+                "demand-backed niches above (use its wording in the product name/"
+                "description) so it has real buyers — do NOT invent an arbitrary niche "
+                "with no measured demand."
+            )
+        except Exception:
+            return ""
+
     def _build_concept_prompt(self, insight: str, feedback: str) -> str:
         retry_note = f"\n\nIMPORTANT — retry feedback:\n{feedback}" if feedback else ""
         # B-1(b): only advertise each POD format when it's enabled.
@@ -636,8 +674,18 @@ propose a bundle/kit/collection of assorted items; the ONLY multi-item product
 allowed is wall_art_set_3 (exactly 3 coordinated prints), and only when it is
 listed as an available format above.
 
+QUALITY BAR (an independent judge scores this 1-10 on "would a real stranger
+BUY this specific item"; only high-quality concepts are built):
+- DISTINCTIVE, not generic. A "generic style applied to a common theme" (e.g.
+  "retro badge <anything>", "minimalist <common word> quote") scores low. Give it
+  a specific, fresh angle a buyer can't already find 50 of.
+- LOW competition. Avoid obviously saturated categories (generic quotes, common
+  holidays, plain motivational text). Target a specific, underserved sub-niche
+  with a clearly-defined buyer.
+- CONCRETE and useful/desirable to a real person with a real reason to buy it.
+
 Market insight:
-{insight}{self._insights_block}{self._margin_guidance_block()}{self._theme_diversity_block()}{self._seasonal_block()}{dedup_note}
+{insight}{self._insights_block}{self._margin_guidance_block()}{self._theme_diversity_block()}{self._demand_grounding_block()}{self._seasonal_block()}{dedup_note}
 
 Return ONLY valid JSON with this structure:
 {{
