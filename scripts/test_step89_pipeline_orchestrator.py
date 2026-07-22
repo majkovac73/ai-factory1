@@ -288,7 +288,11 @@ with tempfile.TemporaryDirectory() as tmp:
         pod_design_calls.clear()
         printify_precheck_calls.clear()
         orch3 = PipelineOrchestrator()
-        with patch("app.services.pipeline_orchestrator.ProductImageAgent") as mock_pia, \
+        # POD (physical) needs a shipping profile or the pipeline fast-fails before
+        # the design stage; set one so this test exercises the POD design path.
+        from config import settings as _s89
+        with patch.object(_s89, "ETSY_SHIPPING_PROFILE_ID", "ship_test_1"), \
+             patch("app.services.pipeline_orchestrator.ProductImageAgent") as mock_pia, \
              patch("app.services.pipeline_orchestrator.PODPipelineService", FakePODPipelineService), \
              patch("app.services.pipeline_orchestrator.PODFulfillmentService", FakePODFulfillmentService3), \
              patch("app.services.pipeline_orchestrator.asyncio.run", return_value={"listing_id": "L99"}), \
