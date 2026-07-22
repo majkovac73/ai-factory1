@@ -159,6 +159,27 @@ class MarketingRefreshService:
     def _listing_url(self, listing_id: str) -> str:
         return f"https://www.etsy.com/listing/{listing_id}"
 
+    def _etsy_primary_image_url(self, listing_id: str) -> Optional[str]:
+        """Public URL of the listing's primary photo, fetched from Etsy. Used to
+        re-promote a product whose LOCAL image assets were auto-pruned (listing
+        mockups are deleted after a few hours; the images live on Etsy now). The
+        pin/social channel can create from a public image_url. Best-effort."""
+        if not listing_id:
+            return None
+        try:
+            import asyncio
+            from app.services.etsy_image_service import EtsyImageService
+            images = asyncio.run(EtsyImageService().get_listing_images(str(listing_id)))
+            if not images:
+                return None
+            primary = images[0]
+            for key in ("url_fullxfull", "url_570xN", "url_680x540", "url_300x300"):
+                if primary.get(key):
+                    return primary[key]
+        except Exception as e:
+            logger.warning(f"MarketingRefreshService: could not fetch Etsy image for {listing_id}: {e}")
+        return None
+
     def rewrite_caption(self, title: str, description: str) -> Optional[str]:
         """ONE cheap text-LLM call to reword the promo caption so repeat posts
         don't read as identical. Returns None on any failure (caller falls back
@@ -199,9 +220,14 @@ class MarketingRefreshService:
         description = output.get("description") or ""
         keywords = output.get("keywords") or []
 
+        # Prefer a local image asset; fall back to the listing's public Etsy image
+        # URL when local assets were pruned (so a backfill of older listings still
+        # works). One of the two must resolve, or there's nothing to post.
         asset_path = self._pick_asset_path(task_id)
-        if not asset_path:
-            return {"success": False, "external_id": None, "url": None, "error": "no existing asset found to re-promote"}
+        image_url = None if asset_path else self._etsy_primary_image_url(listing_id)
+        if not asset_path and not image_url:
+            return {"success": False, "external_id": None, "url": None,
+                    "error": "no image available to re-promote (local assets pruned and no Etsy image URL)"}
 
         caption = description
         if rewrite_caption:
@@ -213,9 +239,12 @@ class MarketingRefreshService:
             "title": title,
             "description": caption,
             "keywords": keywords,
-            "image_path": asset_path,
             "listing_url": self._listing_url(listing_id) if listing_id else "",
         }
+        if asset_path:
+            listing["image_path"] = asset_path
+        else:
+            listing["image_url"] = image_url
         return self.marketing.post_to_channel(task_id, listing, channel)
 
     # ── One refresh cycle ─────────────────────────────────────────────────────
