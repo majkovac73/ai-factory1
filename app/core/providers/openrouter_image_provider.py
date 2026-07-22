@@ -102,15 +102,39 @@ class OpenRouterImageProvider(BaseImageProvider):
             "Content-Type": "application/json",
         }
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(
-                OPENROUTER_IMAGE_API, json=payload, headers=headers
-            )
-            if response.status_code >= 400:
-                raise RuntimeError(
-                    f"OpenRouter Image API error {response.status_code}: {response.text}"
+        # Retry transient failures (5xx / 429 / network) with backoff. Image
+        # generation has NO side effect, so re-issuing is safe (unlike a listing/
+        # order POST) — a one-off Seedream 520 must not block an otherwise-good
+        # product. Only a persistent error (or a 4xx that isn't 429) raises.
+        import asyncio as _asyncio
+        attempts = int(getattr(settings, "IMAGE_GEN_MAX_ATTEMPTS", 4))
+        last_err = None
+        data = None
+        for attempt in range(1, attempts + 1):
+            try:
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    response = await client.post(OPENROUTER_IMAGE_API, json=payload, headers=headers)
+                if response.status_code < 400:
+                    data = response.json()
+                    break
+                # 4xx (except 429) is a real request problem — don't retry.
+                if response.status_code != 429 and response.status_code < 500:
+                    raise RuntimeError(f"OpenRouter Image API error {response.status_code}: {response.text}")
+                last_err = f"{response.status_code}: {response.text[:200]}"
+            except RuntimeError:
+                raise
+            except Exception as e:  # network/timeout — transient
+                last_err = str(e)
+            if attempt < attempts:
+                delay = min(20.0, 1.5 * (2 ** (attempt - 1)))
+                import logging as _lg
+                _lg.getLogger("ai-factory").warning(
+                    f"OpenRouterImageProvider: transient image error ({last_err}); "
+                    f"retry {attempt + 1}/{attempts} in {delay:.0f}s"
                 )
-            data = response.json()
+                await _asyncio.sleep(delay)
+        if data is None:
+            raise RuntimeError(f"OpenRouter Image API failed after {attempts} attempts: {last_err}")
 
         image_data = data["data"][0]
         usage = data.get("usage", {})

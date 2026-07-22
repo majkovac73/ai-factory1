@@ -330,6 +330,10 @@ class Settings(BaseSettings):
     # here if QA accuracy needs improving.
     CONTENT_QA_MODEL: str = "openai/gpt-4o-mini"
     CONTENT_QA_MAX_ATTEMPTS: int = 2  # regenerate-and-recheck attempts before blocking
+    # Retries for a single image-generation POST on transient failures (5xx/429/
+    # network). Image gen has no side effect, so re-issuing is safe — this stops a
+    # one-off Seedream 520 from blocking an otherwise-good product.
+    IMAGE_GEN_MAX_ATTEMPTS: int = 4
     # 1-5: max fraction of a coloring page that may be colored/grey-shaded before
     # it's rejected as "pre-colored" and regenerated (clean line art is ~0%).
     COLORING_PAGE_MAX_COLOR_FRACTION: float = 0.03
