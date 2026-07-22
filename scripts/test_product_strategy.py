@@ -77,6 +77,21 @@ check("desc prompt requires instant digital download note", "INSTANT DIGITAL DOW
 check("desc prompt requires primary keyword in first sentence", "PRIMARY keyword" in p)
 check("desc prompt forbids physical shipping", "physical shipping" in p)
 
+# ── demand axis: Etsy-market proxy when Google Trends is blind (niches) ───────
+from app.services.product_score_service import ProductScoreService as _PS
+def dem(cc, it=None):
+    return _PS._demand({"product_name": "Niche Widget", "description": "x", "market": {"competition_count": cc} if cc is not None else {}}, {"interest_trend": it or {}})
+check("demand: proven niche (800 rivals, no trend) -> 7", dem(800)[0] == 7)
+check("demand: unproven (0 rivals) -> 3", dem(0)[0] == 3)
+check("demand: no market data -> 4", dem(None)[0] == 4)
+check("demand: saturated (200k rivals) -> 6", dem(200000)[0] == 6)
+check("demand: rising Trends keyword still wins (10)",
+      _PS._demand({"product_name": "coloring pages cat", "description": "x", "market": {"competition_count": 800}},
+                  {"interest_trend": {"coloring pages": {"direction": "rising"}}})[0] == 10)
+check("demand: falling Trends keyword -> 0 (not overridden by market)",
+      _PS._demand({"product_name": "fidget spinner", "description": "x", "market": {"competition_count": 800}},
+                  {"interest_trend": {"fidget spinner": {"direction": "falling"}}})[0] == 0)
+
 print()
 if failures:
     print(f"{len(failures)} test(s) FAILED: {failures}")

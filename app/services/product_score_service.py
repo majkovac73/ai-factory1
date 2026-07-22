@@ -86,19 +86,45 @@ class ProductScoreService:
                     return 10, f"matches rising query '{q}'", q
 
         it = (trend_data or {}).get("interest_trend") or {}
-        if not it:
-            return 4, "no trend data", None
         best_dir, best_kw = None, None
         rank = {"rising": 3, "flat": 2, "falling": 1}
-        for kw, info in it.items():
+        for kw, info in (it.items() if it else []):
             if cls._tokens(kw) & ctoks:  # keyword overlaps the concept
                 d = (info or {}).get("direction")
                 if d and (best_dir is None or rank.get(d, 0) > rank.get(best_dir, 0)):
                     best_dir, best_kw = d, kw
-        if best_dir is None:
-            return 4, "no matching trend keyword", None
-        pts = {"rising": 10, "flat": 6, "falling": 0}.get(best_dir, 4)
-        return pts, f"'{best_kw}' is {best_dir}", None
+        if best_dir == "falling":
+            return 0, f"'{best_kw}' is falling", None
+        if best_dir in ("rising", "flat"):
+            return {"rising": 10, "flat": 6}[best_dir], f"'{best_kw}' is {best_dir}", None
+        # Google Trends had no signal — common for SPECIFIC NICHE concepts (Trends
+        # has too little search volume for e.g. "Sicilian Dragon chess print").
+        # Fall back to the Etsy marketplace itself: real competing sellers = real
+        # buyers. This is a DIRECT demand signal in the exact market we sell in, so
+        # it validates niche demand that Trends is blind to (not a lowered bar — an
+        # unproven niche with zero Etsy rivals still scores low).
+        proxy = cls._demand_from_market(concept)
+        if proxy is not None:
+            return proxy[0], proxy[1], None
+        return 4, "no trend or market demand data", None
+
+    @staticmethod
+    def _demand_from_market(concept: dict):
+        """Etsy-market demand proxy (used when Google Trends is blind). Returns
+        (points 0-10, why) or None if there is no market data. Capped at 7 so a
+        proven niche never outranks a genuinely rising Trends query (10)."""
+        market = concept.get("market") or {}
+        c = market.get("competition_count")
+        if c is None:
+            return None
+        c = int(c)
+        if c == 0:
+            return 3, "0 Etsy rivals (unproven demand)"
+        if c < 100:
+            return 5, f"{c} Etsy sellers (small proven niche)"
+        if c < 100000:
+            return 7, f"{c} Etsy sellers (proven niche demand)"
+        return 6, f"{c} Etsy sellers (high but saturated demand)"
 
     @staticmethod
     def _competition(concept: dict) -> tuple:
