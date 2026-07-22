@@ -142,6 +142,9 @@ class Settings(BaseSettings):
 
     ETSY_SHIPPING_PROFILE_ID: str | None = None
     ETSY_SHOP_ORIGIN_COUNTRY: str = "US"  # ISO 3166-1 alpha-2; set in env if shop is not US-based
+    # Etsy requires a postal code to CREATE a shipping profile. Only used as a
+    # fallback when the shop's origin can't be derived from an existing profile.
+    ETSY_SHOP_ORIGIN_POSTAL_CODE: str | None = None
 
     # STEP 103 C-2: Etsy Creativity Standards require POD listings to DECLARE
     # their production partner (Printify). Maj adds Printify in Shop Manager

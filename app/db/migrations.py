@@ -83,6 +83,7 @@ def _migrate_pod_products_add_cost_price(engine):
         "cost_cents": "INTEGER",
         "price_cents": "INTEGER",
         "variant_title": "VARCHAR",
+        "variant_map": "JSON",   # size/color -> Printify variant for fulfillment routing
     }
     missing = {k: v for k, v in to_add.items() if k not in existing}
     if not missing:

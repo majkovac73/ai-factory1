@@ -129,19 +129,26 @@ class PipelineOrchestrator:
         is_set = format_spec["delivery"] == "image_set"  # 7-1: wall_art_set_3
         digital_required = format_spec["category"] == "digital"
 
-        # Fail FAST: a POD (physical) listing REQUIRES a shipping profile. Without
-        # ETSY_SHIPPING_PROFILE_ID the create call 400s ("shipping_profile_id is
-        # required"), but only AFTER we've paid to generate the Printify product +
-        # images. Block before any generation so a misconfiguration can't burn spend.
-        from config import settings as _settings_ship
-        if is_pod and not getattr(_settings_ship, "ETSY_SHIPPING_PROFILE_ID", None):
-            self._block_task(
-                task_id,
-                "POD listing needs a shipping profile but ETSY_SHIPPING_PROFILE_ID "
-                "is not configured — set it (or disable POD_APPAREL_ENABLED)",
-                report, pre_listing=True,
-            )
-            return report
+        # Fail FAST: a POD (physical) listing REQUIRES a shipping profile, or the
+        # create call 400s ("shipping_profile_id is required") — but only AFTER
+        # we've paid to generate the Printify product + images. Resolve (or
+        # auto-create) the profile up front and block before any generation if it
+        # can't be obtained, so a misconfiguration can't burn spend.
+        if is_pod:
+            from app.services.etsy_shipping_service import EtsyShippingService
+            try:
+                _ship_id = asyncio.run(EtsyShippingService().get_or_create())
+            except Exception as _e:
+                _ship_id = None
+                logger.error(f"PipelineOrchestrator: shipping-profile resolve failed for {task_id}: {_e}")
+            if not _ship_id:
+                self._block_task(
+                    task_id,
+                    "POD listing needs a shipping profile but none could be resolved or "
+                    "auto-created (check Etsy shipping settings / ETSY_SHOP_ORIGIN_* )",
+                    report, pre_listing=True,
+                )
+                return report
 
         is_autonomy = bool((task.metadata_ or {}).get("source") == "autonomy_worker")
 

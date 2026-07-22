@@ -15,6 +15,10 @@ class PODProduct(Base):
     blueprint_id = Column(Integer, nullable=True)
     print_provider_id = Column(Integer, nullable=True)
     variant_ids = Column(JSON, nullable=True)
+    # Fulfillment routing: [{size, color, variant_id, sku}] so a buyer's chosen
+    # Etsy (size,color) resolves to the correct Printify variant to order. Without
+    # this, every POD sale shipped the FIRST variant regardless of what was bought.
+    variant_map = Column(JSON, nullable=True)
     etsy_listing_id = Column(String, nullable=True, index=True)
     # P0-4/P0-5: margin auditing + the single deliberate variant actually sold.
     cost_cents = Column(Integer, nullable=True)      # Printify production cost of the sold variant

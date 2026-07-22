@@ -353,7 +353,22 @@ class EtsyReceiptWorker:
                 pod_id = pod.id if pod else None
                 pod_task_id = pod.task_id if pod else None
                 variant_ids = (pod.variant_ids or []) if pod else []
-                variant_id = variant_ids[0] if variant_ids else 0
+                variant_map = (pod.variant_map or []) if pod else []
+                # Route to the EXACT Printify variant the buyer chose (size/color)
+                # instead of always shipping the first variant. Falls back safely.
+                variant_id = 0
+                if pod is not None:
+                    from app.services.pod_variant_mapper import PodVariantMapper
+                    b_size, b_color = PodVariantMapper.parse_buyer_variations(transaction)
+                    variant_id = (
+                        PodVariantMapper.resolve_variant_id(variant_map, b_size, b_color)
+                        or (variant_ids[0] if variant_ids else 0)
+                    )
+                    if variant_map and (b_size or b_color):
+                        logger.info(
+                            f"EtsyReceiptWorker: buyer chose size={b_size!r} color={b_color!r} "
+                            f"-> Printify variant {variant_id} (receipt {receipt_id})"
+                        )
 
                 # Idempotency for fulfillment: per (receipt_id, transaction_id)
                 already_fulfilled = False

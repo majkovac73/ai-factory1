@@ -73,6 +73,9 @@ from app.schemas.task import TaskCreate
 from app.schemas.enums import TaskStatus
 from app.services.pipeline_orchestrator import PipelineOrchestrator
 from app.services.etsy_client import DIGITAL_WHEN_MADE, POD_WHEN_MADE
+from config import settings as _s95
+# POD cases: satisfy the shipping-profile fast-fail guard (get_or_create fast-path).
+_s95.ETSY_SHIPPING_PROFILE_ID = "test-ship-profile"
 
 _passed = _failed = 0
 
@@ -222,7 +225,7 @@ for task_type, is_pod in [("single_print", False), ("pod_apparel_design", True)]
         etsy = _EchoEtsy()
         m_ship = MagicMock()
         async def _get_or_create():
-            return None
+            return "test-ship-profile"   # POD path needs a resolvable shipping profile
         m_ship.return_value.get_or_create.side_effect = _get_or_create
         with patch("app.services.pipeline_orchestrator.ProductImageAgent", pia), \
              patch("app.services.pipeline_orchestrator.PODPipelineService", lambda: OkPODPipelineService(design)), \

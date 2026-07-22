@@ -134,6 +134,7 @@ class PODFulfillmentService:
         #    PipelineOrchestrator._stage_pod_variations using the same selection.
         variants_resp = self._printify.list_variants(blueprint_id, print_provider_id)
         all_variants = variants_resp.get("variants", [])
+        variant_map = None
         if getattr(settings, "POD_APPAREL_ENABLED", False):
             from app.services.pod_variant_mapper import PodVariantMapper
             selected = PodVariantMapper.select_variants(all_variants)
@@ -144,6 +145,9 @@ class PODFulfillmentService:
                 raise RuntimeError(f"No variants available for blueprint {blueprint_id}")
             enabled_variant_ids = [v["id"] for v in selected]
             chosen_variant = selected[len(selected) // 2]  # representative for cost/title
+            # Persist the (size,color) -> Printify variant table so fulfillment
+            # orders the EXACT variant the buyer chose (not always the first one).
+            variant_map = PodVariantMapper.variant_map(selected)
         else:
             chosen_variant = self._pick_single_variant(all_variants)
             if not chosen_variant:
@@ -192,6 +196,7 @@ class PODFulfillmentService:
                 blueprint_id=blueprint_id,
                 print_provider_id=print_provider_id,
                 variant_ids=enabled_variant_ids,
+                variant_map=variant_map,
                 etsy_listing_id=etsy_listing_id,
                 cost_cents=cost_cents,
                 price_cents=price_cents,

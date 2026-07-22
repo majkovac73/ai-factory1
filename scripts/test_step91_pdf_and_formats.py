@@ -73,6 +73,8 @@ _mock96.patch("app.services.content_quality_service.ContentQualityService", _Pas
 # PDF path (incl. its partial-failure behavior), so force that path here.
 from config import settings as _s91
 _s91.PLANNER_RENDER_INTERIOR = False
+# POD cases: satisfy the shipping-profile fast-fail guard (get_or_create fast-path).
+_s91.ETSY_SHIPPING_PROFILE_ID = "test-ship-profile"
 
 from PIL import Image as PILImage
 

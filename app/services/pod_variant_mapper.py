@@ -142,3 +142,52 @@ class PodVariantMapper:
             out.append({"size": (size or "").upper(), "color": (color or "").capitalize(),
                         "variant_id": v.get("id"), "sku": f"pf-{v.get('id')}"})
         return out
+
+    @staticmethod
+    def resolve_variant_id(variant_map: list, size: str = None, color: str = None):
+        """Given a persisted variant_map and the buyer's chosen (size, color),
+        return the matching Printify variant_id. Ensures a POD order ships the
+        EXACT variant the buyer selected. Falls back progressively (both -> size
+        only -> color only -> first) so an order is never dropped, and returns
+        None only if the map is empty."""
+        if not variant_map:
+            return None
+        s = (size or "").strip().upper()
+        c = (color or "").strip().lower()
+
+        def norm_c(x):
+            return (x or "").strip().lower()
+
+        # exact (size AND color)
+        if s and c:
+            for e in variant_map:
+                if (e.get("size") or "").upper() == s and norm_c(e.get("color")) == c:
+                    return e.get("variant_id")
+        # size only
+        if s:
+            for e in variant_map:
+                if (e.get("size") or "").upper() == s:
+                    return e.get("variant_id")
+        # color only
+        if c:
+            for e in variant_map:
+                if norm_c(e.get("color")) == c:
+                    return e.get("variant_id")
+        # last resort: first mapped variant (never drop a paid order)
+        return variant_map[0].get("variant_id")
+
+    @staticmethod
+    def parse_buyer_variations(transaction: dict) -> tuple:
+        """Extract (size, color) from an Etsy transaction's `variations` array
+        (each: {property_id, formatted_name, formatted_value}). Size property is
+        100, color 200; also matches on the formatted_name as a fallback."""
+        size = color = None
+        for var in (transaction or {}).get("variations", []) or []:
+            pid = var.get("property_id")
+            name = str(var.get("formatted_name", "")).lower()
+            val = var.get("formatted_value") or ""
+            if pid == SIZE_PROPERTY_ID or "size" in name:
+                size = val
+            elif pid == COLOR_PROPERTY_ID or "color" in name or "colour" in name:
+                color = val
+        return size, color

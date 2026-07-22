@@ -472,15 +472,11 @@ class TrendResearchAgent(BaseAgent):
         """B-1(b): formats the concept generator may propose — excludes
         pod_apparel_design while POD is paused (POD_APPAREL_ENABLED=False)."""
         formats = list(_FORMAT_LIST)
-        # POD apparel is proposable only when it's enabled AND actually LISTABLE:
-        # a physical Etsy listing requires a shipping profile, so without
-        # ETSY_SHIPPING_PROFILE_ID every POD listing 400s AFTER we've paid to
-        # generate the Printify product + images. Gate it out to avoid that waste.
-        pod_listable = (
-            getattr(settings, "POD_APPAREL_ENABLED", False)
-            and bool(getattr(settings, "ETSY_SHIPPING_PROFILE_ID", None))
-        )
-        if not pod_listable:
+        # POD apparel is proposable when enabled. The shipping profile a physical
+        # listing requires is auto-resolved/created by EtsyShippingService at
+        # listing time (and the orchestrator fast-fails a POD task before any
+        # generation if that ever fails), so no env var is required here.
+        if not getattr(settings, "POD_APPAREL_ENABLED", False):
             formats = [f for f in formats if f != "pod_apparel_design"]
         # 7-1: wall_art_set_3 stays paused until validated (multi-piece generation
         # costs ~3x an image; enable deliberately).
