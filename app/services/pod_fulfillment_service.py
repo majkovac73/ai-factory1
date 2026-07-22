@@ -49,6 +49,25 @@ ETSY_API_BASE = "https://openapi.etsy.com/v3/application"
 _TEE_TITLE_MARKERS = ("t-shirt", "t shirt", "tee", "jersey")
 _PREFERRED_VARIANT = [("l", "black"), ("l", "white"), ("m", "black"), ("m", "white")]
 
+# Per-POD-format config: how to find the right blueprints in the live Printify
+# catalog (title markers) and how to build variants. "apparel" = size x color
+# grid; "size" = distinct sizes only (mugs 11oz/15oz, posters multi-size). Each
+# format is gated by its own enable flag (same safety pattern as apparel).
+_POD_FORMAT_CONFIG = {
+    "pod_apparel_design": {"markers": ("t-shirt", "t shirt", "tee", "jersey"),
+                           "variant_strategy": "apparel", "max_variants": 30,
+                           "enable_flag": "POD_APPAREL_ENABLED"},
+    "pod_mug":            {"markers": ("mug",),
+                           "variant_strategy": "size", "max_variants": 4,
+                           "enable_flag": "POD_MUG_ENABLED",
+                           "avoid": ("travel", "latte", "stainless")},
+    "pod_poster":         {"markers": ("poster",),
+                           "variant_strategy": "size", "max_variants": 8,
+                           "enable_flag": "POD_POSTER_ENABLED",
+                           "prefer": ("vertical",), "avoid": ("framed",)},
+}
+_DEFAULT_POD_FORMAT = "pod_apparel_design"
+
 
 def _title_has_size(title: str, size: str) -> bool:
     # Variant titles look like "Black / L" or "L / Black" — match the size as a
@@ -101,17 +120,30 @@ class PODFulfillmentService:
         logger.info(f"PODFulfillmentService: uploading image for task {task_id}")
         printify_image_id = self._printify.upload_image(image_path)
 
-        # 3. Curate the catalog to t-shirt blueprints and select with the real concept
+        # 3. Curate the catalog to THIS format's blueprints and select with the concept.
         concept = concept or self._lookup_concept(task_id)
+        pod_format = self._lookup_format(task_id)
+        cfg = _POD_FORMAT_CONFIG.get(pod_format, _POD_FORMAT_CONFIG[_DEFAULT_POD_FORMAT])
         blueprints_raw = self._printify.list_blueprints()
-        tee_blueprints = [
-            bp for bp in blueprints_raw
-            if any(m in (bp.get("title", "").lower()) for m in _TEE_TITLE_MARKERS)
-        ]
-        if not tee_blueprints:
-            logger.warning("PODFulfillmentService: no tee blueprints found by title; falling back to first 80")
-            tee_blueprints = blueprints_raw[:80]
-        blueprints = [{"id": bp["id"], "title": bp.get("title", "")} for bp in tee_blueprints[:60]]
+
+        def _matches(bp):
+            title = (bp.get("title", "") or "").lower()
+            if not any(m in title for m in cfg["markers"]):
+                return False
+            if any(a in title for a in cfg.get("avoid", ())):
+                return False
+            return True
+
+        fmt_blueprints = [bp for bp in blueprints_raw if _matches(bp)]
+        # Prefer certain sub-types (e.g. VERTICAL posters) when available.
+        prefer = cfg.get("prefer", ())
+        if prefer:
+            preferred = [bp for bp in fmt_blueprints if any(p in (bp.get("title", "") or "").lower() for p in prefer)]
+            fmt_blueprints = preferred or fmt_blueprints
+        if not fmt_blueprints:
+            logger.warning(f"PODFulfillmentService: no {pod_format} blueprints by title; falling back to first 80")
+            fmt_blueprints = blueprints_raw[:80]
+        blueprints = [{"id": bp["id"], "title": bp.get("title", "")} for bp in fmt_blueprints[:60]]
 
         selection = self._selector.select(concept, blueprints)
         blueprint_id = int(selection["blueprint_id"])
@@ -135,9 +167,14 @@ class PODFulfillmentService:
         variants_resp = self._printify.list_variants(blueprint_id, print_provider_id)
         all_variants = variants_resp.get("variants", [])
         variant_map = None
-        if getattr(settings, "POD_APPAREL_ENABLED", False):
+        # Multi-variant (buyer-choosable) when THIS format is enabled; the strategy
+        # differs: apparel = size x color, mug/poster = size-only.
+        if getattr(settings, cfg["enable_flag"], False):
             from app.services.pod_variant_mapper import PodVariantMapper
-            selected = PodVariantMapper.select_variants(all_variants)
+            if cfg["variant_strategy"] == "apparel":
+                selected = PodVariantMapper.select_variants(all_variants, max_variants=cfg["max_variants"])
+            else:  # "size" — mugs, posters
+                selected = PodVariantMapper.select_size_variants(all_variants, max_variants=cfg["max_variants"])
             if not selected:
                 single = self._pick_single_variant(all_variants)
                 selected = [single] if single else []
@@ -230,6 +267,17 @@ class PODFulfillmentService:
             return concept or f"task_id={task_id}"
         except Exception:
             return f"task_id={task_id}"
+
+    def _lookup_format(self, task_id: str) -> str:
+        """The task's POD product format (pod_apparel_design / pod_mug / pod_poster)
+        so blueprint + variant selection matches the listing type."""
+        try:
+            from app.services.task_service import TaskService
+            t = TaskService().get_task(task_id)
+            ft = getattr(t, "type", None)
+            return ft if ft in _POD_FORMAT_CONFIG else _DEFAULT_POD_FORMAT
+        except Exception:
+            return _DEFAULT_POD_FORMAT
 
     def _pick_single_variant(self, all_variants: list) -> Optional[dict]:
         enabled = [v for v in all_variants if v.get("is_enabled", True)] or list(all_variants)

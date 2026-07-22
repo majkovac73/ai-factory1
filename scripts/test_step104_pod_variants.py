@@ -86,12 +86,13 @@ check("7-2 variant_map entry has size/color/sku", sample["size"] and sample["col
 from app.services.etsy_client import EtsyClient
 check("7-2 EtsyClient.update_listing_inventory exists", callable(getattr(EtsyClient, "update_listing_inventory", None)))
 
-# ── pipeline stage is gated off by default ──
+# ── pipeline stage skips a SINGLE-variant POD product (variations only make
+#    sense for a multi-variant product; format-agnostic, not enable-flag coupled) ──
 from app.services.pipeline_orchestrator import PipelineOrchestrator
 rep = {"stages": {}}
-PipelineOrchestrator()._stage_pod_variations(type("P", (), {"printify_product_id": "x", "variant_ids": [], "price_cents": 0})(), "L1", rep)
-check("7-2 pod_variations gated off by default",
-      rep["stages"].get("pod_variations", {}).get("skipped") == "POD_APPAREL_ENABLED off")
+PipelineOrchestrator()._stage_pod_variations(type("P", (), {"printify_product_id": "x", "variant_ids": [123], "price_cents": 0})(), "L1", rep)
+check("7-2 pod_variations skips a single-variant product",
+      rep["stages"].get("pod_variations", {}).get("skipped") == "single variant")
 
 print()
 if failures:

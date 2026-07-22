@@ -472,12 +472,15 @@ class TrendResearchAgent(BaseAgent):
         """B-1(b): formats the concept generator may propose — excludes
         pod_apparel_design while POD is paused (POD_APPAREL_ENABLED=False)."""
         formats = list(_FORMAT_LIST)
-        # POD apparel is proposable when enabled. The shipping profile a physical
-        # listing requires is auto-resolved/created by EtsyShippingService at
-        # listing time (and the orchestrator fast-fails a POD task before any
-        # generation if that ever fails), so no env var is required here.
-        if not getattr(settings, "POD_APPAREL_ENABLED", False):
-            formats = [f for f in formats if f != "pod_apparel_design"]
+        # POD formats are proposable when their enable flag is on. The shipping
+        # profile a physical listing requires is auto-resolved/created by
+        # EtsyShippingService at listing time (and the orchestrator fast-fails a POD
+        # task before any generation if that ever fails), so no env var is needed.
+        for fmt, flag in (("pod_apparel_design", "POD_APPAREL_ENABLED"),
+                          ("pod_mug", "POD_MUG_ENABLED"),
+                          ("pod_poster", "POD_POSTER_ENABLED")):
+            if not getattr(settings, flag, False):
+                formats = [f for f in formats if f != fmt]
         # 7-1: wall_art_set_3 stays paused until validated (multi-piece generation
         # costs ~3x an image; enable deliberately).
         if not getattr(settings, "WALL_ART_SET_ENABLED", False):
@@ -577,12 +580,18 @@ class TrendResearchAgent(BaseAgent):
 
     def _build_concept_prompt(self, insight: str, feedback: str) -> str:
         retry_note = f"\n\nIMPORTANT — retry feedback:\n{feedback}" if feedback else ""
-        # B-1(b): only advertise POD when it's enabled.
+        # B-1(b): only advertise each POD format when it's enabled.
+        pod_items = []
+        if getattr(settings, "POD_APPAREL_ENABLED", False):
+            pod_items.append("    - pod_apparel_design (one core design printed on a t-shirt)")
+        if getattr(settings, "POD_MUG_ENABLED", False):
+            pod_items.append("    - pod_mug (one design printed on a ceramic coffee mug)")
+        if getattr(settings, "POD_POSTER_ENABLED", False):
+            pod_items.append("    - pod_poster (one design printed as a physical wall-art poster)")
         pod_line = (
-            "  Multi-image print-on-demand:\n"
-            "    - pod_apparel_design (one core design printed on apparel/merchandise;\n"
-            "      the pipeline generates additional listing photos separately)\n\n"
-            if getattr(settings, "POD_APPAREL_ENABLED", False) else ""
+            "  Print-on-demand (real physical products, printed to order):\n"
+            + "\n".join(pod_items) + "\n\n"
+            if pod_items else ""
         )
         # 7-1: only advertise the wall-art set format when it's enabled.
         set_line = (

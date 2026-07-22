@@ -274,6 +274,13 @@ class Settings(BaseSettings):
     # variations are built (B-1(a)). Existing POD listings/fulfillment still work;
     # this only stops NEW POD products. Set True in Railway to re-enable.
     POD_APPAREL_ENABLED: bool = False
+    # Additional POD product types (mugs, posters). Same safety pattern as apparel:
+    # OFF by default; flip on in Railway to let the concept generator propose them.
+    # Each is a real Printify product (mug: size-only variants; poster: multi-size
+    # wall-art print), listed physical with the auto-resolved shipping profile and
+    # real-shipping-inclusive pricing.
+    POD_MUG_ENABLED: bool = False
+    POD_POSTER_ENABLED: bool = False
 
     # P0-9: crash-resume bounds. On startup, DONE tasks whose post-completion
     # pipeline never recorded an outcome (crashed mid-pipeline) are re-run — but

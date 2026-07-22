@@ -1401,9 +1401,11 @@ class PipelineOrchestrator:
         """7-2: build the Etsy size/color inventory from the Printify product's
         variants (priced per-variant from real Printify cost) and PUT it onto the
         listing. Best-effort and gated — never fails a publish."""
-        from config import settings
-        if not getattr(settings, "POD_APPAREL_ENABLED", False):
-            report["stages"]["pod_variations"] = {"skipped": "POD_APPAREL_ENABLED off"}
+        # Push Etsy size/color variations whenever the POD product has MULTIPLE
+        # variants (apparel size x color, or mug/poster sizes). Single-variant POD
+        # products need no variations. Format-agnostic — works for any POD type.
+        if len(getattr(pod_product, "variant_ids", None) or []) <= 1:
+            report["stages"]["pod_variations"] = {"skipped": "single variant"}
             return
         try:
             from app.services.pod_variant_mapper import PodVariantMapper

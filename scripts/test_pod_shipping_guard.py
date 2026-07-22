@@ -130,6 +130,56 @@ check("real shipping price COVERS worse shipping (real > estimate)", real > est)
 check("real shipping price includes the ~$8.59 extra shipping",
       abs((real - est) - round((13.59 - 5.0) / (1 - 0.12)) * 100) < 200)
 
+# ── mugs + posters: formats, size-only variants, format-aware proposal ───────
+from app.core.product_formats import PRODUCT_FORMATS
+check("pod_mug is a POD format (taxonomy 1062)",
+      PRODUCT_FORMATS.get("pod_mug", {}).get("category") == "pod" and PRODUCT_FORMATS["pod_mug"]["taxonomy_id"] == 1062)
+check("pod_poster is a POD format (taxonomy 121)",
+      PRODUCT_FORMATS.get("pod_poster", {}).get("category") == "pod" and PRODUCT_FORMATS["pod_poster"]["taxonomy_id"] == 121)
+
+# proposable only when their flag is on
+def formats2(**over):
+    with patch.multiple(settings, **{**base, "POD_APPAREL_ENABLED": False, "POD_MUG_ENABLED": False, "POD_POSTER_ENABLED": False, **over}):
+        return TrendResearchAgent._proposable_formats()
+check("mug/poster excluded when flags off",
+      "pod_mug" not in formats2() and "pod_poster" not in formats2())
+check("pod_mug proposable when POD_MUG_ENABLED", "pod_mug" in formats2(POD_MUG_ENABLED=True))
+check("pod_poster proposable when POD_POSTER_ENABLED", "pod_poster" in formats2(POD_POSTER_ENABLED=True))
+
+# size-only variant selection (mugs/posters): distinct sizes, no color axis
+poster_variants = [
+    {"id": 1, "is_enabled": True, "options": {"size": "11″ x 9″"}},
+    {"id": 2, "is_enabled": True, "options": {"size": "18″ x 12″"}},
+    {"id": 3, "is_enabled": True, "options": {"size": "24″ x 18″"}},
+    {"id": 4, "is_enabled": True, "options": {"size": "24″ x 18″"}},  # dup size
+]
+sel = PodVariantMapper.select_size_variants(poster_variants, max_variants=8)
+check("size-only selection dedups sizes (3 distinct)", len(sel) == 3)
+inv = PodVariantMapper.build_etsy_inventory(sel, lambda v: 2000)
+check("poster inventory has Size property, no Color",
+      all(any(pv["property_name"] == "Size" for pv in p["property_values"]) and
+          not any(pv["property_name"] == "Color" for pv in p["property_values"]) for p in inv["products"]))
+check("poster size display preserved (dimension, not uppercased weirdly)",
+      inv["products"][0]["property_values"][0]["values"][0] == "11″ x 9″")
+
+# _disp_size: apparel upper, dimensions kept
+check("_disp_size apparel 'm' -> 'M'", PodVariantMapper._disp_size("m") == "M")
+check("_disp_size '11oz' kept", PodVariantMapper._disp_size("11oz") == "11oz")
+
+# fulfillment routing works for size-only (poster): buyer picks a size
+pmap = PodVariantMapper.variant_map(sel)
+txn_p = {"variations": [{"property_id": 100, "formatted_name": "Size", "formatted_value": "18″ x 12″"}]}
+bs, bc = PodVariantMapper.parse_buyer_variations(txn_p)
+check("poster buyer size resolves to its variant",
+      PodVariantMapper.resolve_variant_id(pmap, bs, bc) == 2)
+
+# format config drives blueprint markers/strategy
+from app.services.pod_fulfillment_service import _POD_FORMAT_CONFIG
+check("mug config: 'mug' marker, size strategy",
+      "mug" in _POD_FORMAT_CONFIG["pod_mug"]["markers"] and _POD_FORMAT_CONFIG["pod_mug"]["variant_strategy"] == "size")
+check("poster config: 'poster' marker, prefers vertical",
+      "poster" in _POD_FORMAT_CONFIG["pod_poster"]["markers"] and "vertical" in _POD_FORMAT_CONFIG["pod_poster"].get("prefer", ()))
+
 print()
 if failures:
     print(f"{len(failures)} test(s) FAILED: {failures}")

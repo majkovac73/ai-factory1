@@ -95,6 +95,33 @@ class PodVariantMapper:
         return result
 
     @classmethod
+    def select_size_variants(cls, all_variants: list, max_variants: int = 8) -> list:
+        """Non-apparel POD (mugs, posters): pick the enabled variants for DISTINCT
+        sizes (no color axis — a mug/poster has one design, many sizes), capped so
+        the buyer can choose a size. Falls back to all enabled if sizes can't be
+        parsed, never returning zero when variants exist."""
+        enabled = [v for v in all_variants if v.get("is_enabled", True)] or list(all_variants)
+        seen, out = set(), []
+        for v in enabled:
+            size, _ = cls.parse_option(v)
+            key = size if size else f"id-{v.get('id')}"
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(v)
+            if len(out) >= max_variants:
+                break
+        return out
+
+    @staticmethod
+    def _disp_size(size: str) -> str:
+        """Display form of a size: uppercase apparel codes (m -> M) but keep
+        dimension/volume sizes as-is (11oz, 11" x 9")."""
+        if not size:
+            return ""
+        return size.upper() if not any(c.isdigit() for c in size) else size
+
+    @classmethod
     def build_etsy_inventory(cls, variants: list, price_cents_fn) -> dict:
         """Build the Etsy inventory payload from selected Printify variants.
         price_cents_fn(variant) -> int cents is the margin-safe Etsy price for
@@ -107,7 +134,7 @@ class PodVariantMapper:
             if size:
                 property_values.append({
                     "property_id": SIZE_PROPERTY_ID, "property_name": "Size",
-                    "values": [size.upper()],
+                    "values": [cls._disp_size(size)],
                 })
                 props_used.add(SIZE_PROPERTY_ID)
             if color:
@@ -139,7 +166,7 @@ class PodVariantMapper:
         out = []
         for v in variants:
             size, color = cls.parse_option(v)
-            out.append({"size": (size or "").upper(), "color": (color or "").capitalize(),
+            out.append({"size": cls._disp_size(size), "color": (color or "").capitalize(),
                         "variant_id": v.get("id"), "sku": f"pf-{v.get('id')}"})
         return out
 

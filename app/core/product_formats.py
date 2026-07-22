@@ -79,6 +79,13 @@ PRODUCT_FORMATS = {
     "seamless_pattern":     {"category": "digital", "delivery": "single_image", "taxonomy_id": 2078, "price_band": (3.00, 6.00),  "delivery_aspect": "1:1"},
     "pdf_planner_or_guide": {"category": "digital", "delivery": "pdf",          "taxonomy_id": 354,  "price_band": (5.00, 16.00), "delivery_aspect": "3:4"},
     "pod_apparel_design":   {"category": "pod",     "delivery": "single_image", "taxonomy_id": 482,  "price_band": (24.00, 40.00), "delivery_aspect": "1:1"},
+    # POD mug (11oz/15oz ceramic). taxonomy 1062 = Home & Living > ... > Mugs.
+    # Design placed centered; size-only variants. Band is a fallback — real price
+    # is cost+shipping-based (mug shipping is high, ~$10-25).
+    "pod_mug":              {"category": "pod",     "delivery": "single_image", "taxonomy_id": 1062, "price_band": (16.00, 32.00), "delivery_aspect": "1:1"},
+    # POD poster / wall-art print. taxonomy 121 = Art & Collectibles > Prints >
+    # Giclée. Portrait print; multi-size variants (buyer picks size).
+    "pod_poster":           {"category": "pod",     "delivery": "single_image", "taxonomy_id": 121,  "price_band": (18.00, 45.00), "delivery_aspect": "2:3"},
     # 7-1: a curated SET of 3 coordinated wall-art prints sharing one palette/
     # theme, sold as one listing. Highest-AOV digital format on Etsy ($8-15 vs
     # $3-6). delivery "image_set" (set_size pieces, each with its own print-ratio
@@ -149,6 +156,8 @@ _MATERIALS = {
     "sticker_sheet_design": ["digital download", "printable stickers"],
     "pdf_planner_or_guide": ["digital download", "printable planner", "PDF"],
     "pod_apparel_design":   ["cotton", "unisex t-shirt", "DTG print"],
+    "pod_mug":              ["ceramic", "coffee mug", "dishwasher safe"],
+    "pod_poster":           ["matte paper", "wall art", "giclée print"],
     "seamless_pattern":     ["digital download", "seamless pattern", "digital paper"],
     "wall_art_set_3":       ["digital download", "printable wall art", "gallery wall set"],
 }
@@ -175,6 +184,8 @@ def description_blocks(product_format: str, page_count: int = None) -> str:
         "sticker_sheet_design": "• 1 printable sticker sheet (high-resolution PNG) — print onto sticker paper and cut out.",
         "pdf_planner_or_guide": f"• 1 printable PDF{f' with {page_count} pages' if page_count else ''} — print at home or use on a tablet.",
         "pod_apparel_design": "• 1 made-to-order apparel item, printed just for you (see the size/variant note above).",
+        "pod_mug": "• 1 made-to-order ceramic mug, printed just for you (choose your size at checkout).",
+        "pod_poster": "• 1 made-to-order wall-art poster, printed just for you (choose your size at checkout).",
         "seamless_pattern": "• 1 high-resolution SEAMLESS repeating pattern tile (digital paper) — tiles edge-to-edge with no visible seams, for fabric, scrapbooking, packaging, and print projects.",
         "wall_art_set_3": "• A SET of 3 coordinated high-resolution wall-art prints that share one palette and theme — designed to hang together as a gallery wall. Each print comes in several standard sizes.",
     }.get(product_format, "• 1 digital file.")
