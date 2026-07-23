@@ -628,6 +628,17 @@ class EtsyReceiptWorker:
                 return
             from app.services.autonomy_service import AutonomyService
             auto = AutonomyService()
+            # The daily PRODUCT cap (MAX_TASKS_PER_DAY) governs ALL new-product
+            # creation, not just the autonomy loop. Once it's hit, the only thing
+            # that may still run is marketing_refresh — a winner/engagement variant
+            # is a NEW product that can't be posted beyond the cap, so building one
+            # would be pure wasted spend (concept scoring + image gen). Stop here.
+            if not auto.can_create_task():
+                logger.info(
+                    f"EtsyReceiptWorker: {source} skipped — daily product cap "
+                    f"({settings.MAX_TASKS_PER_DAY}) reached; only marketing_refresh runs now"
+                )
+                return
             if not auto.can_create_winner_variant():
                 return
             # 2-3: a variant costs ~$0.80 of image spend that was never reserved —
@@ -685,6 +696,10 @@ class EtsyReceiptWorker:
                     vmeta[k] = pmeta[k]
             new_task = ts.create_task(TaskCreate(prompt=prompt, type=parent.type, metadata=vmeta))
             auto.record_winner_variant()
+            # A variant is a product too — count it against the unified daily
+            # product cap so autonomy + variants together never exceed
+            # MAX_TASKS_PER_DAY (and the cap-hit alert fires once the total lands).
+            auto.record_task_created()
             logger.info(f"EtsyReceiptWorker: spawned {source} task {new_task.id} from task {task_id}")
         except Exception as e:
             logger.error(f"EtsyReceiptWorker: {source} spawn failed for {task_id}: {e}")
