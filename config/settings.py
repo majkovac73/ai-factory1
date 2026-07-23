@@ -433,6 +433,14 @@ class Settings(BaseSettings):
     # Google-Trends rising queries instead. Performance-weighting resumes once real
     # traffic/sales exist. Sales (any revenue) always re-enable internal bias.
     LEARNING_MIN_VIEWS_FOR_SIGNAL: int = 50
+    # NicheMemoryService — how the factory decides a niche is a proven winner/loser
+    # from real traffic. A niche is a WINNER if it has earned money, OR has >=
+    # NICHE_MIN_LISTINGS_FOR_VERDICT listings and avg views >= this multiple of the
+    # shop median; a LOSER if it has >= NICHE_LOSER_MIN_LISTINGS listings, no sales,
+    # and roughly half the median views. Only applied once there's real traffic.
+    NICHE_WINNER_VIEW_MULTIPLE: float = 1.5
+    NICHE_MIN_LISTINGS_FOR_VERDICT: int = 2
+    NICHE_LOSER_MIN_LISTINGS: int = 3
     # D-1: serve Google Trends data from a local cache within this many hours
     # (trends don't change hourly; re-fetching every cycle from one IP risks a
     # 429 ban that halts all autonomy). 0 disables caching.

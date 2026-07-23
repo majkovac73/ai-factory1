@@ -813,6 +813,17 @@ Return ONLY valid JSON with this structure:
             if fmt_counts:
                 parts.append("Current shop mix: " + ", ".join(f"{fmt}: {n}" for fmt, n in fmt_counts.most_common()))
 
+            # Persistent, self-learned NICHE memory: which themes actually earn
+            # views/sales. Empty until there's real traffic (fails safe), then it
+            # steers the factory to double down on winners and drop dead ends.
+            try:
+                from app.services.niche_memory_service import NicheMemoryService
+                niche_focus = NicheMemoryService().focus_block()
+                if niche_focus:
+                    parts.append(niche_focus)
+            except Exception:
+                pass
+
             if not parts:
                 return ""
             return "\n\nWhat's working in the shop so far (learn from REAL performance):\n- " + "\n- ".join(parts)

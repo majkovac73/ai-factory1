@@ -861,6 +861,14 @@ class EtsyReceiptWorker:
         state["last_stats_poll_at"] = now
         self._save_state(state)
         logger.info(f"EtsyReceiptWorker: listing-stats poll done — {report}")
+        # Learn from the fresh traffic: recompute which NICHES actually get views/
+        # sales and persist the verdicts, so the concept generator can double down
+        # on winners and stop making losers — self-directed, no human needed.
+        try:
+            from app.services.niche_memory_service import NicheMemoryService
+            NicheMemoryService().update()
+        except Exception as e:
+            logger.warning(f"EtsyReceiptWorker: niche-memory update failed: {e}")
 
     # ── State persistence ─────────────────────────────────────────────────────
 
