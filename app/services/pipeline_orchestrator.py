@@ -379,7 +379,7 @@ class PipelineOrchestrator:
         # buyers cannot actually open or buy (a pin/post to a nonexistent listing
         # is worse than none: it burns reach + looks broken).
         if listing_id and not report.get("blocked"):
-            self._stage_pinterest(task_id, product_name, visual_brief, output_data, report, task_type=task_type)
+            self._stage_pinterest(task_id, product_name, visual_brief, output_data, report, task_type=task_type, listing_id=listing_id)
             self._stage_tumblr(task_id, product_name, output_data, listing_id, report)
 
         # P0-9: stamp COMPLETED so a restart's resume scan won't re-run (and
@@ -1874,7 +1874,7 @@ class PipelineOrchestrator:
             logger.warning(f"PipelineOrchestrator: listing video failed for {task_id}: {e}")
             report["stages"]["listing_video"] = {"error": str(e)[:200]}
 
-    def _stage_pinterest(self, task_id: str, product_name: str, visual_brief: str, output_data: dict, report: dict, task_type: str = None):
+    def _stage_pinterest(self, task_id: str, product_name: str, visual_brief: str, output_data: dict, report: dict, task_type: str = None, listing_id: Optional[str] = None):
         from config import settings
 
         try:
@@ -1902,6 +1902,11 @@ class PipelineOrchestrator:
                 "keywords": output_data.get("keywords", []),
                 "product_name": product_name,
                 "product_format": task_type,  # A-9: per-format board routing
+                # CRITICAL: the pin MUST link back to the Etsy listing or it drives
+                # zero traffic (a linkless pin is a dead end). This was missing —
+                # every main-pipeline pin had an empty link, so 50+ pins/week sent
+                # nobody to the shop. Mirrors _stage_tumblr's listing_url.
+                "listing_url": f"https://www.etsy.com/listing/{listing_id}" if listing_id else "",
             }
 
             # 3-3: compose the pin from an EXISTING free listing mockup of the
