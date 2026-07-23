@@ -1505,6 +1505,17 @@ class PipelineOrchestrator:
             # WORKS / TERMS) appended to the LLM's creative hook.
             from app.core.product_formats import materials_for, description_blocks
             listing["materials"] = materials_for(task_type)
+            # Thin descriptions rank + convert worse. If the SEO agent's creative
+            # body came back short, rewrite it to full length BEFORE appending the
+            # deterministic blocks, so new listings never ship thin.
+            _body = (listing.get("description") or "")
+            if len(_body) < int(getattr(settings, "MIN_LISTING_DESCRIPTION_CHARS", 500)):
+                try:
+                    from app.services.listing_enrichment_service import ListingEnrichmentService
+                    listing["description"] = ListingEnrichmentService().build_description(
+                        product_name, task_type, output_data.get("keywords") or [], page_count=pdf_page_count)
+                except Exception as e:
+                    logger.warning(f"PipelineOrchestrator: description enrichment skipped for {task_id}: {e}")
             blocks = description_blocks(task_type, pdf_page_count)
             if bundle_note:
                 blocks = blocks + "\n" + bundle_note  # A-5: "Includes N sizes: ..."

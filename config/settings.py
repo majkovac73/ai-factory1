@@ -424,6 +424,10 @@ class Settings(BaseSettings):
     # niches, nudge the concept generator to DEEPEN an existing niche into a real
     # collection (Etsy search rewards focused shops). Soft; yields to saturation.
     SHOP_COHERENCE_ENABLED: bool = True
+    # If the SEO agent's description body comes back shorter than this, the create
+    # pipeline rewrites it to full length before publishing (thin descriptions
+    # rank + convert worse). Also the "thin" threshold for the enrichment sweep.
+    MIN_LISTING_DESCRIPTION_CHARS: int = 500
 
     # STEP 103 C-1: extra trademark/brand terms to block beyond the built-in
     # list, as a JSON array env, e.g. TRADEMARK_BLOCKLIST_EXTRA='["acme","foo"]'.
