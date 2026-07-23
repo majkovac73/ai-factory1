@@ -125,6 +125,7 @@ DETERMINISTIC = [
     "test_variant_daily_cap.py",
     "test_pinterest_pin_link.py",
     "test_niche_memory.py",
+    "test_reach_boards_ads_coherence.py",
 ]
 
 

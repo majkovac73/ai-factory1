@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     # board_id) as a JSON env, e.g. '{"single_print":"123","pdf_planner_or_guide":"456"}'.
     # Falls back to PINTEREST_BOARD_ID when a format isn't mapped.
     PINTEREST_BOARD_MAP: dict = {}
+    # Auto-create + route pins to topically-focused boards (per occasion/format)
+    # instead of one catch-all board — Pinterest distributes tight boards better.
+    # Falls back to PINTEREST_BOARD_MAP / PINTEREST_BOARD_ID on any failure.
+    PINTEREST_AUTO_BOARDS: bool = True
     # #1c/#5: publish-capability override. A Trial-access Pinterest app returns
     # 403 code 29 on every pin-create, so generating the (billable) pin image is
     # pure waste. pinterest_oauth.can_publish() auto-detects capability from
@@ -416,6 +420,10 @@ class Settings(BaseSettings):
     # diversify, so the catalog doesn't become a monoculture (e.g. 53% "school")
     # that cannibalizes itself in Etsy search and dies when the season ends.
     THEME_SATURATION_PCT: float = 0.25
+    # Counterpart to saturation: when the shop is SCATTERED across many one-off
+    # niches, nudge the concept generator to DEEPEN an existing niche into a real
+    # collection (Etsy search rewards focused shops). Soft; yields to saturation.
+    SHOP_COHERENCE_ENABLED: bool = True
 
     # STEP 103 C-1: extra trademark/brand terms to block beyond the built-in
     # list, as a JSON array env, e.g. TRADEMARK_BLOCKLIST_EXTRA='["acme","foo"]'.

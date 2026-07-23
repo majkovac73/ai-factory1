@@ -247,6 +247,14 @@ def dashboard_metrics():
     }
 
 
+@router.get("/ad-candidates")
+def ad_candidates(limit: int = 10):
+    """Which live listings to promote with Etsy Ads (manual — Etsy has no ads API),
+    ranked by likely ROI: engagement velocity + ticket size + in-season + freshness."""
+    from app.services.ad_candidate_service import AdCandidateService
+    return AdCandidateService().recommend(limit=limit)
+
+
 @router.get("/activity")
 def live_activity(limit: int = 60):
     """Everything happening right now: a live feed of the most recent log lines

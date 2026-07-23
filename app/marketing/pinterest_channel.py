@@ -24,9 +24,19 @@ class PinterestChannel(MarketingChannel):
         except Exception as e:
             return {"success": False, "external_id": None, "url": None, "error": str(e)}
 
-        # A-9: route the pin to the board for this product's format when mapped.
-        fmt = listing.get("product_format") or listing.get("type")
-        board_id = (getattr(settings, "PINTEREST_BOARD_MAP", None) or {}).get(fmt) or settings.PINTEREST_BOARD_ID
+        # Route the pin to a topically-focused board (Pinterest favors tight,
+        # on-topic boards). Auto-create/resolve a themed board for this product;
+        # fall back to the format map, then the single default board.
+        board_id = None
+        if getattr(settings, "PINTEREST_AUTO_BOARDS", True):
+            try:
+                from app.services.pinterest_board_service import PinterestBoardService
+                board_id = await PinterestBoardService().resolve_for(listing)
+            except Exception:
+                board_id = None
+        if not board_id:
+            fmt = listing.get("product_format") or listing.get("type")
+            board_id = (getattr(settings, "PINTEREST_BOARD_MAP", None) or {}).get(fmt) or settings.PINTEREST_BOARD_ID
 
         payload = {
             "board_id": board_id,

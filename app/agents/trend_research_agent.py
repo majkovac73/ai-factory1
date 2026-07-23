@@ -578,6 +578,48 @@ class TrendResearchAgent(BaseAgent):
         except Exception:
             return ""
 
+    def _coherence_block(self) -> str:
+        """Push the shop toward COHERENT collections instead of scattered one-offs.
+        A focused shop (several related products per niche) ranks far better in Etsy
+        search than 40 unrelated singletons. Soft preference — yields to the demand
+        + diversity constraints; never deepens a saturated or proven-dead niche."""
+        if not getattr(settings, "SHOP_COHERENCE_ENABLED", True):
+            return ""
+        try:
+            from collections import Counter
+            from app.services.niche_memory_service import NicheMemoryService
+            prods = self._recent_products or []
+            if len(prods) < 6:
+                return ""
+            nm = NicheMemoryService()
+            clusters = Counter()
+            for title, _fmt in prods:
+                head = " ".join(nm._normalize(title).split()[:2])
+                if head:
+                    clusters[head] += 1
+            if len(clusters) < 3:
+                return ""
+            singletons = sum(1 for _, c in clusters.items() if c == 1)
+            if singletons / len(clusters) < 0.6:  # already reasonably concentrated
+                return ""
+            mem = nm.load()
+            losers = {k.split(':', 1)[-1] for k, v in (mem.get("themes") or {}).items()
+                      if v.get("verdict") == "loser"}
+            deepen = [n for n, c in clusters.most_common() if 1 <= c <= 4 and n not in losers][:3]
+            if not deepen:
+                return ""
+            return (
+                "\n\nSHOP COHERENCE (build COLLECTIONS, not one-offs): the shop is scattered "
+                "across many unrelated single products, which ranks poorly in Etsy search — "
+                "Etsy favors focused shops with deep, related collections a browsing buyer can "
+                "explore. PREFER a NEW, distinct product that DEEPENS one of these existing "
+                "niches into a real collection: " + ", ".join(f"'{n}'" for n in deepen) + ". "
+                "This is a soft preference — it yields to the demand + diversity constraints; "
+                "never deepen a saturated theme or a proven dead end."
+            )
+        except Exception:
+            return ""
+
     def _demand_grounding_block(self) -> str:
         """Ground the concept in MEASURED demand. The quality gate's demand axis
         scores 4/10 ("no matching trend keyword") whenever a concept doesn't map to
@@ -685,7 +727,7 @@ BUY this specific item"; only high-quality concepts are built):
 - CONCRETE and useful/desirable to a real person with a real reason to buy it.
 
 Market insight:
-{insight}{self._insights_block}{self._margin_guidance_block()}{self._theme_diversity_block()}{self._demand_grounding_block()}{self._seasonal_block()}{dedup_note}
+{insight}{self._insights_block}{self._margin_guidance_block()}{self._theme_diversity_block()}{self._coherence_block()}{self._demand_grounding_block()}{self._seasonal_block()}{dedup_note}
 
 Return ONLY valid JSON with this structure:
 {{
