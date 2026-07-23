@@ -365,9 +365,22 @@ class PipelineOrchestrator:
             # Printify product created upstream).
             self._stage_pod_variations(pod_product, listing_id, report)
 
+        # A failed create_listing leaves listing_id None — there is NO product a
+        # buyer can open or purchase. Record the task as blocked (not silently
+        # "done") so it is visible + retryable, and so marketing is suppressed
+        # below. Skip if a stage already blocked it.
+        if not listing_id and not report.get("blocked"):
+            reason = (report.get("stages", {}).get("create_listing", {}) or {}).get("error") \
+                or "Etsy listing creation failed — no live listing produced"
+            self._block_task(task_id, f"listing not created: {reason}", report, pre_listing=False)
+
         # 8 — Social marketing (independent of Etsy stages): Pinterest + Tumblr.
-        self._stage_pinterest(task_id, product_name, visual_brief, output_data, report, task_type=task_type)
-        self._stage_tumblr(task_id, product_name, output_data, listing_id, report)
+        # ONLY when a real, live listing exists — never advertise a product that
+        # buyers cannot actually open or buy (a pin/post to a nonexistent listing
+        # is worse than none: it burns reach + looks broken).
+        if listing_id and not report.get("blocked"):
+            self._stage_pinterest(task_id, product_name, visual_brief, output_data, report, task_type=task_type)
+            self._stage_tumblr(task_id, product_name, output_data, listing_id, report)
 
         # P0-9: stamp COMPLETED so a restart's resume scan won't re-run (and
         # re-spend on) this task. Only when a real listing was produced and the
@@ -1570,9 +1583,16 @@ class PipelineOrchestrator:
                 # 999 keeps the winning listing alive (Etsy marks quantity=1 sold
                 # out and deactivates it).
                 listing["quantity"] = 999
-                shipping_id = asyncio.run(EtsyShippingService().get_or_create())
+                svc = EtsyShippingService()
+                shipping_id = asyncio.run(svc.get_or_create())
                 if shipping_id:
                     listing["shipping_profile_id"] = shipping_id
+                # Etsy requires a readiness_state_id on physical listings ("A
+                # readiness_state_id is required for physical listings" 400) —
+                # prefer the shop's made_to_order state for POD.
+                readiness_id = asyncio.run(svc.get_readiness_state_id())
+                if readiness_id:
+                    listing["readiness_state_id"] = readiness_id
             else:
                 listing["type"] = "download"
                 listing["quantity"] = 999  # unlimited digital supply

@@ -25,6 +25,7 @@ logger = logging.getLogger("ai-factory")
 ETSY_API_BASE = "https://openapi.etsy.com/v3/application"
 
 _cached_profile_id: Optional[str] = None
+_cached_readiness_id: Optional[str] = None
 
 
 class EtsyShippingService:
@@ -62,6 +63,49 @@ class EtsyShippingService:
             return profile_id
         except Exception as e:
             logger.error(f"EtsyShippingService: failed to resolve shipping profile: {e}")
+            return None
+
+    async def get_readiness_state_id(self) -> Optional[str]:
+        """Return a readiness_state_id for a physical/POD listing. Etsy now
+        REQUIRES this on physical listings ("A readiness_state_id is required for
+        physical listings" 400) — it says how soon the item ships. Prefer a
+        `made_to_order` state (correct for print-on-demand), else the first
+        defined state. Cached in-process. Env override: ETSY_READINESS_STATE_ID.
+        Returns None only if the shop has no readiness states AND none is set."""
+        global _cached_readiness_id
+        if _cached_readiness_id:
+            return _cached_readiness_id
+
+        env_id = getattr(settings, "ETSY_READINESS_STATE_ID", None)
+        if env_id:
+            _cached_readiness_id = str(env_id)
+            return _cached_readiness_id
+        if not settings.ETSY_SHOP_ID:
+            return None
+        try:
+            access_token = await get_valid_access_token()
+            api_key_header = f"{settings.ETSY_API_KEY}:{settings.ETSY_SHARED_SECRET}"
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    f"{ETSY_API_BASE}/shops/{settings.ETSY_SHOP_ID}/readiness-state-definitions",
+                    headers={"Authorization": f"Bearer {access_token}", "x-api-key": api_key_header},
+                )
+            if resp.status_code >= 400:
+                logger.warning(f"EtsyShippingService: GET readiness-state-definitions {resp.status_code}: {resp.text[:200]}")
+                return None
+            states = resp.json().get("results", []) or []
+            made = next((s for s in states if s.get("readiness_state") == "made_to_order"), None)
+            chosen = made or (states[0] if states else None)
+            if not chosen:
+                logger.error("EtsyShippingService: shop has NO readiness states — a physical "
+                             "listing cannot be created. Create one in Etsy shop settings.")
+                return None
+            _cached_readiness_id = str(chosen.get("readiness_state_id"))
+            logger.info(f"EtsyShippingService: using readiness state {_cached_readiness_id} "
+                        f"('{chosen.get('readiness_state')}')")
+            return _cached_readiness_id
+        except Exception as e:
+            logger.error(f"EtsyShippingService: failed to resolve readiness state: {e}")
             return None
 
     # Title of the profile this service auto-creates (also used to find it again

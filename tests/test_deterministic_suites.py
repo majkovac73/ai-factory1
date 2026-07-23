@@ -121,6 +121,7 @@ DETERMINISTIC = [
     "test_deep_audit_v3_fixes.py",
     "test_pod_shipping_guard.py",
     "test_image_gen_retry.py",
+    "test_pod_readiness_and_cost.py",
 ]
 
 

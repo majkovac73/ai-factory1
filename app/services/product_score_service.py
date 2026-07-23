@@ -278,12 +278,58 @@ class ProductScoreService:
 
         det = self.deterministic_breakdown(concept, trend_data or {}, recent_titles or [], today)
 
+        # COST GUARD: the deterministic floors (det >= det_floor AND no axis at
+        # rock bottom) are computed for FREE and are *necessary* conditions to
+        # pass (enforced again in `floors` below). If they already fail, no judge
+        # score can rescue the concept — so skip BOTH paid LLM judge calls. On a
+        # strict det_floor (30/40) this is where most concepts die, and each one
+        # was costing a sonnet-5 judge call + a default judge call for nothing.
+        # This NEVER changes an outcome (a det-failing concept can't pass anyway);
+        # it only stops paying to grade the already-doomed.
+        pre_det_floor = int(getattr(settings, "PRODUCT_DET_FLOOR", 30))
+        _da = det if isinstance(det, dict) else {}
+        pre_axis_ok = (_da.get("demand", {}).get("points", 0) > 0
+                       and _da.get("competition", {}).get("points", 0) > 2
+                       and _da.get("originality", {}).get("points", 0) > 1)
+        if getattr(settings, "SCORE_SKIP_JUDGE_ON_DET_FAIL", True) and (
+                det["total"] < pre_det_floor or not pre_axis_ok):
+            why = (f"deterministic {det['total']}/40 below floor {pre_det_floor}"
+                   if det["total"] < pre_det_floor else "a deterministic axis is at its floor")
+            result = {
+                "total": det["total"], "max": 100, "passed": False, "min_score": min_score,
+                "rule_version": 2, "deterministic": det, "judges": None,
+                "judge_skipped": "det floor unreachable — judges skipped to save spend",
+                "floors": {"total": False, "judge": False, "det": det["total"] >= pre_det_floor, "axis": pre_axis_ok},
+                "retry_feedback": f"scored {det['total']}/100 (pre-judge reject): {why}. "
+                                  f"Propose a concept with stronger measured demand, lower competition, "
+                                  f"and clearer originality so the evidence alone clears the bar.",
+            }
+            if record:
+                self._record(concept, result)
+            return result
+
         # Give both judges the deterministic evidence to reason with.
         judged = dict(concept)
         judged["_scoring_evidence"] = {k: {"points": v["points"], "max": v["max"], "why": v["why"]}
                                        for k, v in det.items() if isinstance(v, dict)}
-        j1 = self._judge(judged, self._concept_model)
-        j2 = self._judge(judged, self._default_model)
+        # COST GUARD: the pass rule needs harsher = min(j1, j2) >= judge_floor.
+        # Evaluate the CHEAP judge (default_model) first; if it's already below
+        # the floor, min(...) is below the floor no matter what the EXPENSIVE
+        # judge (concept_model, e.g. sonnet-5) says — so skip that paid call.
+        # Independence is preserved for every concept that clears the cheap judge
+        # (the expensive one can still veto those). This never changes an outcome;
+        # it only stops paying sonnet-5 to grade concepts the cheap judge rejects,
+        # which — since most concepts are rejected — is the bulk of judge spend.
+        judge_floor_sc = int(getattr(settings, "PRODUCT_JUDGE_FLOOR", 9))
+        j2 = self._judge(judged, self._default_model)  # cheaper baseline model
+        if (getattr(settings, "SCORE_SHORTCIRCUIT_EXPENSIVE_JUDGE", True)
+                and self._concept_model != self._default_model
+                and j2.get("score", 0) < judge_floor_sc):
+            j1 = {"score": j2.get("score", 0),
+                  "reason": "expensive judge skipped — cheaper judge already below the judge floor",
+                  "_skipped": True}
+        else:
+            j1 = self._judge(judged, self._concept_model)  # expensive concept model
         harsher = min(j1.get("score", 0), j2.get("score", 0))
         llm_points = 6 * harsher  # 0-60, harsher judge
 

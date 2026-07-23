@@ -141,6 +141,9 @@ class Settings(BaseSettings):
     POD_ETSY_FEE_FRACTION: float = 0.12
 
     ETSY_SHIPPING_PROFILE_ID: str | None = None
+    # Etsy requires a readiness_state_id on physical (POD) listings. Left None,
+    # the service auto-discovers the shop's made_to_order state; set to pin one.
+    ETSY_READINESS_STATE_ID: str | None = None
     ETSY_SHOP_ORIGIN_COUNTRY: str = "US"  # ISO 3166-1 alpha-2; set in env if shop is not US-based
     # Etsy requires a postal code to CREATE a shipping profile. Only used as a
     # fallback when the shop's origin can't be derived from an existing profile.
@@ -364,6 +367,16 @@ class Settings(BaseSettings):
     PRODUCT_MIN_SCORE: int = 90
     PRODUCT_JUDGE_FLOOR: int = 9      # both judges in the "distinctive/compelling" band
     PRODUCT_DET_FLOOR: int = 30       # of 40 — evidence must be strong
+    # COST GUARD: skip the two paid LLM judge calls when the FREE deterministic
+    # score already can't clear PRODUCT_DET_FLOOR (or an axis is at its floor) —
+    # such a concept can never pass, so grading it is pure wasted spend. Safe:
+    # never changes an outcome. Set false to always run both judges.
+    SCORE_SKIP_JUDGE_ON_DET_FAIL: bool = True
+    # COST GUARD: harsher = min(cheap_judge, expensive_judge) must clear the judge
+    # floor. Evaluate the cheap (default) judge first and skip the expensive
+    # (concept-model, e.g. sonnet-5) judge when the cheap one is already below the
+    # floor — the min can't clear it either way. Safe: never changes an outcome.
+    SCORE_SHORTCIRCUIT_EXPENSIVE_JUDGE: bool = True
     PRODUCT_SCORE_ENFORCE: bool = False
     # #3: guardrail against the "enforce flipped on before quality is ready ->
     # factory silently builds nothing" trap. When enforce is on and this many
