@@ -935,7 +935,6 @@ class PipelineOrchestrator:
         mockups from the ACTUAL delivered pages. Returns a list of Paths."""
         import tempfile
         from io import BytesIO  # noqa: F401 (kept for parity/readability)
-        from PIL import Image as _PILImage
         from pypdf import PdfReader
 
         pages = []

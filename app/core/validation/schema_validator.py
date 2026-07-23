@@ -4,8 +4,8 @@ from app.core.utils.json_sanitizer import JSONSanitizer
 class SchemaValidator:
     """
     Single entry point for all SEO schema validation. Handles JSON extraction,
-    schema validation, and quality checks. All validation paths (SchemaAgent,
-    QAAgent, TaskProcessor) should use this class to ensure consistency.
+    schema validation, and quality checks. All validation paths (QAAgent,
+    TaskProcessor) should use this class to ensure consistency.
     """
 
     def __init__(self):
