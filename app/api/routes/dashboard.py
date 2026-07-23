@@ -13,6 +13,99 @@ task_queue = TaskQueue()
 log_service = LogService()
 
 
+# ── Live-activity plumbing ───────────────────────────────────────────────────
+# Which log sources belong to each room/agent group. A log line is attributed to
+# a group when its `source` is one of these names OR it's an "ai-factory" logger
+# line whose message starts with "<Name>: ..." (WARNING/ERROR go through the
+# python logger, which stamps source='ai-factory' but keeps the class prefix).
+AGENT_GROUPS = {
+    "research":     {"label": "Research",     "names": ["AutonomyWorker", "TrendResearchAgent", "ResearchAgent", "IntelligenceAgent", "ProductViabilityCriticAgent", "ProductScoreService", "ProductTypeSelectorAgent"]},
+    "planning":     {"label": "Planning",     "names": ["TaskWorker", "TaskProcessor", "TaskService", "TaskQueue", "PlannerAgent"]},
+    "content":      {"label": "Content",      "names": ["ExecutorAgent", "ListingGeneratorAgent", "SEOGeneratorAgent", "SEOAgent", "PipelineOrchestrator"]},
+    "image_studio": {"label": "Image Studio", "names": ["ProductImageAgent", "SocialImageAgent", "PODDesignAgent", "ImageValidationService", "PDFGenerationService", "MockupService", "OpenRouterImageProvider"]},
+    "qa":           {"label": "QA",           "names": ["QAAgent", "QAValidator", "QARepairAgent", "ContentQAService"]},
+    "storefront":   {"label": "Storefront",   "names": ["EtsyClient", "EtsyImageService", "EtsyShippingService", "EtsyOAuth"]},
+    "marketing":    {"label": "Marketing",    "names": ["MarketingService", "PinterestChannel", "TumblrChannel", "MarketingRefreshWorker", "PinterestClient"]},
+    "fulfillment":  {"label": "Fulfillment",  "names": ["EtsyReceiptWorker", "PODFulfillmentService", "PrintifyClient"]},
+    "ledger":       {"label": "Ledger",       "names": ["AnalyticsService", "RevenueService", "PerformanceService", "BestProductsService"]},
+}
+
+# active (non-terminal) task states — what is "in flight" right now
+_ACTIVE_STATES = ["NEW", "PLANNED", "RUNNING", "QA"]
+
+
+def _agent_of(source: str, message: str) -> str:
+    """Best display name for a log line: the source unless it's the generic
+    'ai-factory' logger, in which case pull the 'ClassName:' prefix from the msg."""
+    if source and source != "ai-factory":
+        return source
+    msg = message or ""
+    if ":" in msg:
+        head = msg.split(":", 1)[0].strip()
+        if 0 < len(head) <= 40 and " " not in head:
+            return head
+    return source or "system"
+
+
+def _fmt_log(row) -> dict:
+    msg = (row.message or "")
+    return {
+        "level": row.level,
+        "source": row.source,
+        "agent": _agent_of(row.source, msg),
+        "message": msg[:200],
+        "at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+def _recent_logs(limit: int = 60, names: list = None):
+    """Recent log rows (all levels), newest first. If `names` is given, keep only
+    lines belonging to that agent group (direct source match OR 'ai-factory' line
+    prefixed 'Name: ...')."""
+    from app.db.database import SessionLocal
+    from app.models.log import Log
+    from sqlalchemy import or_
+    db = SessionLocal()
+    try:
+        q = db.query(Log)
+        if names:
+            conds = [Log.source.in_(names)]
+            for n in names:
+                conds.append(Log.message.like(f"{n}:%"))
+            q = q.filter(or_(*conds))
+        rows = q.order_by(Log.created_at.desc()).limit(int(limit)).all()
+        return [_fmt_log(r) for r in rows]
+    finally:
+        db.close()
+
+
+def _running_tasks():
+    """Tasks currently in flight, with a human product name + elapsed seconds."""
+    out = []
+    now = datetime.utcnow()
+    for t in task_service.list_tasks():
+        if t.status not in _ACTIVE_STATES:
+            continue
+        od = t.output_data or {}
+        md = t.metadata_ or {}
+        name = od.get("title") or md.get("product_name") or md.get("concept") or t.title or "(unnamed)"
+        elapsed = None
+        if t.created_at:
+            elapsed = round((now - t.created_at).total_seconds())
+        out.append({
+            "id": t.id,
+            "short_id": (t.id or "")[:8],
+            "type": t.type,
+            "status": t.status,
+            "product_name": str(name)[:80],
+            "elapsed_s": elapsed,
+            "created_at": t.created_at.isoformat() if t.created_at else None,
+        })
+    # longest-running first (most likely the one actively worked)
+    out.sort(key=lambda r: r["elapsed_s"] or 0, reverse=True)
+    return out
+
+
 @router.get("/pnl")
 def pnl():
     """D-6/4-1: the one number that matters — lifetime revenue vs spend, with an
@@ -139,6 +232,91 @@ def dashboard_metrics():
             round(avg_processing_seconds, 2) if avg_processing_seconds is not None else None
         ),
         "token_usage": token_summary,
+    }
+
+
+@router.get("/activity")
+def live_activity(limit: int = 60):
+    """Everything happening right now: a live feed of the most recent log lines
+    across every agent, the tasks currently in flight, and today's production +
+    spend. This is the dashboard's real-time heartbeat."""
+    from config import settings as _s
+    feed = _recent_logs(limit=limit)
+    running = _running_tasks()
+    last_at = feed[0]["at"] if feed else None
+
+    try:
+        from app.services.autonomy_service import AutonomyService
+        daily = AutonomyService().daily_status()
+    except Exception:
+        daily = {}
+    try:
+        from app.services.production_monitor_service import ProductionMonitorService
+        prod = ProductionMonitorService().dashboard_summary()
+    except Exception:
+        prod = {}
+
+    return {
+        "polled_at": datetime.utcnow().isoformat(),
+        "last_activity_at": last_at,
+        "feed": feed,
+        "running": running,
+        "running_count": len(running),
+        "queue_size": task_queue.size(),
+        "today": {
+            "tasks_created": daily.get("tasks_created"),
+            "max_tasks_per_day": daily.get("max_tasks_per_day"),
+            "spend_usd": daily.get("spend_usd"),
+            "max_daily_spend_usd": daily.get("max_daily_spend_usd"),
+            "products_last_24h": prod.get("products_last_24h"),
+            "concepts_scored_today": prod.get("concepts_scored_today"),
+            "best_score_today": prod.get("best_score_today"),
+            "best_concept_today": prod.get("best_concept_today"),
+            "blocked_tasks_24h": prod.get("blocked_tasks_24h"),
+        },
+        "flags": {
+            "autonomy_enabled": bool(getattr(_s, "AUTONOMY_ENABLED", False)),
+            "auto_publish": bool(getattr(_s, "AUTO_PUBLISH_LISTINGS", False)),
+        },
+    }
+
+
+@router.get("/agent/{key}")
+def agent_detail(key: str, limit: int = 40):
+    """Drill-down for one agent/room: its own recent activity feed (all levels),
+    the tasks in flight, and its worker heartbeat — i.e. exactly what it is doing
+    right now. `key` is one of the AGENT_GROUPS / room keys."""
+    group = AGENT_GROUPS.get(key)
+    if not group:
+        return {"error": f"unknown agent '{key}'", "known": list(AGENT_GROUPS.keys())}
+
+    feed = _recent_logs(limit=limit, names=group["names"])
+    # heartbeat for any worker in this group
+    try:
+        from app.services import worker_registry
+        hbs = worker_registry.get_heartbeats()
+        now_utc = datetime.now(timezone.utc)
+        heartbeats = {}
+        for n in group["names"]:
+            last = hbs.get(n)
+            if last is not None:
+                aware = last.replace(tzinfo=timezone.utc) if last.tzinfo is None else last
+                heartbeats[n] = round((now_utc - aware).total_seconds(), 1)
+    except Exception:
+        heartbeats = {}
+
+    errors_24h = sum(1 for f in feed if f["level"] in ("ERROR", "CRITICAL"))
+    return {
+        "key": key,
+        "label": group["label"],
+        "sources": group["names"],
+        "polled_at": datetime.utcnow().isoformat(),
+        "last_activity_at": feed[0]["at"] if feed else None,
+        "feed": feed,
+        "feed_count": len(feed),
+        "recent_error_count": errors_24h,
+        "heartbeats": heartbeats,
+        "running": _running_tasks(),
     }
 
 
