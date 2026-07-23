@@ -58,10 +58,16 @@ def _fmt_log(row) -> dict:
     }
 
 
-def _recent_logs(limit: int = 60, names: list = None):
+# Routine background chatter that isn't "the factory doing something" — hidden
+# from the global feed so real production activity isn't buried (still visible in
+# the owning agent's own drill-down).
+_NOISE_MESSAGES = ["Etsy access token refreshed"]
+
+
+def _recent_logs(limit: int = 60, names: list = None, exclude_noise: bool = False):
     """Recent log rows (all levels), newest first. If `names` is given, keep only
     lines belonging to that agent group (direct source match OR 'ai-factory' line
-    prefixed 'Name: ...')."""
+    prefixed 'Name: ...'). If `exclude_noise`, drop routine heartbeat chatter."""
     from app.db.database import SessionLocal
     from app.models.log import Log
     from sqlalchemy import or_
@@ -73,6 +79,8 @@ def _recent_logs(limit: int = 60, names: list = None):
             for n in names:
                 conds.append(Log.message.like(f"{n}:%"))
             q = q.filter(or_(*conds))
+        if exclude_noise:
+            q = q.filter(Log.message.notin_(_NOISE_MESSAGES))
         rows = q.order_by(Log.created_at.desc()).limit(int(limit)).all()
         return [_fmt_log(r) for r in rows]
     finally:
@@ -241,7 +249,7 @@ def live_activity(limit: int = 60):
     across every agent, the tasks currently in flight, and today's production +
     spend. This is the dashboard's real-time heartbeat."""
     from config import settings as _s
-    feed = _recent_logs(limit=limit)
+    feed = _recent_logs(limit=limit, exclude_noise=True)
     running = _running_tasks()
     last_at = feed[0]["at"] if feed else None
 
