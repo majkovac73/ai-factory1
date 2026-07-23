@@ -240,4 +240,20 @@ class AutonomyWorker:
         # P0-13: no flat text-LLM record here — real spend (images + vision-QA)
         # is recorded as it happens downstream, so this no longer double-counts.
 
+        # Brain: capture the creative decision (WHAT was built + WHY), so the
+        # factory's memory has a timeline of everything it has created.
+        try:
+            from app.services.brain_service import BrainService
+            market = (metadata.get("market") or {})
+            BrainService().decide(
+                "product", product_name[:120],
+                f"Built '{product_name[:100]}' ({product_format}) — "
+                + (opportunity.get("description") or "")[:160],
+                data={"format": product_format, "occasion": metadata.get("occasion"),
+                      "competition_count": market.get("competition_count"),
+                      "price_p50": market.get("price_p50"), "task_id": task.id},
+                source="autonomy_worker")
+        except Exception as e:
+            logger.warning(f"AutonomyWorker: brain capture failed: {e}")
+
         logger.info(f"AutonomyWorker: created task {task.id} for product: {product_name[:80]}")

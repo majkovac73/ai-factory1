@@ -127,6 +127,7 @@ DETERMINISTIC = [
     "test_niche_memory.py",
     "test_reach_boards_ads_coherence.py",
     "test_listing_enrichment.py",
+    "test_brain.py",
 ]
 
 

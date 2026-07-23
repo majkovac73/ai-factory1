@@ -10,5 +10,6 @@ from app.models.analytics_event import AnalyticsEvent
 from app.models.image_asset import ImageAsset
 from app.models.pod_product import PODProduct
 from app.models.fulfillment_record import FulfillmentRecord
+from app.models.knowledge import Knowledge
 
-__all__ = ["Task", "TaskStep", "AgentExecution", "Log", "Memory", "EtsyToken", "MarketingPost", "PinterestToken", "AnalyticsEvent", "ImageAsset", "PODProduct", "FulfillmentRecord"]
+__all__ = ["Task", "TaskStep", "AgentExecution", "Log", "Memory", "EtsyToken", "MarketingPost", "PinterestToken", "AnalyticsEvent", "ImageAsset", "PODProduct", "FulfillmentRecord", "Knowledge"]

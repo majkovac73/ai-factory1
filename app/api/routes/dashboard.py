@@ -247,6 +247,19 @@ def dashboard_metrics():
     }
 
 
+@router.get("/brain")
+def brain(recent: int = 0):
+    """What the factory's brain knows — organized knowledge it consults to decide
+    and improve. Default returns the summary (counts + top lessons + recent). Pass
+    ?recent=N to also include the N most recent knowledge items of every kind."""
+    from app.services.brain_service import BrainService
+    b = BrainService()
+    out = b.summary()
+    if recent:
+        out["timeline"] = b.recall(limit=int(recent))
+    return out
+
+
 @router.get("/ad-candidates")
 def ad_candidates(limit: int = 10):
     """Which live listings to promote with Etsy Ads (manual — Etsy has no ads API),

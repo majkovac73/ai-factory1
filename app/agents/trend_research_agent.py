@@ -866,6 +866,16 @@ Return ONLY valid JSON with this structure:
             except Exception:
                 pass
 
+            # The BRAIN's consolidated lessons (finance/market/quality/niche) — the
+            # highest-confidence things the factory has learned from its own history.
+            try:
+                from app.services.brain_service import BrainService
+                brain = BrainService().context_block()
+                if brain:
+                    parts.append(brain)
+            except Exception:
+                pass
+
             if not parts:
                 return ""
             return "\n\nWhat's working in the shop so far (learn from REAL performance):\n- " + "\n- ".join(parts)

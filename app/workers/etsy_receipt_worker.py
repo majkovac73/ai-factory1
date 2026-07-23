@@ -869,6 +869,13 @@ class EtsyReceiptWorker:
             NicheMemoryService().update()
         except Exception as e:
             logger.warning(f"EtsyReceiptWorker: niche-memory update failed: {e}")
+        # Consolidate the whole picture into the factory's BRAIN (organized lessons
+        # it consults when deciding what to build). Deterministic, no LLM cost.
+        try:
+            from app.services.brain_service import BrainService
+            BrainService().consolidate()
+        except Exception as e:
+            logger.warning(f"EtsyReceiptWorker: brain consolidation failed: {e}")
 
     # ── State persistence ─────────────────────────────────────────────────────
 
