@@ -49,10 +49,14 @@ def _agent_of(source: str, message: str) -> str:
 
 def _fmt_log(row) -> dict:
     msg = (row.message or "")
+    agent = _agent_of(row.source, msg)
+    # the agent has its own column — drop a redundant leading "Agent: " prefix
+    if msg.startswith(f"{agent}:"):
+        msg = msg[len(agent) + 1:].lstrip()
     return {
         "level": row.level,
         "source": row.source,
-        "agent": _agent_of(row.source, msg),
+        "agent": agent,
         "message": msg[:200],
         "at": row.created_at.isoformat() if row.created_at else None,
     }
