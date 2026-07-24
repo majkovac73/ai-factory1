@@ -406,6 +406,38 @@
       animation: pulse 1.7s ease-in-out infinite;
     }
     .pulse-dot.off { background: #e07020; animation: none; }
+
+    /* ── Brain panel ─────────────────────────────────────────────────── */
+    .brain-btn {
+      background: none; border: 1px solid #3a2b52; color: #c98fe0; cursor: pointer;
+      padding: 3px 10px; border-radius: 3px; font-family: monospace;
+      font-size: 1em; letter-spacing: 0.08em;
+    }
+    .brain-btn:hover { border-color: #c98fe0; color: #e0b6f0; }
+    .panel-brain { width: 720px; }
+    .brain-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .brain-chip {
+      font-size: 0.9em; border: 1px solid #2a3b52; border-radius: 3px;
+      padding: 2px 8px; color: #9fb8cf; text-transform: uppercase; letter-spacing: 0.06em;
+    }
+    .brain-chip b { color: #cfe2f6; margin-left: 2px; }
+    .brain-lesson {
+      background: rgba(255,255,255,0.02); border: 1px solid #14273c;
+      border-left: 3px solid #4ab8e8; border-radius: 3px; padding: 7px 10px; margin-bottom: 7px;
+    }
+    .brain-lesson-top { display: flex; justify-content: space-between; margin-bottom: 3px; }
+    .brain-cat { font-size: 0.7em; text-transform: uppercase; letter-spacing: 0.08em; }
+    .brain-conf { font-size: 0.7em; color: #3a5a78; }
+    .brain-lesson-body { font-size: 0.82em; color: #c0d4ec; line-height: 1.45; }
+    .brain-timeline { max-height: 260px; overflow-y: auto; }
+    .brain-tl-row {
+      display: flex; gap: 8px; align-items: baseline; padding: 3px 0;
+      border-bottom: 1px solid #0c1a2c; font-size: 0.76em;
+    }
+    .brain-tl-icon { flex-shrink: 0; }
+    .brain-tl-cat { flex-shrink: 0; width: 62px; text-transform: uppercase; font-size: 0.85em; overflow: hidden; }
+    .brain-tl-body { flex: 1; color: #8aa6c4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .brain-tl-time { flex-shrink: 0; color: #243a54; }
   </style>
 </head>
 <body>
@@ -1153,6 +1185,100 @@
       );
     }
 
+    /* ── Brain panel: what the factory has learned + its live thoughts ── */
+    const BRAIN_CAT_COLORS = {
+      niche: '#5bd97a', market: '#4ab8e8', finance: '#e5c153', quality: '#c98fe0',
+      product: '#7fb0d8', pipeline: '#e0906a', marketing: '#e07ab0', ops: '#8aa6c4',
+    };
+    const BRAIN_KIND_ICON = {
+      lesson: '💡', decision: '🔨', observation: '👁', research: '🔬', outcome: '🎯',
+    };
+    const brainCatColor = c => BRAIN_CAT_COLORS[c] || '#8aa6c4';
+
+    function BrainPanel({ onClose }) {
+      const [data, setData] = useState(null);
+      const [err, setErr] = useState(null);
+      useEffect(() => {
+        let live = true;
+        const load = async () => {
+          try {
+            const r = await apiFetch(`${API}/dashboard/brain?recent=25`);
+            if (r.ok && live) setData(await r.json());
+            else if (live) setErr(`HTTP ${r.status}`);
+          } catch (e) { if (live) setErr(e.message); }
+        };
+        load();
+        const id = setInterval(load, POLL);
+        return () => { live = false; clearInterval(id); };
+      }, []);
+
+      return (
+        <div className="overlay" onClick={onClose}>
+          <div className="panel panel-brain" onClick={e => e.stopPropagation()}>
+            <div className="panel-hdr">
+              <span className="panel-title">🧠 The Factory's Brain</span>
+              <button className="panel-close" onClick={onClose}>[ × ]</button>
+            </div>
+
+            {!data && !err && <div className="ld-idle">Loading the brain…</div>}
+            {err && <div className="ld-idle" style={{ color: '#ff6a6a' }}>Couldn't load: {err}</div>}
+
+            {data && (
+              <>
+                <div className="psec">
+                  <div className="psec-lbl">Knowledge — {data.total} item{data.total === 1 ? '' : 's'}</div>
+                  <div className="brain-chips">
+                    {Object.entries(data.by_kind || {}).map(([k, n]) => (
+                      <span key={k} className="brain-chip">{BRAIN_KIND_ICON[k] || ''} {k}<b>{n}</b></span>
+                    ))}
+                  </div>
+                  {Object.keys(data.by_category || {}).length > 0 && (
+                    <div className="brain-chips" style={{ marginTop: '6px' }}>
+                      {Object.entries(data.by_category).map(([c, n]) => (
+                        <span key={c} className="brain-chip" style={{ borderColor: brainCatColor(c), color: brainCatColor(c) }}>{c}<b>{n}</b></span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="psec">
+                  <div className="psec-lbl">Lessons it has learned — this is what it uses to decide</div>
+                  {(data.top_lessons || []).length === 0
+                    ? <div className="ld-idle">No lessons yet — the brain stays quiet until there's real traffic/sales
+                        signal to learn from, so it never steers on noise.</div>
+                    : (data.top_lessons || []).map((l, i) => (
+                      <div key={i} className="brain-lesson" style={{ borderLeftColor: brainCatColor(l.category) }}>
+                        <div className="brain-lesson-top">
+                          <span className="brain-cat" style={{ color: brainCatColor(l.category) }}>{l.category}</span>
+                          <span className="brain-conf">confidence {Math.round((l.confidence || 0) * 100)}%</span>
+                        </div>
+                        <div className="brain-lesson-body">{l.content}</div>
+                      </div>
+                    ))}
+                </div>
+
+                {(data.timeline || []).length > 0 && (
+                  <div className="psec">
+                    <div className="psec-lbl">Recent thoughts — live timeline</div>
+                    <div className="brain-timeline">
+                      {data.timeline.map((t, i) => (
+                        <div key={i} className="brain-tl-row" title={t.content}>
+                          <span className="brain-tl-icon">{BRAIN_KIND_ICON[t.kind] || '•'}</span>
+                          <span className="brain-tl-cat" style={{ color: brainCatColor(t.category) }}>{t.category}</span>
+                          <span className="brain-tl-body">{t.content}</span>
+                          <span className="brain-tl-time">{fmtAgo(t.at)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      );
+    }
+
     function Facility() {
       const [data, setData]       = useState(null);
       const [err, setErr]         = useState(null);
@@ -1162,6 +1288,7 @@
       const [prod, setProd]       = useState(null); // 106 1-9: production monitor
       const [act, setAct]         = useState(null); // live activity feed + running tasks
       const [dockOpen, setDockOpen] = useState(true);
+      const [brainOpen, setBrainOpen] = useState(false); // 🧠 brain panel
 
       const fetch_ = useCallback(async () => {
         try {
@@ -1255,6 +1382,7 @@
                 POLL {lastTs ? lastTs.toLocaleTimeString() : '—'}
                 {err && <span className="stale-warn"> (stale)</span>}
               </span>
+              <button className="brain-btn" onClick={() => setBrainOpen(true)}>🧠 BRAIN</button>
               <KeyField />
             </span>
           </header>
@@ -1279,6 +1407,7 @@
           {panel && (
             <Panel sel={panel} rooms={rooms} onClose={() => setPanel(null)} />
           )}
+          {brainOpen && <BrainPanel onClose={() => setBrainOpen(false)} />}
         </>
       );
     }
